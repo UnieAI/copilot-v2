@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: multi-ai-chatroom-db-prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: 105114
+      POSTGRES_DB: Multi_AI_Chatroom_DB
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U admin -d Multi_AI_Chatroom_DB" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Database Initialization (runs migrations on first start)
+  db-init:
+    image: node:18-alpine
+    container_name: multi-ai-chatroom-db-init-prod
+    working_dir: /app
+    command: sh -c "npm install && npx drizzle-kit generate && npx drizzle-kit migrate && npx drizzle-kit push"
+    volumes:
+      - .:/app
+      - node_modules_init:/app/node_modules
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_URL=postgresql://admin:105114@postgres:5432/Multi_AI_Chatroom_DB
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  # Next.js Application (Production)
+  multi-ai-chatroom:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: multi-ai-chatroom-prod
+    restart: unless-stopped
+    ports:
+      - "2999:3000"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - POSTGRES_URL=postgresql://admin:105114@postgres:5432/Multi_AI_Chatroom_DB
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    networks:
+      - app-network
+
+volumes:
+  postgres_data:
+  node_modules_init:
+
+
+networks:
+  app-network:
+    driver: bridge
