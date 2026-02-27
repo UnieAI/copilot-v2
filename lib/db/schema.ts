@@ -1,96 +1,187 @@
-import type { InferSelectModel } from 'drizzle-orm';
+import { type InferSelectModel, type InferInsertModel } from 'drizzle-orm';
 import {
-  pgTable,
-  varchar,
-  real,
-  integer,
-  timestamp,
-  json,
-  uuid,
-  text,
-  primaryKey,
-  foreignKey,
-  boolean,
-  uniqueIndex,
-  jsonb,
+    pgTable,
+    varchar,
+    timestamp,
+    json,
+    uuid,
+    text,
+    primaryKey,
+    integer,
 } from 'drizzle-orm/pg-core';
+import type { AdapterAccount } from '@auth/core/adapters';
 
-export const user = pgTable("user", {
-  id: uuid('id').primaryKey().notNull().defaultRandom(),
-  email: varchar("email", { length: 255 }).notNull().unique(),
-  password: varchar("password", { length: 255 }),
-  username: varchar("username", { length: 255 }),
-  userimage: text('userimage').notNull(), // base64 string
-  createdAt: timestamp("created_at").defaultNow(),
+// ----------------------------------------------------------------------------
+// 1. Auth & Users (NextAuth Compatible)
+// ----------------------------------------------------------------------------
+
+export const users = pgTable('user', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name'),
+    email: varchar('email', { length: 255 }).notNull().unique(),
+    emailVerified: timestamp('emailVerified', { mode: 'date' }),
+    image: text('image'),
+
+    // Custom fields
+    role: varchar('role', { length: 50 }).notNull().default('pending'), // 'pending' | 'user' | 'admin' | 'super'
+    provider: varchar('provider', { length: 100 }), // e.g. 'google', 'azure-ad'
+    providerId: text('providerId'),
+
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
-export type User = InferSelectModel<typeof user>;
 
-export const userApiSettings = pgTable('user_api_settings', {
-  userId: uuid('user_id')
-    .primaryKey()
-    .references(() => user.id, { onDelete: 'cascade' }),
+export const accounts = pgTable(
+    'account',
+    {
+        userId: uuid('userId')
+            .notNull()
+            .references(() => users.id, { onDelete: 'cascade' }),
+        type: text('type').$type<AdapterAccount['type']>().notNull(),
+        provider: text('provider').notNull(),
+        providerAccountId: text('providerAccountId').notNull(),
+        refresh_token: text('refresh_token'),
+        access_token: text('access_token'),
+        expires_at: integer('expires_at'),
+        token_type: text('token_type'),
+        scope: text('scope'),
+        id_token: text('id_token'),
+        session_state: text('session_state'),
+    },
+    (account) => ({
+        compoundKey: primaryKey({ columns: [account.provider, account.providerAccountId] }),
+    })
+);
 
-  apiUrl: text('api_url').notNull(),
-  apiKey: text('api_key').notNull(),
-  selectedModel: text('selected_model'),
-
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+export const sessions = pgTable('session', {
+    sessionToken: text('sessionToken').primaryKey(),
+    userId: uuid('userId')
+        .notNull()
+        .references(() => users.id, { onDelete: 'cascade' }),
+    expires: timestamp('expires', { mode: 'date' }).notNull(),
 });
-export type UserApiSettings = InferSelectModel<typeof userApiSettings>;
 
-export const character = pgTable('character', {
-  id: uuid('id').primaryKey().defaultRandom(),
+export const verificationTokens = pgTable(
+    'verificationToken',
+    {
+        identifier: text('identifier').notNull(),
+        token: text('token').notNull(),
+        expires: timestamp('expires', { mode: 'date' }).notNull(),
+    },
+    (vt) => ({
+        compoundKey: primaryKey({ columns: [vt.identifier, vt.token] }),
+    })
+);
 
-  // 原本就有的欄位（優先保留原本定義）
-  userId: uuid('userId')
-    .references(() => user.id, { onDelete: 'cascade' })
-    .notNull(),
-  image: text('image').notNull(),
-  name: text('name').notNull(),
-  gender: varchar('gender', { length: 10 }).notNull(),
-  birthday: text('birthday').notNull(),
-  zodiac: text('zodiac').notNull(),
-  bloodType: text('bloodType').notNull(),
-  mbti: text('mbti').notNull(),
+// ----------------------------------------------------------------------------
+// 2. Admin Settings (Singleton)
+// ----------------------------------------------------------------------------
 
-  // 從 girls / boys 額外帶進來的欄位
-  englishName: text('english_name'),
-  personality: text('personality'),
-  birthplace: text('birthplace'),
-  education: text('education'),
-  appearance: text('appearance'),
-  detail: text('detail'),
+export const adminSettings = pgTable('admin_settings', {
+    id: uuid('id').primaryKey().defaultRandom(),
 
-  // girls 特有欄位
-  uniformDetail: jsonb('uniform_detail'),    // 選填，只有女生角色會有
+    defaultUserRole: varchar('default_user_role', { length: 50 }).notNull().default('pending'),
+    pendingMessage: text('pending_message').notNull().default('Your account is pending administrator approval.'),
 
-  systemPrompt: text('system_prompt'),
-  tag: text('tag'),
+    workModelUrl: text('work_model_url'),
+    workModelKey: text('work_model_key'),
+    workModelName: text('work_model_name'),
 
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+    taskModelUrl: text('task_model_url'),
+    taskModelKey: text('task_model_key'),
+    taskModelName: text('task_model_name'),
+
+    visionModelUrl: text('vision_model_url'),
+    visionModelKey: text('vision_model_key'),
+    visionModelName: text('vision_model_name'),
+
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
-export type Character = InferSelectModel<typeof character>;
 
-export const systemPromptTemplate = pgTable('SystemPromptTemplate', {
-  id: uuid('id').primaryKey().notNull().defaultRandom(),
-  userId: uuid('userId')
-    .notNull()
-    .references(() => user.id, { onDelete: 'cascade' }),
-  name: text('name').notNull(),
-  content: text('content').notNull(),
-  createdAt: timestamp('createdAt').notNull().defaultNow(),
-  updatedAt: timestamp('updatedAt').notNull().defaultNow(),
-});
-export type SystemPromptTemplate = InferSelectModel<typeof systemPromptTemplate>;
+// ----------------------------------------------------------------------------
+// 3. User Specific Configuration
+// ----------------------------------------------------------------------------
 
-export const guessingDickLeaderboard = pgTable('Leaderboard', {
-  id: uuid('id').primaryKey().notNull().defaultRandom(),
-  girlName: text('girlName').notNull(),
-  girlImg: text('girlImg').notNull(),
-  boyName: text('boyName').notNull(),
-  amount: real('amount').notNull(), // 使用 real 來儲存金額（浮點數）
-  createdAt: timestamp('createdAt').notNull().defaultNow(),
+export const userModels = pgTable('user_models', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('userId')
+        .notNull()
+        .references(() => users.id, { onDelete: 'cascade' }),
+
+    apiUrl: text('api_url').notNull(),
+    apiKey: text('api_key').notNull(),
+    modelList: json('model_list').notNull().default('[]'), // result from /v1/models
+
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
-export type GuessingDickLeaderboard = InferSelectModel<typeof guessingDickLeaderboard>;
+
+export const mcpTools = pgTable('mcp_tools', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('userId')
+        .notNull()
+        .references(() => users.id, { onDelete: 'cascade' }),
+
+    url: text('url').notNull(),
+    path: text('path').notNull(),
+    type: text('type').notNull(),
+    auth_type: text('auth_type').notNull(),
+    key: text('key'),
+    spec_type: text('spec_type').notNull(), // e.g. 'openapi'
+    spec: text('spec').notNull(), // The actual raw spec text
+    info: json('info').notNull().default('{}'),
+    config: json('config').notNull().default('{}'),
+
+    isActive: integer('is_active').default(1).notNull(), // 1 true, 0 false
+
+    createdAt: timestamp('createdAt').defaultNow().notNull(),
+    updatedAt: timestamp('updatedAt').defaultNow().notNull(),
+});
+
+// ----------------------------------------------------------------------------
+// 4. Chat Interface
+// ----------------------------------------------------------------------------
+
+export const chatSessions = pgTable('chat_sessions', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('userId')
+        .notNull()
+        .references(() => users.id, { onDelete: 'cascade' }),
+
+    title: text('title').notNull().default('New Chat'),
+    systemPrompt: text('system_prompt'),
+    modelName: text('model_name').notNull(), // the model user selected for this chat
+
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const chatMessages = pgTable('chat_messages', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('sessionId')
+        .notNull()
+        .references(() => chatSessions.id, { onDelete: 'cascade' }),
+    userId: uuid('userId')
+        .notNull()
+        .references(() => users.id, { onDelete: 'cascade' }),
+
+    role: varchar('role', { length: 50 }).notNull(), // 'user', 'assistant', 'system'
+    content: text('content').notNull(),
+
+    // store pre-processed text from docs/images, or metadata about the generation
+    attachments: json('attachments').default('[]'),
+    toolCalls: json('tool_calls').default('[]'), // store mcp tool calls if any
+
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// ----------------------------------------------------------------------------
+// Export Type Definitions
+// ----------------------------------------------------------------------------
+
+export type User = InferSelectModel<typeof users>;
+export type NewUser = InferInsertModel<typeof users>;
+export type AdminSettings = InferSelectModel<typeof adminSettings>;
+export type UserModel = InferSelectModel<typeof userModels>;
+export type McpTool = InferSelectModel<typeof mcpTools>;
+export type ChatSession = InferSelectModel<typeof chatSessions>;
+export type ChatMessage = InferSelectModel<typeof chatMessages>;

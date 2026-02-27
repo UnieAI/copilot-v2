@@ -16,6 +16,8 @@
     "db:up": "drizzle-kit up"
   },
   "dependencies": {
+    "@auth/drizzle-adapter": "^1.11.1",
+    "@azure/msal-node": "^5.0.5",
     "@hookform/resolvers": "^3.9.1",
     "@radix-ui/react-accordion": "1.2.2",
     "@radix-ui/react-alert-dialog": "1.1.4",
@@ -51,6 +53,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "1.0.4",
+    "csv-parser": "^3.2.0",
     "date-fns": "^2.29.3",
     "dotenv": "^16.4.5",
     "drizzle-orm": "^0.34.0",
@@ -58,10 +61,12 @@
     "framer-motion": "^12.31.0",
     "input-otp": "1.4.1",
     "lucide-react": "^0.523.0",
+    "mammoth": "^1.11.0",
     "next": "15.2.4",
     "next-auth": "5.0.0-beta.25",
-    "next-intl": "^4.5.6",
+    "next-intl": "^4.8.3",
     "next-themes": "^0.3.0",
+    "pdf-parse": "^2.4.5",
     "postgres": "^3.4.4",
     "postprocessing": "^6.38.2",
     "react": "^18.2.0",
@@ -87,6 +92,7 @@
     "drizzle-kit": "^0.25.0",
     "postcss": "^8.5",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }
