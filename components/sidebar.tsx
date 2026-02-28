@@ -76,6 +76,13 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
         return () => window.removeEventListener('sidebar:refresh', handler)
     }, [])
 
+    // Auto-collapse sidebar when entering project pages
+    useEffect(() => {
+        if (pathname?.includes('/p/')) {
+            setOpen(false)
+        }
+    }, [pathname])
+
     // Close move menu on outside click
     useEffect(() => {
         const handler = (e: MouseEvent) => {
@@ -289,7 +296,13 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                         "absolute flex items-center justify-center group/logo",
                         state === 'expanded' ? "left-6" : "left-1"
                     )}>
-                        <Link href="/" onClick={() => isMobile && setOpenMobile(false)} className="flex items-center gap-2 justify-center">
+                        <button
+                            onClick={() => {
+                                state === 'expanded' ? router.push('/') : window.location.href = '/chat'
+                                isMobile && setOpenMobile(false)
+                            }}
+                            className="flex items-center gap-2 justify-center"
+                        >
                             <div className={cn(
                                 "flex-shrink-0 h-6 w-6 rounded bg-foreground text-background flex items-center justify-center text-xs font-bold transition-[transform,opacity] duration-300 ease-out hover:rotate-180 hover:duration-700 transform-gpu",
                                 state === 'collapsed' && "group-hover/logo:opacity-0 group-hover/logo:scale-90"
@@ -297,7 +310,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                             {state === 'expanded' && (
                                 <span className="text-sm font-semibold tracking-tight transition-opacity duration-300">UnieAI</span>
                             )}
-                        </Link>
+                        </button>
                         {/* Expand button - only shows on hover when collapsed */}
                         {state === 'collapsed' && (
                             <button

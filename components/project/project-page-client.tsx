@@ -98,12 +98,7 @@ export function ProjectPageClient({
                 {/* New Chat button */}
                 <div className="px-3 py-3 border-b border-border/40">
                     <button
-                        onClick={async () => {
-                            // Start a new chat in this project
-                            // We send to /chat?projectId=... so the stream can assign the project
-                            // Instead, navigate to project page and let ChatInterface handle it
-                            setActiveSessionId(undefined)
-                        }}
+                        onClick={() => { window.location.href = `/p/${project.id}` }}
                         className="w-full flex items-center gap-2 h-9 px-3 rounded-xl border border-border/50 text-sm text-muted-foreground hover:text-foreground hover:border-border hover:bg-muted/50 transition-all"
                     >
                         <Plus className="h-3.5 w-3.5" />
