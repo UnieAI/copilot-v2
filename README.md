@@ -17,7 +17,7 @@ To run the required PostgreSQL and Redis instances locally:
 
 ```bash
 # PostgreSQL
-docker run -d --name unieai-postgres -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=105114 -e POSTGRES_DB=UnieAI_Copilot_DB -p 5432:5432 -v D:/Docker/Database/unieai-copilot:/var/lib/postgresql/data --restart unless-stopped postgres:16
+docker run -d --name unieai-postgres -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=105114 -e POSTGRES_DB=UnieAI_Chatroom_DB -p 5432:5432 -v D:/Docker/Database/unieai-chatroom:/var/lib/postgresql/data --restart unless-stopped postgres:16
 
 # Redis
 docker run -d --name unieai-redis -p 6379:6379 -v D:/Docker/Database/unieai-redis:/data --restart unless-stopped redis:7

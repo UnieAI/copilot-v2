@@ -4,12 +4,12 @@ services:
   # PostgreSQL Database
   postgres:
     image: postgres:16-alpine
-    container_name: multi-ai-chatroom-db-dev
+    container_name: unieai-chatroom-db-dev
     restart: unless-stopped
     environment:
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: 105114
-      POSTGRES_DB: Multi_AI_Chatroom_DB
+      POSTGRES_DB: UnieAI_Chatroom_DB
     volumes:
       - postgres_data_dev:/var/lib/postgresql/data
     ports:
@@ -17,7 +17,7 @@ services:
     networks:
       - app-network
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U admin -d Multi_AI_Chatroom_DB" ]
+      test: [ "CMD-SHELL", "pg_isready -U admin -d UnieAI_Chatroom_DB" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -25,7 +25,7 @@ services:
   # Database Initialization (runs migrations on first start)
   db-init:
     image: node:18-alpine
-    container_name: multi-ai-chatroom-db-init-dev
+    container_name: unieai-chatroom-db-init-dev
     working_dir: /app
     command: sh -c "npm install && npx drizzle-kit generate && npx drizzle-kit migrate && npx drizzle-kit push"
     volumes:
@@ -34,7 +34,7 @@ services:
     env_file:
       - .env
     environment:
-      - POSTGRES_URL=postgresql://admin:105114@postgres:5432/Multi_AI_Chatroom_DB
+      - POSTGRES_URL=postgresql://admin:105114@postgres:5432/UnieAI_Chatroom_DB
     depends_on:
       postgres:
         condition: service_healthy
@@ -42,9 +42,9 @@ services:
       - app-network
 
   # Next.js Application (Development with Hot Reload)
-  multi-ai-chatroom:
+  unieai-chatroom:
     image: node:18-alpine
-    container_name: multi-ai-chatroom-dev
+    container_name: unieai-chatroom-dev
     restart: unless-stopped
     working_dir: /app
     command: sh -c "npm install && npm run dev"
@@ -61,7 +61,7 @@ services:
       - .env
     environment:
       - NODE_ENV=development
-      - POSTGRES_URL=postgresql://admin:105114@postgres:5432/Multi_AI_Chatroom_DB
+      - POSTGRES_URL=postgresql://admin:105114@postgres:5432/UnieAI_Chatroom_DB
       # Enable hot reload to work properly in Docker
       - WATCHPACK_POLLING=true
       - CHOKIDAR_USEPOLLING=true

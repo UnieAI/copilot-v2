@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
     // ppr: true,
     serverActions: {
       allowedOrigins: [
-        "https://multi-ai-chatroom.unieai.com"
+        "https://unieai-chatroom.unieai.com"
       ]
     }
   },
