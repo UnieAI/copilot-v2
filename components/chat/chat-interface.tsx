@@ -272,7 +272,7 @@ export function ChatInterface({
     // Scroll state
     const [userScrolled, setUserScrolled] = useState(false)
     const [showScrollButton, setShowScrollButton] = useState(false)
-    const isAtBottomRef = useRef(true)
+    const isProgrammaticScrollRef = useRef(false)
 
     const checkIsAtBottom = useCallback(() => {
         const el = scrollContainerRef.current
@@ -281,24 +281,31 @@ export function ChatInterface({
     }, [])
 
     const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+        isProgrammaticScrollRef.current = true
         messagesEndRef.current?.scrollIntoView({ behavior })
         setUserScrolled(false)
         setShowScrollButton(false)
-        isAtBottomRef.current = true
+        // Release the programmatic flag after the scroll animation settles
+        setTimeout(() => { isProgrammaticScrollRef.current = false }, 400)
     }, [])
 
-    // Handle scroll events from the user
-    const handleScroll = useCallback(() => {
-        const atBottom = checkIsAtBottom()
-        isAtBottomRef.current = atBottom
-        setShowScrollButton(!atBottom)
-        if (!atBottom && isGenerating) {
+    // Detect wheel input: immediately pause auto-scroll when user scrolls up
+    const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+        if (e.deltaY < 0) {
+            // Scrolling up — user wants to read history
             setUserScrolled(true)
         }
+    }, [])
+
+    // Update scroll button visibility on scroll events
+    const handleScroll = useCallback(() => {
+        if (isProgrammaticScrollRef.current) return
+        const atBottom = checkIsAtBottom()
+        setShowScrollButton(!atBottom)
         if (atBottom) {
             setUserScrolled(false)
         }
-    }, [checkIsAtBottom, isGenerating])
+    }, [checkIsAtBottom])
 
     // Auto-scroll when messages change, unless user has scrolled away
     useEffect(() => {
@@ -307,11 +314,13 @@ export function ChatInterface({
         }
     }, [messages, statusText]) // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Reset userScrolled when generation starts so new generations auto-scroll
+    // Reset userScrolled for each new generation so it starts auto-scrolling
+    const prevIsGeneratingRef = useRef(false)
     useEffect(() => {
-        if (isGenerating) {
+        if (isGenerating && !prevIsGeneratingRef.current) {
             setUserScrolled(false)
         }
+        prevIsGeneratingRef.current = isGenerating
     }, [isGenerating])
 
     useEffect(() => {
@@ -822,6 +831,7 @@ export function ChatInterface({
                 <div
                     ref={scrollContainerRef}
                     onScroll={handleScroll}
+                    onWheel={handleWheel}
                     className="flex-1 overflow-y-auto w-full relative"
                 >
                     <div className={`mx-auto w-full space-y-8 py-8 ${selectedPreviewAttachment ? 'px-6 max-w-full' : 'px-4 max-w-3xl'}`}>
@@ -952,22 +962,20 @@ export function ChatInterface({
                         <StatusBadge text={statusText} />
                         <div ref={messagesEndRef} className="h-4" />
                     </div>
-                </div>
 
-                {/* Scroll to bottom floating button */}
-                {showScrollButton && (
-                    <div className="absolute bottom-[120px] left-1/2 -translate-x-1/2 z-20 pointer-events-none"
-                        style={{ width: 'fit-content' }}
-                    >
-                        <button
-                            onClick={() => scrollToBottom("smooth")}
-                            className="pointer-events-auto flex items-center justify-center h-8 w-8 rounded-full bg-background/80 backdrop-blur border border-border shadow-md text-muted-foreground hover:text-foreground hover:bg-background transition-all"
-                            aria-label="捲動到最底部"
-                        >
-                            <ChevronDown className="h-4 w-4" />
-                        </button>
-                    </div>
-                )}
+                    {/* Scroll to bottom floating button — sticky inside the scroll container */}
+                    {showScrollButton && (
+                        <div className="sticky bottom-4 flex justify-center w-full pointer-events-none z-20">
+                            <button
+                                onClick={() => scrollToBottom("smooth")}
+                                className="pointer-events-auto flex items-center justify-center h-8 w-8 rounded-full bg-background/80 backdrop-blur border border-border shadow-md text-muted-foreground hover:text-foreground hover:bg-background transition-all"
+                                aria-label="捲動到最底部"
+                            >
+                                <ChevronDown className="h-4 w-4" />
+                            </button>
+                        </div>
+                    )}
+                </div>
 
                 {/* Input Area */}
                 <div className="bg-background px-4 py-4 shrink-0">
