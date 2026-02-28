@@ -13,7 +13,7 @@ export default async function LoginPage() {
                 <div className="flex flex-col items-center gap-3">
                     <div className="h-10 w-10 rounded-xl bg-foreground text-background flex items-center justify-center font-bold text-lg">U</div>
                     <div className="text-center">
-                        <h1 className="text-2xl font-semibold tracking-tight">UnieAI Copilot</h1>
+                        <h1 className="text-2xl font-semibold tracking-tight">UnieAI Chatroom</h1>
                         <p className="text-sm text-muted-foreground mt-1">登入以開始使用 AI 助手</p>
                     </div>
                 </div>

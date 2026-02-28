@@ -9,7 +9,7 @@ import { notFound } from "next/navigation"
 import { routing } from "@/i18n/routing"
 import { Providers } from "@/components/providers"
 export const metadata: Metadata = {
-    title: "UnieAI Copilot V2",
+    title: "UnieAI Chatroom",
     description: "Next Generation AI Chat Interface",
 }
 

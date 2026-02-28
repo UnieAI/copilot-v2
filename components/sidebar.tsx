@@ -272,7 +272,7 @@ export function Sidebar() {
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                 <div className="flex items-center gap-2">
                     <div className="h-6 w-6 rounded bg-foreground text-background flex items-center justify-center text-xs font-bold">U</div>
-                    <span className="text-sm font-semibold tracking-tight">UnieAI Copilot</span>
+                    <span className="text-sm font-semibold tracking-tight">UnieAI Chatroom</span>
                 </div>
                 <button onClick={() => setCollapsed(true)} className="p-1 rounded hover:bg-muted text-muted-foreground">
                     <PanelLeftClose className="h-4 w-4" />
