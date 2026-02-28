@@ -5,7 +5,7 @@ import { userProviders, mcpTools, users } from "@/lib/db/schema"
 import { eq } from "drizzle-orm"
 import { SettingsMcpSection } from "@/components/settings/settings-mcp-section"
 import { SettingsProvidersSection } from "@/components/settings/settings-providers-section"
-import { revalidatePath } from "next/cache"
+import { ProfileForm } from "@/components/settings/profile-form"
 
 export default async function SettingsPage() {
     const session = await auth()
@@ -15,15 +15,6 @@ export default async function SettingsPage() {
     const dbUser = await db.query.users.findFirst({ where: eq(users.id, userId) })
     const userProviderList = await db.query.userProviders.findMany({ where: eq(userProviders.userId, userId) })
     const userMcpTools = await db.query.mcpTools.findMany({ where: eq(mcpTools.userId, userId) })
-
-    const saveProfile = async (formData: FormData) => {
-        "use server"
-        const session = await auth()
-        if (!session?.user?.id) return
-        const name = formData.get("name") as string
-        await db.update(users).set({ name }).where(eq(users.id, session.user.id as string))
-        revalidatePath("/settings")
-    }
 
     return (
         <div className="h-full flex flex-col overflow-hidden">
@@ -46,16 +37,11 @@ export default async function SettingsPage() {
                             <h2 className="font-semibold">個人資料</h2>
                             <p className="text-xs text-muted-foreground mt-0.5">更新您的顯示名稱</p>
                         </div>
-                        <form action={saveProfile} className="flex gap-3">
-                            <input name="name" defaultValue={dbUser?.name || ""} placeholder="您的名稱"
-                                className="flex-1 h-10 rounded-xl border border-input/60 bg-background px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
-                            />
-                            <button type="submit" className="h-10 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-all shadow-sm active:scale-95">儲存</button>
-                        </form>
+                        <ProfileForm initialName={dbUser?.name || ""} />
                         <div className="text-xs text-muted-foreground space-y-0.5 pt-1 border-t border-border">
                             <p>Email：{dbUser?.email}</p>
-                            <p>角色：{dbUser?.role}</p>
-                            <p>登入方式：{dbUser?.provider || '-'}</p>
+                            {/* <p>角色：{dbUser?.role}</p> */}
+                            {/* <p>登入方式：{dbUser?.provider || '-'}</p> */}
                         </div>
                     </section>
 
