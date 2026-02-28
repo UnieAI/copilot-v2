@@ -18,6 +18,16 @@ export default function Home() {
     const [isFocused, setIsFocused] = useState(false);
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+    const handleDragOver = (e: React.DragEvent) => {
+        if (e.dataTransfer?.types?.includes('Files')) {
+            e.preventDefault();
+        }
+    };
+    const handleDrop = (e: React.DragEvent) => {
+        if (e.dataTransfer?.types?.includes('Files')) {
+            e.preventDefault();
+        }
+    };
 
     // Check login status on mount
     useEffect(() => {
@@ -48,7 +58,12 @@ export default function Home() {
     };
 
     return (
-        <section id="hero" className="w-full h-full relative overflow-hidden bg-background">
+        <section
+            id="hero"
+            className="w-full h-full relative overflow-hidden bg-background"
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+        >
             {/* Simple Header */}
             <header className="absolute top-0 left-0 right-0 z-50 px-6 py-4 flex items-center justify-between">
                 <div />
@@ -149,15 +164,9 @@ export default function Home() {
                             />
 
                             <div className="flex items-center justify-between p-1 mt-auto">
-                                <div className="flex items-center gap-1 text-muted-foreground">
-                                    <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-full" title="Upload file">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>
-                                    </Button>
-                                </div>
-
-                                <div className="flex items-center gap-2">
-                                    <Button
-                                        type="submit"
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    type="submit"
                                         size="icon"
                                         className={cn(
                                             "h-9 w-9 rounded-full transition-all flex items-center justify-center",

@@ -21,7 +21,7 @@ export default async function LoginPage() {
             <div className="absolute top-4 sm:top-6 left-4 sm:left-6 z-10">
                 <Link href="/" className="flex items-center space-x-2">
                     <div className="flex flex-row items-center gap-2">
-                        <UnieAIIcon className="sm:w-7 sm:h-7" />
+                        <UnieAIIcon className="sm:w-8 sm:h-8" />
                         <span className="font-semibold tracking-tight text-foreground">UnieAI</span>
                     </div>
                 </Link>

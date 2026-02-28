@@ -4,6 +4,7 @@ import { redirect } from "next/navigation"
 import { userProviders, userPreferences, chatMessages, chatSessions } from "@/lib/db/schema"
 import { eq, and } from "drizzle-orm"
 import { ChatInterface } from "@/components/chat/chat-interface"
+import { getGroupModels } from "@/lib/get-group-models"
 
 export default async function ChatSessionPage({ params }: { params: Promise<{ id: string }> }) {
     const session = await auth()
@@ -18,15 +19,19 @@ export default async function ChatSessionPage({ params }: { params: Promise<{ id
     })
 
     // Build flat model option list: value = "{prefix}-{modelId}"
-    const availableModels = providers.flatMap(p => {
-        const models = Array.isArray(p.modelList) ? (p.modelList as any[]) : []
-        return models.map((m: any) => ({
-            value: `${p.prefix}-${m.id || String(m)}`,
-            label: m.id || String(m),
-            providerName: p.displayName || p.prefix,
-            providerPrefix: p.prefix,
-        }))
-    })
+    const availableModels = [
+        ...providers.flatMap(p => {
+            const models = Array.isArray(p.modelList) ? (p.modelList as any[]) : []
+            return models.map((m: any) => ({
+                value: `${p.prefix}-${m.id || String(m)}`,
+                label: m.id || String(m),
+                providerName: p.displayName || p.prefix,
+                providerPrefix: p.prefix,
+                source: 'user' as const,
+            }))
+        }),
+        ...(await getGroupModels(userId)),
+    ]
 
     // Load messages
     const initialMessages = await db.query.chatMessages.findMany({

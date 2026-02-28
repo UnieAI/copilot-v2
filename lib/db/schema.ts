@@ -120,6 +120,52 @@ export const userProviders = pgTable('user_providers', {
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// ----------------------------------------------------------------------------
+// 4. Groups (org-level groups with shared providers)
+// ----------------------------------------------------------------------------
+
+export const groups = pgTable('groups', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Group Providers — identical structure to userProviders but scoped to a group
+export const groupProviders = pgTable('group_providers', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    groupId: uuid('group_id')
+        .notNull()
+        .references(() => groups.id, { onDelete: 'cascade' }),
+
+    enable: integer('enable').notNull().default(1),
+    displayName: text('display_name').notNull().default(''),
+    prefix: varchar('prefix', { length: 4 }).notNull(),
+
+    apiUrl: text('api_url').notNull(),
+    apiKey: text('api_key').notNull(),
+    modelList: json('model_list').notNull().default('[]'),       // all models fetched from API
+    selectedModels: json('selected_models').notNull().default('[]'), // admin-selected subset (IDs only)
+
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Many-to-many: users ↔ groups
+export const userGroups = pgTable(
+    'user_groups',
+    {
+        userId: uuid('user_id')
+            .notNull()
+            .references(() => users.id, { onDelete: 'cascade' }),
+        groupId: uuid('group_id')
+            .notNull()
+            .references(() => groups.id, { onDelete: 'cascade' }),
+    },
+    (t) => ({
+        pk: primaryKey({ columns: [t.userId, t.groupId] }),
+    })
+);
+
 export const userPreferences = pgTable('user_preferences', {
     id: uuid('id').primaryKey().defaultRandom(),
     userId: uuid('userId')
@@ -243,3 +289,6 @@ export type ChatProject = InferSelectModel<typeof chatProjects>;
 export type ChatSession = InferSelectModel<typeof chatSessions>;
 export type ChatMessage = InferSelectModel<typeof chatMessages>;
 export type ChatFile = InferSelectModel<typeof chatFiles>;
+export type Group = InferSelectModel<typeof groups>;
+export type GroupProvider = InferSelectModel<typeof groupProviders>;
+export type UserGroup = InferSelectModel<typeof userGroups>;

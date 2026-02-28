@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     const userId = session.user.id as string;
 
     const body = await req.json().catch(() => ({}));
-    const name = (body.name as string)?.trim() || '新資料夾';
+    const name = (body.name as string)?.trim() || '新專案';
 
     const [project] = await db.insert(chatProjects).values({ userId, name }).returning();
     return Response.json(project);

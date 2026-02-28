@@ -4,6 +4,7 @@ import { redirect } from "next/navigation"
 import { chatProjects, chatSessions, chatMessages, userProviders, userPreferences } from "@/lib/db/schema"
 import { eq, and } from "drizzle-orm"
 import { ProjectPageClient } from "@/components/project/project-page-client"
+import { getGroupModels } from "@/lib/get-group-models"
 
 export default async function ProjectChatPage({
     params,
@@ -48,15 +49,19 @@ export default async function ProjectChatPage({
     const providers = await db.query.userProviders.findMany({
         where: and(eq(userProviders.userId, userId), eq(userProviders.enable, 1)),
     })
-    const availableModels = providers.flatMap(p => {
-        const models = Array.isArray(p.modelList) ? (p.modelList as any[]) : []
-        return models.map((m: any) => ({
-            value: `${p.prefix}-${m.id || String(m)}`,
-            label: m.id || String(m),
-            providerName: p.displayName || p.prefix,
-            providerPrefix: p.prefix,
-        }))
-    })
+    const availableModels = [
+        ...providers.flatMap(p => {
+            const models = Array.isArray(p.modelList) ? (p.modelList as any[]) : []
+            return models.map((m: any) => ({
+                value: `${p.prefix}-${m.id || String(m)}`,
+                label: m.id || String(m),
+                providerName: p.displayName || p.prefix,
+                providerPrefix: p.prefix,
+                source: 'user' as const,
+            }))
+        }),
+        ...(await getGroupModels(userId)),
+    ]
 
     // Determine selected model (from chat session, then preference, then first)
     let initialSelectedModel = availableModels[0]?.value || ""

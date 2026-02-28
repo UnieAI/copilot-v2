@@ -2,17 +2,31 @@
 
 import { useState, useRef, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
-import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
+import ReactMarkdown from "react-markdown"
 import {
     Send, Paperclip, X, RefreshCw, Edit2,
     ChevronDown, ChevronUp, Loader2, Check, Settings2,
-    Brain, FileText, Bot, User
+    Brain, FileText, Bot, User, ChevronsUpDown,
+    Search
 } from "lucide-react"
 import { toast } from "sonner"
 import { streamStore } from "@/lib/stream-store"
 import { useTranslations } from "next-intl"
 import { DynamicGreeting } from "@/components/ui/dynamic-greeting"
+import { MarkdownCode } from "@/components/chat/markdown-code"
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuGroup,
+    DropdownMenuItem,
+    DropdownMenuPortal,
+    DropdownMenuSeparator,
+    DropdownMenuSub,
+    DropdownMenuSubContent,
+    DropdownMenuSubTrigger,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 // ─── Types ─────────────────────────────────────────────────────────────
 type Attachment = {
@@ -50,6 +64,52 @@ function fileToBase64(file: File): Promise<string> {
         reader.onerror = reject
     })
 }
+
+// ─── Model Item Component ─────────────────────────────────────────────
+const ModelItem = ({
+    model,
+    isSelected,
+    onSelect
+}: {
+    model: any;
+    isSelected: boolean;
+    onSelect: (value: string) => void
+}) => {
+    const [isHovered, setIsHovered] = useState(false);
+
+    return (
+        <DropdownMenuItem
+            onSelect={() => onSelect(model.value)}
+            asChild // 關鍵：讓 DropdownMenuItem 渲染成你自定義的按鈕樣式
+        >
+            <button
+                onMouseEnter={() => setIsHovered(true)}
+                onMouseLeave={() => setIsHovered(false)}
+                className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg transition-all text-left group outline-none ${isSelected
+                    ? "bg-primary/10 text-primary font-semibold"
+                    : "hover:bg-muted/60 text-foreground/90 hover:text-foreground"
+                    }`}
+            >
+                <div className="flex flex-col gap-0.5 overflow-hidden">
+                    <span className="text-sm truncate leading-tight">{model.label}</span>
+                    <span className={`text-[10px] font-medium uppercase tracking-wider leading-tight ${isSelected
+                        ? "text-primary/80"
+                        : "text-muted-foreground group-hover:text-muted-foreground/80"
+                        }`}>
+                        {model.providerName}
+                    </span>
+                </div>
+                {isSelected ? (
+                    <Check className="h-4 w-4 opacity-100 shrink-0" />
+                ) : (
+                    // <ChevronsUpDown className={`h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ${isHovered ? "opacity-100" : ""
+                    //     }`} />
+                    <></>
+                )}
+            </button>
+        </DropdownMenuItem>
+    );
+};
 
 // ─── Think Tag Parser ──────────────────────────────────────────────────
 function ThinkBlock({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
@@ -114,7 +174,12 @@ function MessageContent({ content, isStreaming }: { content: string; isStreaming
                 p.type === 'think'
                     ? <ThinkBlock key={i} content={p.content} isStreaming={p.unfinished} />
                     : <div key={i} className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1.5 prose-pre:text-xs">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{p.content}</ReactMarkdown>
+                        <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{ code: MarkdownCode }}
+                        >
+                            {p.content}
+                        </ReactMarkdown>
                     </div>
             )}
         </div>
@@ -218,6 +283,68 @@ type AvailableModel = {
     label: string      // modelId only
     providerName: string
     providerPrefix: string
+    source?: 'user' | 'group'
+    groupId?: string
+    groupName?: string
+}
+
+// ─── Group Model Section (2nd-level collapsible) ──────────────────────────
+function GroupModelSection({
+    groupName,
+    models,
+    selectedModel,
+    hasSelected,
+    onSelect,
+    showSeparator,
+}: {
+    groupName: string
+    models: AvailableModel[]
+    selectedModel: string
+    hasSelected: boolean
+    onSelect: (value: string) => void
+    showSeparator: boolean
+}) {
+    const [expanded, setExpanded] = useState(hasSelected) // auto-expand if a model from this group is selected
+
+    return (
+        <>
+            {showSeparator && <div className="my-1 border-t border-border/40" />}
+            {/* Group header row */}
+            <button
+                onClick={() => setExpanded(v => !v)}
+                className={`w-full flex items-center justify-between px-3 py-2 text-sm font-medium transition-colors hover:bg-muted/60
+                    ${hasSelected ? 'text-primary' : 'text-foreground/80'}`}
+            >
+                <span className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold tracking-wider text-muted-foreground uppercase">群組</span>
+                    <span>{groupName}</span>
+                    {hasSelected && <span className="text-[10px] text-primary">✓ 使用中</span>}
+                </span>
+                <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`} />
+            </button>
+
+            {/* Expanded model list */}
+            {expanded && (
+                <div className="bg-muted/20">
+                    {models.map(m => (
+                        <button
+                            key={m.value}
+                            onClick={() => onSelect(m.value)}
+                            className={`w-full text-left pl-7 pr-4 py-2 text-sm transition-colors flex items-center justify-between
+                                ${selectedModel === m.value ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted text-foreground/80 hover:text-foreground'}
+                            `}
+                        >
+                            <div className="flex flex-col items-start">
+                                <span className="truncate max-w-[160px]">{m.label}</span>
+                                <span className="text-[10px] text-muted-foreground">{m.providerName}</span>
+                            </div>
+                            {selectedModel === m.value && <Check className="h-3.5 w-3.5 shrink-0" />}
+                        </button>
+                    ))}
+                </div>
+            )}
+        </>
+    )
 }
 
 // ─── Main Chat Interface ─────────────────────────────────────────────────
@@ -268,6 +395,7 @@ export function ChatInterface({
     // Split view state
     const [selectedPreviewAttachment, setSelectedPreviewAttachment] = useState<Attachment | null>(null)
     const [isDragging, setIsDragging] = useState(false)
+    const [modelSearch, setModelSearch] = useState("")
 
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -371,11 +499,8 @@ export function ChatInterface({
         }
     }, [availableModels])
 
-    // ── Mount: abort orphaned streams (Bug 1) & reconnect to live stream (Bug 2) ──
+    // ── Mount: reconnect to live stream if it exists ──
     useEffect(() => {
-        // Abort any stream that isn't for this session (handles "navigate to /chat" case)
-        streamStore.abortAllExcept(initialSessionId)
-
         // If there's already a live stream for this session, subscribe to it
         if (initialSessionId && streamStore.isActive(initialSessionId)) {
             const snap = streamStore.getSnapshot(initialSessionId)
@@ -778,7 +903,7 @@ export function ChatInterface({
         }
     }
 
-    const [showModelDropdown, setShowModelDropdown] = useState(false)
+    const [modelPickerOpen, setModelPickerOpen] = useState(false)
     // Derived: selected model display label
     const selectedModelObj = availableModels.find(m => m.value === selectedModel)
     const selectedModelLabel = selectedModelObj ? `${selectedModelObj.label}` : (selectedModel || "未選擇模型")
@@ -786,7 +911,7 @@ export function ChatInterface({
     // Called when user picks a model from the dropdown
     const handleModelChange = (modelValue: string) => {
         setSelectedModel(modelValue)
-        setShowModelDropdown(false)
+        setModelPickerOpen(false)
 
         const modelObj = availableModels.find(m => m.value === modelValue)
         if (!modelObj) return
@@ -845,6 +970,37 @@ export function ChatInterface({
         setIsDragging(false)
     }
 
+    // Model picker filtering
+    const searchTerm = modelSearch.trim().toLowerCase()
+    const matchesSearch = (text?: string) => text?.toLowerCase().includes(searchTerm)
+
+    const userModels = availableModels.filter(m => !m.source || m.source === 'user')
+    const filteredUserModels = searchTerm
+        ? userModels.filter(m =>
+            matchesSearch(m.label) ||
+            matchesSearch(m.providerName)
+        )
+        : userModels
+
+    const groupModels = availableModels.filter(m => m.source === 'group')
+    const groupMap = new Map<string, AvailableModel[]>()
+    groupModels.forEach(m => {
+        const name = m.groupName || '群組'
+        if (!groupMap.has(name)) groupMap.set(name, [])
+        groupMap.get(name)!.push(m)
+    })
+    const groupEntries = [...groupMap.entries()].map(([gName, gModels]) => {
+        const filtered = searchTerm
+            ? gModels.filter(m =>
+                matchesSearch(m.label) ||
+                matchesSearch(m.providerName) ||
+                matchesSearch(gName)
+            )
+            : gModels
+        return { gName, filtered, total: gModels.length }
+    }).filter(({ filtered, gName }) => filtered.length > 0 || matchesSearch(gName))
+    const hasAnyMatch = filteredUserModels.length > 0 || groupEntries.length > 0
+
     return (
         <div
             className="flex h-full w-full bg-background overflow-hidden relative"
@@ -870,60 +1026,250 @@ export function ChatInterface({
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 bg-background/80 backdrop-blur sticky top-0 z-10 shrink-0">
 
-                    {/* Gemini-style Model Selector */}
-                    <div className="relative">
-                        <button
-                            onClick={() => setShowModelDropdown(!showModelDropdown)}
-                            className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-muted/60 transition-colors group"
+                    {/* Dropdown model selector with hoverable submenus */}
+                    {/* <DropdownMenu
+                        open={modelPickerOpen}
+                        onOpenChange={(open) => {
+                            setModelPickerOpen(open)
+                            if (!open) setModelSearch("")
+                        }}
+                    >
+                        <DropdownMenuTrigger asChild>
+                            <button
+                                className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-muted/60 transition-colors group"
+                            >
+                                <div className="flex flex-col items-start">
+                                    <span className="text-sm font-semibold tracking-tight text-foreground/90 group-hover:text-foreground leading-tight">
+                                        {selectedModelLabel}
+                                    </span>
+                                    {selectedModelObj && (
+                                        <span className="text-[10px] text-muted-foreground leading-tight">{selectedModelObj.providerName}</span>
+                                    )}
+                                </div>
+                                <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground opacity-60" />
+                            </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" sideOffset={8} className="w-80 p-0 max-h-[440px] overflow-y-auto">
+                            <div className="px-3 py-2 border-b border-border/60">
+                                <input
+                                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                    placeholder="搜尋模型..."
+                                    value={modelSearch}
+                                    onChange={(e) => setModelSearch(e.target.value)}
+                                />
+                            </div>
+
+                            {filteredUserModels.length > 0 && (
+                                <DropdownMenuGroup className="py-1">
+                                    {filteredUserModels.map(m => (
+                                        <DropdownMenuItem
+                                            key={m.value}
+                                            onSelect={() => { handleModelChange(m.value); setModelPickerOpen(false) }}
+                                            className="flex items-center justify-between gap-2"
+                                        >
+                                            <div className="flex flex-col">
+                                                <span className="text-sm">{m.label}</span>
+                                                <span className="text-[10px] text-muted-foreground">{m.providerName}</span>
+                                            </div>
+                                            {selectedModel === m.value && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+                                        </DropdownMenuItem>
+                                    ))}
+                                </DropdownMenuGroup>
+                            )}
+
+                            {filteredUserModels.length > 0 && groupEntries.length > 0 && <DropdownMenuSeparator />}
+
+                            {groupEntries.length > 0 && (
+                                <DropdownMenuGroup className="max-h-[320px] overflow-y-auto py-1">
+                                    {groupEntries.map(({ gName, filtered, total }) => (
+                                        <DropdownMenuSub key={gName}>
+                                            <DropdownMenuSubTrigger className="flex items-center justify-between gap-3">
+                                                <div className="flex flex-col">
+                                                    <span className="text-sm font-medium">{gName}</span>
+                                                    <span className="text-[10px] text-muted-foreground">{filtered.length} / {total} 模型</span>
+                                                </div>
+                                            </DropdownMenuSubTrigger>
+                                            <DropdownMenuPortal>
+                                                <DropdownMenuSubContent className="w-64 rounded-lg">
+                                                    {filtered.length > 0 ? filtered.map(m => (
+                                                        <DropdownMenuItem
+                                                            key={m.value}
+                                                            onSelect={() => { handleModelChange(m.value); setModelPickerOpen(false) }}
+                                                            className="flex items-center justify-between gap-2"
+                                                        >
+                                                            <div className="flex flex-col">
+                                                                <span className="text-sm">{m.label}</span>
+                                                                <span className="text-[10px] text-muted-foreground">{m.providerName}</span>
+                                                            </div>
+                                                            {selectedModel === m.value && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+                                                        </DropdownMenuItem>
+                                                    )) : (
+                                                        <div className="px-3 py-2 text-xs text-muted-foreground">此群組無符合的模型</div>
+                                                    )}
+                                                </DropdownMenuSubContent>
+                                            </DropdownMenuPortal>
+                                        </DropdownMenuSub>
+                                    ))}
+                                </DropdownMenuGroup>
+                            )}
+
+                            {!hasAnyMatch && (
+                                <div className="py-6 text-center text-sm text-muted-foreground">
+                                    找不到符合的模型
+                                </div>
+                            )}
+                        </DropdownMenuContent>
+                    </DropdownMenu> */}
+                    <DropdownMenu
+                        open={modelPickerOpen}
+                        onOpenChange={(open) => {
+                            setModelPickerOpen(open);
+                            if (!open) setModelSearch("");
+                        }}
+                    >
+                        {/* --- 觸發按鈕 (Gemini Style) --- */}
+                        <DropdownMenuTrigger asChild>
+                            <button className="
+            flex items-center justify-between gap-3 px-4 py-2 
+            min-w-[160px] max-w-[240px] 
+            rounded-full border border-border/40 
+            bg-background/50 hover:bg-muted/50 
+            transition-all duration-300 group outline-none
+        ">
+                                <div className="flex flex-col items-start text-left overflow-hidden">
+                                    <span className="text-[13px] font-semibold text-foreground/90 group-hover:text-primary truncate w-full transition-colors leading-tight">
+                                        {selectedModelLabel}
+                                    </span>
+                                    {selectedModelObj && (
+                                        <span className="text-[9px] font-medium text-muted-foreground/60 uppercase tracking-widest truncate w-full">
+                                            {selectedModelObj.providerName}
+                                        </span>
+                                    )}
+                                </div>
+                                <ChevronDown className="h-4 w-4 text-muted-foreground/50 group-hover:text-foreground transition-all duration-300 group-data-[state=open]:rotate-180" />
+                            </button>
+                        </DropdownMenuTrigger>
+
+                        {/* --- 下拉內容 (Gemini Style) --- */}
+                        <DropdownMenuContent
+                            align="start"
+                            sideOffset={10}
+                            className="
+            w-80 p-2 
+            rounded-[24px] border-border/40 
+            bg-background/80 backdrop-blur-2xl 
+            shadow-[0_8px_32px_rgba(0,0,0,0.12)] 
+            animate-in fade-in zoom-in-95 duration-200
+        "
                         >
-                            <div className="flex flex-col items-start">
-                                <span className="text-sm font-semibold tracking-tight text-foreground/90 group-hover:text-foreground leading-tight">
-                                    {selectedModelLabel}
-                                </span>
-                                {selectedModelObj && (
-                                    <span className="text-[10px] text-muted-foreground leading-tight">{selectedModelObj.providerName}</span>
+                            {/* 搜尋框區塊：更簡潔的底色 */}
+                            <div className="relative mb-2 px-1">
+                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/40" />
+                                <input
+                                    autoFocus
+                                    className="
+                    w-full pl-10 pr-4 py-2.5 text-sm 
+                    bg-muted/30 hover:bg-muted/50 focus:bg-background 
+                    rounded-2xl border-none ring-1 ring-border/20 
+                    focus:ring-2 focus:ring-primary/30 
+                    outline-none transition-all
+                "
+                                    placeholder="搜尋 AI 模型..."
+                                    value={modelSearch}
+                                    onChange={(e) => setModelSearch(e.target.value)}
+                                />
+                            </div>
+
+                            <div className="max-h-[420px] overflow-y-auto px-1 custom-scrollbar">
+                                {/* 最近使用 */}
+                                {filteredUserModels.length > 0 && (
+                                    <DropdownMenuGroup>
+                                        <div className="px-3 py-2 text-[11px] font-bold text-muted-foreground/50 uppercase tracking-[0.1em]">
+                                            MY MODELS
+                                        </div>
+                                        <div className="space-y-0.5">
+                                            {filteredUserModels.map(m => (
+                                                <ModelItem
+                                                    key={m.value}
+                                                    model={m}
+                                                    isSelected={selectedModel === m.value}
+                                                    onSelect={(val) => {
+                                                        handleModelChange(val);
+                                                        setModelPickerOpen(false);
+                                                    }}
+                                                />
+                                            ))}
+                                        </div>
+                                    </DropdownMenuGroup>
+                                )}
+
+                                {/* 分隔線：更淡的處理 */}
+                                {filteredUserModels.length > 0 && groupEntries.length > 0 && (
+                                    <DropdownMenuSeparator className="my-2 bg-border/30 mx-2" />
+                                )}
+
+                                {/* 模型群組 */}
+                                {groupEntries.length > 0 && (
+                                    <DropdownMenuGroup>
+                                        <div className="px-3 py-2 text-[11px] font-bold text-muted-foreground/50 uppercase tracking-[0.1em]">
+                                            GROUPS
+                                        </div>
+                                        <div className="space-y-0.5">
+                                            {groupEntries.map(({ gName, filtered, total }) => (
+                                                <DropdownMenuSub key={gName}>
+                                                    <DropdownMenuSubTrigger className="
+                                    rounded-xl py-2.5 px-3 
+                                    hover:bg-muted/50 focus:bg-muted/50 
+                                    data-[state=open]:bg-muted/50
+                                    transition-colors cursor-pointer
+                                ">
+                                                        <div className="flex flex-col gap-0.5 text-left">
+                                                            <span className="text-[13px] font-medium">{gName}</span>
+                                                            <span className="text-[10px] text-muted-foreground/60">{filtered.length} Models</span>
+                                                        </div>
+                                                    </DropdownMenuSubTrigger>
+                                                    <DropdownMenuPortal>
+                                                        <DropdownMenuSubContent
+                                                            sideOffset={8}
+                                                            className="
+                                            w-64 p-2 rounded-[20px] 
+                                            bg-background/90 backdrop-blur-xl 
+                                            shadow-xl border-border/40
+                                        "
+                                                        >
+                                                            <div className="max-h-[300px] overflow-y-auto space-y-0.5">
+                                                                {filtered.map(m => (
+                                                                    <ModelItem
+                                                                        key={m.value}
+                                                                        model={m}
+                                                                        isSelected={selectedModel === m.value}
+                                                                        onSelect={(val) => {
+                                                                            handleModelChange(val);
+                                                                            setModelPickerOpen(false);
+                                                                        }}
+                                                                    />
+                                                                ))}
+                                                            </div>
+                                                        </DropdownMenuSubContent>
+                                                    </DropdownMenuPortal>
+                                                </DropdownMenuSub>
+                                            ))}
+                                        </div>
+                                    </DropdownMenuGroup>
+                                )}
+
+                                {/* 空狀態 */}
+                                {!hasAnyMatch && (
+                                    <div className="py-16 text-center animate-in fade-in slide-in-from-bottom-2">
+                                        <div className="inline-flex p-3 rounded-full bg-muted/30 mb-3">
+                                            <Search className="h-5 w-5 text-muted-foreground/30" />
+                                        </div>
+                                        <p className="text-xs text-muted-foreground font-medium">找不到相關模型</p>
+                                    </div>
                                 )}
                             </div>
-                            <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform duration-200 ${showModelDropdown ? 'rotate-180' : ''}`} />
-                        </button>
-
-                        {/* Dropdown Menu */}
-                        {showModelDropdown && (
-                            <>
-                                <div className="fixed inset-0 z-40" onClick={() => setShowModelDropdown(false)} />
-                                <div className="absolute top-full left-0 mt-2 w-56 rounded-xl border border-border bg-card shadow-lg z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
-                                    <div className="py-2">
-                                        <div className="px-3 pb-2 text-xs font-semibold tracking-wider text-muted-foreground uppercase border-b border-border/40">
-                                            可用模型
-                                        </div>
-                                        <div className="max-h-[300px] overflow-y-auto mt-1">
-                                            {availableModels.length === 0 ? (
-                                                <div className="px-4 py-3 text-sm text-muted-foreground text-center">
-                                                    尚未配置任何模型
-                                                </div>
-                                            ) : (
-                                                availableModels.map(m => (
-                                                    <button
-                                                        key={m.value}
-                                                        onClick={() => handleModelChange(m.value)}
-                                                        className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center justify-between
-                                                            ${selectedModel === m.value ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted text-foreground/80 hover:text-foreground'}
-                                                        `}
-                                                    >
-                                                        <div className="flex flex-col items-start">
-                                                            <span>{m.label}</span>
-                                                            <span className="text-[10px] text-muted-foreground">{m.providerName}</span>
-                                                        </div>
-                                                        {selectedModel === m.value && <Check className="h-4 w-4 shrink-0" />}
-                                                    </button>
-                                                ))
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                            </>
-                        )}
-                    </div>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
 
                     {/* Settings Toggles */}
                     <button
@@ -951,7 +1297,7 @@ export function ChatInterface({
                 {/* Messages Container */}
                 <div
                     ref={scrollContainerRef}
-                    className="flex-1 overflow-y-auto w-full relative"
+                    className="flex-1 overflow-y-auto w-full relative [scrollbar-color:auto_transparent] [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:bg-transparent"
                 >
                     <div className={`mx-auto w-full space-y-8 py-8 ${selectedPreviewAttachment ? 'px-6 max-w-full' : 'px-4 max-w-3xl'}`}>
                         {messages.length === 0 && !isGenerating && (
@@ -969,11 +1315,11 @@ export function ChatInterface({
                             <div key={msg.id} className={`flex w-full group ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
 
                                 {/* Assistant Avatar */}
-                                {msg.role === 'assistant' && (
+                                {/* {msg.role === 'assistant' && (
                                     <div className="flex-shrink-0 mr-4 h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center mt-1 outline outline-1 outline-border">
                                         <Bot className="h-5 w-5 text-primary" />
                                     </div>
-                                )}
+                                )} */}
 
                                 <div className={`flex flex-col gap-2 max-w-[85%] ${msg.role === 'user' ? 'items-end' : 'items-start w-full'}`}>
 
@@ -1127,7 +1473,7 @@ export function ChatInterface({
                             placeholder="輸入訊息或拖曳檔案/圖片至此處... (Shift+Enter 換行)"
                             disabled={isGenerating}
                             rows={1}
-                            className={`w-full resize-none bg-transparent px-5 py-4 text-[15px] leading-relaxed focus:outline-none placeholder:text-muted-foreground disabled:opacity-50 min-h-[56px] max-h-[30vh] overflow-y-auto ${attachments.length > 0 ? 'pt-3' : ''}`}
+                            className={`w-full resize-none bg-transparent px-5 py-4 text-[15px] leading-relaxed focus:outline-none placeholder:text-muted-foreground disabled:opacity-50 min-h-[56px] max-h-[30vh] overflow-y-auto scrollbar-hide ${attachments.length > 0 ? 'pt-3' : ''}`}
                         />
 
                         {/* Input Actions Footer */}

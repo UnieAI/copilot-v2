@@ -85,6 +85,13 @@ export function ProjectPageClient({
         setRenamingId(null)
     }
 
+    const handleCreateNew = () => {
+        setActiveSessionId(undefined)
+        setActiveMessages([])
+        const fresh = Date.now()
+        router.push(`/p/${project.id}?fresh=${fresh}`)
+    }
+
     return (
         <div className="flex h-full w-full overflow-hidden">
             {/* ── Left Panel: Chat List ─────────────────────────── */}
@@ -98,7 +105,8 @@ export function ProjectPageClient({
                 {/* New Chat button */}
                 <div className="px-3 py-3 border-b border-border/40">
                     <button
-                        onClick={() => { window.location.href = `/p/${project.id}` }}
+                        type="button"
+                        onClick={handleCreateNew}
                         className="w-full flex items-center gap-2 h-9 px-3 rounded-xl border border-border/50 text-sm text-muted-foreground hover:text-foreground hover:border-border hover:bg-muted/50 transition-all"
                     >
                         <Plus className="h-3.5 w-3.5" />
@@ -109,7 +117,7 @@ export function ProjectPageClient({
                 {/* Session List */}
                 <div className="flex-1 overflow-y-auto px-3 py-2 space-y-0.5">
                     {sessions.length === 0 ? (
-                        <p className="text-[11px] text-muted-foreground text-center py-6">此資料夾尚無對話</p>
+                        <p className="text-[11px] text-muted-foreground text-center py-6">此專案尚無對話</p>
                     ) : (
                         sessions.map(s => (
                             <div
