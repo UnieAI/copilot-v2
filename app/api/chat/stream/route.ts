@@ -163,65 +163,50 @@ export async function POST(req: NextRequest) {
                         }
                     }
 
-                    // ─── 4. MCP Tool Dispatch ───────────────────────────────────────
+                    // ─── 4. MCP Tool Dispatch (3-step: spec → select → call) ────────
                     const mcpResults: string[] = [];
 
                     if (allMcpTools.length > 0 && adminConf?.taskModelUrl && adminConf?.taskModelKey && adminConf?.taskModelName) {
+                        const { fetchMcpToolPayloads, selectMcpTools, callMcpTool } = await import('@/lib/mcp/mcp-dispatch');
+
                         const userPrompt = messages[messages.length - 1]?.content || '';
-                        const toolSpecs = allMcpTools.map((t: any) => ({
-                            name: (t.info as any)?.title || t.url,
-                            url: t.url,
-                            path: t.path,
-                            type: t.type,
-                            auth_type: t.auth_type,
-                            spec: t.spec,
-                        }));
 
-                        const toolSpecText = JSON.stringify(toolSpecs, null, 2);
-                        const taskPrompt = `You are a tool dispatcher. Given the user's request and available tools, decide which tools to call and with what parameters. Respond ONLY with a JSON array of tool calls: [{\"tool_index\": 0, \"method\": \"GET\", \"url\": \"...\", \"params\": {}, \"headers\": {}}]. If no tools needed, respond with [].\n\nAvailable tools:\n${toolSpecText}\n\nUser request: ${userPrompt}`;
+                        // Step 1: Fetch OpenAPI specs from all active MCP servers in parallel
+                        send({ type: 'status', data: '正在讀取 MCP 工具規範...' });
+                        const toolPayloads = await fetchMcpToolPayloads(
+                            allMcpTools.map((t: any) => ({
+                                id: t.id,
+                                url: t.url,
+                                path: t.path,
+                                key: t.key ?? null,
+                            }))
+                        );
 
-                        send({ type: 'status', data: `正在分析可用工具...` });
+                        if (toolPayloads.length > 0) {
+                            // Step 2: Ask task model which tools to call
+                            send({ type: 'status', data: '正在分析 MCP 工具...' });
+                            const selectedTools = await selectMcpTools({
+                                payloads: toolPayloads,
+                                userQuery: userPrompt,
+                                taskModelUrl: adminConf.taskModelUrl,
+                                taskModelKey: adminConf.taskModelKey,
+                                taskModelName: adminConf.taskModelName,
+                            }).catch(() => []);
 
-                        try {
-                            const taskBase = adminConf.taskModelUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
-                            const taskRes = await fetch(`${taskBase}/v1/chat/completions`, {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    'Authorization': `Bearer ${adminConf.taskModelKey}`
-                                },
-                                body: JSON.stringify({
-                                    model: adminConf.taskModelName,
-                                    messages: [{ role: 'user', content: taskPrompt }],
-                                    temperature: 0,
-                                })
-                            });
-
-                            if (taskRes.ok) {
-                                const taskData = await taskRes.json();
-                                const raw = stripThink(taskData.choices?.[0]?.message?.content || '[]');
-                                const jsonMatch = raw.match(/\[[\s\S]*\]/);
-                                if (jsonMatch) {
-                                    const toolCalls = JSON.parse(jsonMatch[0]);
-                                    for (const call of toolCalls) {
-                                        const toolInfo = toolSpecs[call.tool_index];
-                                        send({ type: 'status', data: `正在調用 MCP 工具 [${toolInfo?.name || call.url}]...` });
-                                        try {
-                                            const mcpRes = await fetch(call.url, {
-                                                method: call.method || 'GET',
-                                                headers: call.headers || {},
-                                                body: call.method !== 'GET' ? JSON.stringify(call.params) : undefined,
-                                            });
-                                            const mcpData = await mcpRes.text();
-                                            mcpResults.push(`[MCP 工具 ${toolInfo?.name || call.url} 回應]\n${mcpData}`);
-                                        } catch (e: any) {
-                                            mcpResults.push(`[MCP 工具 ${toolInfo?.name} 調用失敗: ${e.message}]`);
-                                        }
-                                    }
+                            // Step 3: Call each selected tool
+                            for (const selected of selectedTools) {
+                                const toolName = selected.payload.name || selected.tool;
+                                send({ type: 'status', data: `正在調用 MCP 工具 [${toolName}]...` });
+                                const result = await callMcpTool(selected);
+                                if (result.error) {
+                                    mcpResults.push(`[MCP 工具 ${toolName} 調用失敗]\n${result.error}`);
+                                } else {
+                                    const resultText = typeof result.result === 'string'
+                                        ? result.result
+                                        : JSON.stringify(result.result, null, 2);
+                                    mcpResults.push(`[MCP 工具 ${toolName} 回應]\n${resultText}`);
                                 }
                             }
-                        } catch (e) {
-                            // Task model failed, continue without MCP
                         }
                     }
 

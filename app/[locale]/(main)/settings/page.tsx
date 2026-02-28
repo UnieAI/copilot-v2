@@ -4,7 +4,7 @@ import { redirect } from "next/navigation"
 import { userModels, mcpTools, users } from "@/lib/db/schema"
 import { eq } from "drizzle-orm"
 import { revalidatePath } from "next/cache"
-import Link from "next/link"
+import { SettingsMcpSection } from "@/components/settings/settings-mcp-section"
 
 export default async function SettingsPage() {
     const session = await auth()
@@ -46,21 +46,6 @@ export default async function SettingsPage() {
         } catch {
             throw new Error("無法連接 API，請確認 URL 和 Key 是否正確")
         }
-        revalidatePath("/settings")
-    }
-
-    const deleteMcpTool = async (formData: FormData) => {
-        "use server"
-        const toolId = formData.get("toolId") as string
-        await db.delete(mcpTools).where(eq(mcpTools.id, toolId))
-        revalidatePath("/settings")
-    }
-
-    const toggleMcpTool = async (formData: FormData) => {
-        "use server"
-        const toolId = formData.get("toolId") as string
-        const isActive = formData.get("isActive") === '1' ? 0 : 1
-        await db.update(mcpTools).set({ isActive }).where(eq(mcpTools.id, toolId))
         revalidatePath("/settings")
     }
 
@@ -134,53 +119,8 @@ export default async function SettingsPage() {
                 )}
             </section>
 
-            {/* MCP Tools */}
-            <section className="rounded-xl border border-border bg-card p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                    <div>
-                        <h2 className="font-semibold">MCP 工具</h2>
-                        <p className="text-xs text-muted-foreground mt-0.5">管理 AI 可調用的外部工具</p>
-                    </div>
-                    <Link href="/settings/mcp/new"
-                        className="flex items-center gap-1.5 h-8 px-3 rounded-md border border-input bg-background text-xs font-medium hover:bg-muted transition-colors"
-                    >
-                        + 新增工具
-                    </Link>
-                </div>
-
-                {userMcpTools.length === 0 ? (
-                    <div className="py-8 text-center text-sm text-muted-foreground border border-dashed border-border rounded-lg">
-                        尚未新增任何 MCP 工具
-                    </div>
-                ) : (
-                    <div className="space-y-2">
-                        {userMcpTools.map(tool => (
-                            <div key={tool.id} className="flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-muted/30 transition-colors">
-                                <span className="text-muted-foreground shrink-0 text-sm">🔗</span>
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium truncate">{(tool.info as any)?.title || tool.url}</p>
-                                    <p className="text-xs text-muted-foreground truncate">{tool.type} · {tool.path}</p>
-                                </div>
-                                <form action={toggleMcpTool}>
-                                    <input type="hidden" name="toolId" value={tool.id} />
-                                    <input type="hidden" name="isActive" value={String(tool.isActive)} />
-                                    <button type="submit"
-                                        className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${tool.isActive ? 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' : 'bg-muted text-muted-foreground border-border'}`}
-                                    >
-                                        {tool.isActive ? '啟用' : '停用'}
-                                    </button>
-                                </form>
-                                <form action={deleteMcpTool}>
-                                    <input type="hidden" name="toolId" value={tool.id} />
-                                    <button type="submit" className="p-1 text-muted-foreground hover:text-destructive transition-colors text-sm">
-                                        🗑
-                                    </button>
-                                </form>
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </section>
+            {/* MCP Tools — client component with Dialog */}
+            <SettingsMcpSection initialTools={userMcpTools} />
         </div>
     )
 }
