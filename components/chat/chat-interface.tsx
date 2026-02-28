@@ -270,7 +270,7 @@ export function ChatInterface({
     const textareaRef = useRef<HTMLTextAreaElement>(null)
 
     // Scroll state — mirrors the pattern from step2.tsx
-    const [isAutoScrolling, setIsAutoScrolling] = useState(false)
+    const [isAutoScrolling, setIsAutoScrolling] = useState(true)
     const [showScrollButton, setShowScrollButton] = useState(false)
 
     // IntersectionObserver: show/hide the scroll button based on messagesEndRef visibility
@@ -317,7 +317,7 @@ export function ChatInterface({
         }
     }, [messages, statusText])
 
-    // rAF loop + wheel listener: the core auto-scroll engine from step2.tsx
+    // rAF loop + wheel listener: the core auto-scroll engine
     useEffect(() => {
         if (!isAutoScrolling) return
 
@@ -326,9 +326,12 @@ export function ChatInterface({
 
         let animationFrameId: number
 
-        const scrollSmoothly = () => {
-            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-            animationFrameId = requestAnimationFrame(scrollSmoothly)
+        // Use direct scrollTop assignment — calling scrollIntoView({ behavior: "smooth" })
+        // on every frame starts a new animation each frame and causes severe jitter.
+        // rAF at ~60fps is already visually smooth without a CSS animation.
+        const tick = () => {
+            chatContainer.scrollTop = chatContainer.scrollHeight
+            animationFrameId = requestAnimationFrame(tick)
         }
 
         const handleWheel = (event: WheelEvent) => {
@@ -337,7 +340,7 @@ export function ChatInterface({
             }
         }
 
-        scrollSmoothly()
+        animationFrameId = requestAnimationFrame(tick)
         window.addEventListener("wheel", handleWheel, { passive: true })
 
         return () => {
@@ -997,7 +1000,11 @@ export function ChatInterface({
                     {showScrollButton && (
                         <div className="sticky bottom-4 flex justify-center w-full pointer-events-none z-20">
                             <button
-                                onClick={() => setIsAutoScrolling(true)}
+                                onClick={() => {
+                                    // One-shot smooth scroll to bottom, then re-enable rAF auto-scroll
+                                    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+                                    setTimeout(() => setIsAutoScrolling(true), 500)
+                                }}
                                 className="pointer-events-auto flex items-center justify-center h-8 w-8 rounded-full bg-background/80 backdrop-blur border border-border shadow-md text-muted-foreground hover:text-foreground hover:bg-background transition-all"
                                 aria-label="捲動到最底部"
                             >
