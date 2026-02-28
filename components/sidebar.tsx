@@ -216,7 +216,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
             key={s.id}
             className={`group relative flex items-center gap-1.5 rounded-[12px] px-3 py-2 cursor-pointer transition-colors text-sm
                 ${currentSessionId === s.id ? 'bg-muted/80 text-foreground font-medium' : 'hover:bg-muted/50 text-muted-foreground hover:text-foreground'}`}
-            onClick={() => { if (renamingId !== s.id) router.push(`/c/${s.id}`) }}
+            onClick={() => { if (renamingId !== s.id) router.push(s.projectId ? `/p/${s.projectId}/c/${s.id}` : `/c/${s.id}`) }}
         >
             <MessageSquare className="h-3 w-3 shrink-0 opacity-50" />
 
@@ -286,14 +286,15 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                 <div className="relative flex h-[32px] items-center">
                     {/* Logo - fixed position on left */}
                     <div className={cn(
-                        "absolute flex items-center justify-center group/logo left-6"
+                        "absolute flex items-center justify-center group/logo",
+                        state === 'expanded' ? "left-6" : "left-1"
                     )}>
                         <Link href="/" onClick={() => isMobile && setOpenMobile(false)} className="flex items-center gap-2 justify-center">
                             <div className={cn(
                                 "flex-shrink-0 h-6 w-6 rounded bg-foreground text-background flex items-center justify-center text-xs font-bold transition-[transform,opacity] duration-300 ease-out hover:rotate-180 hover:duration-700 transform-gpu",
                                 state === 'collapsed' && "group-hover/logo:opacity-0 group-hover/logo:scale-90"
                             )}>U</div>
-                            {state !== 'collapsed' && (
+                            {state === 'expanded' && (
                                 <span className="text-sm font-semibold tracking-tight transition-opacity duration-300">UnieAI</span>
                             )}
                         </Link>

@@ -8,41 +8,48 @@ import { ChatInterface } from "@/components/chat/chat-interface"
 
 type Session = { id: string; title: string; updatedAt: string }
 type AvailableModel = { value: string; label: string; providerName: string; providerPrefix: string }
+type DBMessage = { id: string; role: 'user' | 'assistant' | 'system'; content: string; createdAt?: string; attachments?: any[] }
 
 export function ProjectPageClient({
     project,
     initialSessions,
     availableModels,
     initialSelectedModel,
+    initialActiveSessionId,
+    initialActiveMessages = [],
 }: {
     project: { id: string; name: string }
     initialSessions: Session[]
     availableModels: AvailableModel[]
     initialSelectedModel: string
+    initialActiveSessionId?: string
+    initialActiveMessages?: DBMessage[]
 }) {
     const router = useRouter()
     const [sessions, setSessions] = useState<Session[]>(initialSessions)
-    const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined)
+    const [activeSessionId, setActiveSessionId] = useState<string | undefined>(initialActiveSessionId)
+    const [activeMessages, setActiveMessages] = useState<DBMessage[]>(initialActiveMessages)
     const [renamingId, setRenamingId] = useState<string | null>(null)
     const [renameValue, setRenameValue] = useState("")
 
     // When the chat interface creates or updates a session
     const handleSessionCreated = useCallback((newId: string, title: string) => {
         setActiveSessionId(newId)
+        setActiveMessages([])  // new session starts blank
         setSessions(prev => {
             const existing = prev.find(s => s.id === newId)
             if (existing) {
-                // Update title if we now have one
                 if (title) return prev.map(s => s.id === newId ? { ...s, title } : s)
                 return prev
             }
-            // Add new session to top of list
             return [{ id: newId, title: title || 'New Chat', updatedAt: new Date().toISOString() }, ...prev]
         })
-    }, [])
+        // Update URL to reflect the new chat within project context
+        window.history.pushState({}, '', `/p/${project.id}/c/${newId}`)
+    }, [project.id])
 
     const handleSelectSession = (id: string) => {
-        router.push(`/c/${id}`)
+        router.push(`/p/${project.id}/c/${id}`)
     }
 
     const handleDeleteSession = async (id: string, e: React.MouseEvent) => {
@@ -164,10 +171,11 @@ export function ProjectPageClient({
             {/* ── Right Panel: Chat Interface ────────────────────── */}
             <div className="flex-1 min-w-0 overflow-hidden">
                 <ChatInterface
+                    key={activeSessionId ?? 'new'}
                     sessionId={activeSessionId}
                     availableModels={availableModels}
                     initialSelectedModel={initialSelectedModel}
-                    initialMessages={[]}
+                    initialMessages={activeMessages as any[]}
                     projectId={project.id}
                     onSessionCreated={handleSessionCreated}
                 />
