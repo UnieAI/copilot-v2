@@ -11,6 +11,8 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { streamStore } from "@/lib/stream-store"
+import { useTranslations } from "next-intl"
+import { DynamicGreeting } from "@/components/ui/dynamic-greeting"
 
 // ─── Types ─────────────────────────────────────────────────────────────
 type Attachment = {
@@ -38,7 +40,7 @@ type UIMessage = {
 }
 
 const ACCEPTED_IMAGE_TYPES = ".jpg,.jpeg,.png"
-const ACCEPTED_DOC_TYPES = ".pdf,.doc,.docx,.csv,.txt,.md"
+const ACCEPTED_DOC_TYPES = ".pdf,.doc,.docx,.csv,.txt,.md,.json,.js,.jsx,.ts,.tsx,.html,.css,.py"
 
 function fileToBase64(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -223,6 +225,7 @@ export function ChatInterface({
     sessionId: initialSessionId,
     availableModels,
     initialSelectedModel,
+    initialQuery,
     initialMessages = [],
     projectId,
     onSessionCreated,
@@ -230,6 +233,7 @@ export function ChatInterface({
     sessionId?: string
     availableModels: AvailableModel[]
     initialSelectedModel?: string
+    initialQuery?: string
     initialMessages?: DBMessage[]
     projectId?: string          // if set, new sessions are placed in this project
     onSessionCreated?: (id: string, title: string) => void  // called when a new session is created
@@ -263,6 +267,7 @@ export function ChatInterface({
 
     // Split view state
     const [selectedPreviewAttachment, setSelectedPreviewAttachment] = useState<Attachment | null>(null)
+    const [isDragging, setIsDragging] = useState(false)
 
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -401,16 +406,44 @@ export function ChatInterface({
         }
     }, [input])
 
+    const getMimeType = (file: File) => {
+        if (file.type) return file.type;
+        const ext = file.name.split('.').pop()?.toLowerCase() || '';
+        switch (ext) {
+            case 'jpg':
+            case 'jpeg': return 'image/jpeg';
+            case 'png': return 'image/png';
+            case 'gif': return 'image/gif';
+            case 'webp': return 'image/webp';
+            case 'pdf': return 'application/pdf';
+            case 'csv': return 'text/csv';
+            case 'txt': return 'text/plain';
+            case 'md': return 'text/markdown';
+            case 'doc': return 'application/msword';
+            case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+            case 'json': return 'application/json';
+            case 'js':
+            case 'jsx':
+            case 'ts':
+            case 'tsx':
+            case 'html':
+            case 'css':
+            case 'py': return 'text/plain';
+            default: return 'application/octet-stream';
+        }
+    }
+
     const handleFileSelect = async (files: FileList | null, isEdit = false) => {
         if (!files) return
         const newAtts: Attachment[] = []
         for (const file of Array.from(files)) {
+            const mimeType = getMimeType(file)
             const base64 = await fileToBase64(file)
             newAtts.push({
                 name: file.name,
-                mimeType: file.type,
+                mimeType,
                 base64,
-                previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined
+                previewUrl: mimeType.startsWith('image/') ? URL.createObjectURL(file) : undefined
             })
         }
         if (isEdit) setEditAttachments(prev => [...prev, ...newAtts])
@@ -783,6 +816,8 @@ export function ChatInterface({
 
     const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault()
+        e.stopPropagation()
+        setIsDragging(false)
         const files = e.dataTransfer.files
         if (files && files.length > 0) {
             handleFileSelect(files)
@@ -791,10 +826,46 @@ export function ChatInterface({
 
     const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault()
+        e.stopPropagation()
+    }
+
+    const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault()
+        e.stopPropagation()
+        if (e.dataTransfer.types.includes('Files')) {
+            setIsDragging(true)
+        }
+    }
+
+    const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault()
+        e.stopPropagation()
+        // Improve reliability: only set false if leaving the window area
+        if (e.currentTarget.contains(e.relatedTarget as Node)) return
+        setIsDragging(false)
     }
 
     return (
-        <div className="flex h-full w-full bg-background overflow-hidden relative">
+        <div
+            className="flex h-full w-full bg-background overflow-hidden relative"
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+        >
+            {/* Full-screen drag overlay */}
+            {isDragging && (
+                <div className="absolute inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm border-2 border-dashed border-primary/50 m-4 rounded-3xl transition-all">
+                    <div className="flex flex-col items-center gap-4 text-primary pointer-events-none scale-110 animate-in zoom-in-95 duration-200">
+                        <div className="p-4 bg-primary/10 rounded-full">
+                            <Paperclip className="h-10 w-10" />
+                        </div>
+                        <h3 className="text-xl font-semibold tracking-tight">放開以附加檔案</h3>
+                        <p className="text-sm font-medium text-muted-foreground">支援圖片、文件等多種格式</p>
+                    </div>
+                </div>
+            )}
+
             <div className={`relative flex flex-col h-full bg-background transition-all duration-300 ease-in-out ${selectedPreviewAttachment ? 'w-1/2 min-w-0 border-r border-border' : 'w-full'} `}>
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 bg-background/80 backdrop-blur sticky top-0 z-10 shrink-0">
@@ -1038,8 +1109,6 @@ export function ChatInterface({
                                      border border-border/80 focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/50 focus-within:bg-background
                                      hover:border-primary/30
                                      ${selectedPreviewAttachment ? 'max-w-full' : 'max-w-3xl'}`}
-                        onDrop={handleDrop}
-                        onDragOver={handleDragOver}
                     >
                         {/* Attachments Section Inside Input Box */}
                         {attachments.length > 0 && (

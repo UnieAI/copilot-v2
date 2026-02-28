@@ -23,7 +23,8 @@ export async function parseFile(name: string, mimeType: string, base64Data: stri
     if (ext === 'csv' || mimeType === 'text/csv') {
         return parseCsv(name, buffer)
     }
-    if (['txt', 'md'].includes(ext) || mimeType.startsWith('text/')) {
+    const textExtensions = ['txt', 'md', 'json', 'js', 'jsx', 'ts', 'tsx', 'css', 'scss', 'html', 'py', 'java', 'c', 'cpp', 'rs', 'go', 'sh', 'yaml', 'yml', 'env', 'xml']
+    if (textExtensions.includes(ext) || mimeType.startsWith('text/')) {
         return parsePlainText(name, buffer)
     }
 
@@ -77,5 +78,6 @@ export function isImageFile(name: string, mimeType: string): boolean {
 
 export function isDocumentFile(name: string, mimeType: string): boolean {
     const ext = name.split('.').pop()?.toLowerCase() || ''
-    return ['pdf', 'doc', 'docx', 'csv', 'txt', 'md'].includes(ext)
+    const docExtensions = ['pdf', 'doc', 'docx', 'csv', 'txt', 'md', 'json', 'js', 'jsx', 'ts', 'tsx', 'css', 'scss', 'html', 'py', 'java', 'c', 'cpp', 'rs', 'go', 'sh', 'yaml', 'yml', 'env', 'xml']
+    return docExtensions.includes(ext) || mimeType.startsWith('text/') || mimeType === 'application/json' || mimeType.startsWith('application/x-')
 }
