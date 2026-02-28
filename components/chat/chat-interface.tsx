@@ -264,13 +264,55 @@ export function ChatInterface({
     const [selectedPreviewAttachment, setSelectedPreviewAttachment] = useState<Attachment | null>(null)
 
     const messagesEndRef = useRef<HTMLDivElement>(null)
+    const scrollContainerRef = useRef<HTMLDivElement>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
     const editFileInputRef = useRef<HTMLInputElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+    // Scroll state
+    const [userScrolled, setUserScrolled] = useState(false)
+    const [showScrollButton, setShowScrollButton] = useState(false)
+    const isAtBottomRef = useRef(true)
+
+    const checkIsAtBottom = useCallback(() => {
+        const el = scrollContainerRef.current
+        if (!el) return true
+        return el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    }, [])
+
+    const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+        messagesEndRef.current?.scrollIntoView({ behavior })
+        setUserScrolled(false)
+        setShowScrollButton(false)
+        isAtBottomRef.current = true
+    }, [])
+
+    // Handle scroll events from the user
+    const handleScroll = useCallback(() => {
+        const atBottom = checkIsAtBottom()
+        isAtBottomRef.current = atBottom
+        setShowScrollButton(!atBottom)
+        if (!atBottom && isGenerating) {
+            setUserScrolled(true)
+        }
+        if (atBottom) {
+            setUserScrolled(false)
+        }
+    }, [checkIsAtBottom, isGenerating])
+
+    // Auto-scroll when messages change, unless user has scrolled away
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-    }, [messages, statusText])
+        if (!userScrolled) {
+            scrollToBottom("smooth")
+        }
+    }, [messages, statusText]) // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Reset userScrolled when generation starts so new generations auto-scroll
+    useEffect(() => {
+        if (isGenerating) {
+            setUserScrolled(false)
+        }
+    }, [isGenerating])
 
     useEffect(() => {
         if (availableModels.length > 0 && !selectedModel) {
@@ -694,7 +736,7 @@ export function ChatInterface({
 
     return (
         <div className="flex h-full w-full bg-background overflow-hidden relative">
-            <div className={`flex flex-col h-full bg-background transition-all duration-300 ease-in-out ${selectedPreviewAttachment ? 'w-1/2 min-w-0 border-r border-border' : 'w-full'} `}>
+            <div className={`relative flex flex-col h-full bg-background transition-all duration-300 ease-in-out ${selectedPreviewAttachment ? 'w-1/2 min-w-0 border-r border-border' : 'w-full'} `}>
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 bg-background/80 backdrop-blur sticky top-0 z-10 shrink-0">
 
@@ -777,7 +819,11 @@ export function ChatInterface({
                 )}
 
                 {/* Messages Container */}
-                <div className="flex-1 overflow-y-auto w-full">
+                <div
+                    ref={scrollContainerRef}
+                    onScroll={handleScroll}
+                    className="flex-1 overflow-y-auto w-full relative"
+                >
                     <div className={`mx-auto w-full space-y-8 py-8 ${selectedPreviewAttachment ? 'px-6 max-w-full' : 'px-4 max-w-3xl'}`}>
                         {messages.length === 0 && !isGenerating && (
                             <div className="flex flex-col items-center justify-center h-full min-h-[50vh] gap-4 text-muted-foreground">
@@ -907,6 +953,21 @@ export function ChatInterface({
                         <div ref={messagesEndRef} className="h-4" />
                     </div>
                 </div>
+
+                {/* Scroll to bottom floating button */}
+                {showScrollButton && (
+                    <div className="absolute bottom-[120px] left-1/2 -translate-x-1/2 z-20 pointer-events-none"
+                        style={{ width: 'fit-content' }}
+                    >
+                        <button
+                            onClick={() => scrollToBottom("smooth")}
+                            className="pointer-events-auto flex items-center justify-center h-8 w-8 rounded-full bg-background/80 backdrop-blur border border-border shadow-md text-muted-foreground hover:text-foreground hover:bg-background transition-all"
+                            aria-label="捲動到最底部"
+                        >
+                            <ChevronDown className="h-4 w-4" />
+                        </button>
+                    </div>
+                )}
 
                 {/* Input Area */}
                 <div className="bg-background px-4 py-4 shrink-0">
