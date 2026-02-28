@@ -55,6 +55,8 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
     const [sessions, setSessions] = useState<ChatSession[]>([])
     const [projects, setProjects] = useState<ChatProject[]>([])
     const [mounted, setMounted] = useState(false)
+    const segments = pathname?.split('/').filter(Boolean) || []
+    const localePrefix = segments.length && segments[0].length <= 5 ? `/${segments[0]}` : ''
 
     const { state, setOpen, setOpenMobile, isMobile } = useSidebar()
 
@@ -80,6 +82,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
     const [activeStreams, setActiveStreams] = useState<Record<string, { statusText: string }>>({})
     const activeStreamsRef = useRef<Record<string, { statusText: string }>>({})
     const sessionsRef = useRef<ChatSession[]>([])
+    const [activeChatStreamId, setActiveChatStreamId] = useState<string | null>(null)
 
     const currentSessionId = pathname?.split('/c/')?.[1]?.split('/')?.[0] || ''
 
@@ -88,7 +91,15 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
     useEffect(() => {
         const handler = () => fetchAll()
         window.addEventListener('sidebar:refresh', handler)
-        return () => window.removeEventListener('sidebar:refresh', handler)
+        const activeHandler = (e: Event) => {
+            const detail = (e as CustomEvent)?.detail
+            setActiveChatStreamId(detail || null)
+        }
+        window.addEventListener('chat:active', activeHandler)
+        return () => {
+            window.removeEventListener('sidebar:refresh', handler)
+            window.removeEventListener('chat:active', activeHandler)
+        }
     }, [])
     useEffect(() => { sessionsRef.current = sessions }, [sessions])
     useEffect(() => {
@@ -97,9 +108,9 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
             entries.forEach(e => { next[e.sessionId] = { statusText: e.statusText } })
 
             const prev = activeStreamsRef.current
-            const finishedIds = Object.keys(prev).filter(id => !next[id])
+            const finishedIds = Object.keys(prev).filter(id => !next[id] && !id.startsWith('pending-'))
             finishedIds.forEach(id => {
-                if (id === currentSessionId) return
+                if (id === currentSessionId || id === activeChatStreamId) return
                 const sessionMeta = sessionsRef.current.find(s => s.id === id)
                 const title = sessionMeta?.title || '對話'
                 const targetHref = sessionMeta?.projectId ? `/p/${sessionMeta.projectId}/c/${id}` : `/c/${id}`
@@ -116,7 +127,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
             setActiveStreams(next)
         })
         return () => unsubscribe()
-    }, [currentSessionId, router])
+    }, [currentSessionId, router, activeChatStreamId])
 
     // Auto-collapse sidebar when entering project pages
     useEffect(() => {
@@ -162,7 +173,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
         try {
             await fetch(`/api/chat/${id}`, { method: 'DELETE' })
             setSessions(prev => prev.filter(s => s.id !== id))
-            if (pathname?.includes(id)) router.push('/chat')
+            if (pathname?.includes(id)) router.push(`${localePrefix}/chat`)
             toast.success("對話已刪除")
         } catch { toast.error("刪除失敗") }
     }
@@ -232,7 +243,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
             setSessions(prev => prev.filter(s => s.projectId !== id))
             // If currently viewing a session in this project, go home
             const sessionInProject = sessions.find(s => s.projectId === id && pathname?.includes(s.id))
-            if (sessionInProject || pathname?.includes(`/p/${id}`)) router.push('/chat')
+            if (sessionInProject || pathname?.includes(`/p/${id}`)) router.push(`${localePrefix}/chat`)
             toast.success("專案及所有對話已刪除")
         } catch { toast.error("刪除失敗") }
     }
@@ -248,7 +259,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
     const startNewChat = () => {
         setMoveMenuId(null)
         const fresh = Date.now()
-        router.push(`/chat?fresh=${fresh}`)
+        router.push(`${localePrefix}/chat?fresh=${fresh}`)
         if (isMobile) {
             setOpenMobile(false)
         }
@@ -354,7 +365,8 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                     )}>
                         <button
                             onClick={() => {
-                                state === 'expanded' ? router.push('/') : window.location.href = '/chat'
+                                const homePath = localePrefix || '/'
+                                state === 'expanded' ? router.push(homePath) : router.push(`${localePrefix}/chat`)
                                 isMobile && setOpenMobile(false)
                             }}
                             className="flex items-center gap-2 justify-center"

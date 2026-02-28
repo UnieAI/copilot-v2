@@ -105,7 +105,7 @@ export default function Home() {
 
                 {/* Main content area */}
                 <div className="flex-1 flex flex-col relative z-[1] justify-center mt-12">
-                    <div className="w-full max-w-3xl mx-auto flex flex-col items-center text-center px-4">
+                    <div className="w-full max-w-4xl mx-auto flex flex-col items-center text-center px-4">
 
                         <div className="animate-in fade-in-0 slide-in-from-bottom-4 duration-500 fill-mode-both">
                             <h1 className="text-3xl sm:text-4xl md:text-5xl font-medium text-foreground tracking-tight">
@@ -164,9 +164,9 @@ export default function Home() {
                             />
 
                             <div className="flex items-center justify-between p-1 mt-auto">
-                            <div className="flex items-center gap-2">
-                                <Button
-                                    type="submit"
+                                <div className="flex items-center gap-2">
+                                    <Button
+                                        type="submit"
                                         size="icon"
                                         className={cn(
                                             "h-9 w-9 rounded-full transition-all flex items-center justify-center",

@@ -1,9 +1,10 @@
 import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { adminSettings, userProviders, mcpTools, chatSessions, chatMessages, chatFiles } from "@/lib/db/schema";
+import { adminSettings, userProviders, mcpTools, chatSessions, chatMessages, chatFiles, userGroups, groupProviders } from "@/lib/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { parseFile, isImageFile, isDocumentFile } from "@/lib/parsers";
+import { describePdfWithVision, isPdf } from "@/lib/parsers/pdf-vision";
 
 /** Strip <think>...</think> blocks (including unclosed ones) and trim. */
 function stripThink(text: string): string {
@@ -97,22 +98,56 @@ export async function POST(req: NextRequest) {
                         })
                     ]);
 
-                    // Look up provider by prefix
-                    const userConf = providerPrefix
-                        ? await db.query.userProviders.findFirst({
-                            where: and(eq(userProviders.userId, userId), eq(userProviders.prefix, providerPrefix))
-                        })
-                        : await db.query.userProviders.findFirst({
-                            where: and(eq(userProviders.userId, userId), eq(userProviders.enable, 1))
-                        });
+                    // Determine accessible groups for this user
+                    const memberships = await db.query.userGroups.findMany({
+                        where: eq(userGroups.userId, userId),
+                    });
+                    const memberGroupIds = memberships.map(g => g.groupId);
 
-                    if (!userConf?.apiUrl || !userConf?.apiKey) {
-                        send({ type: 'error', data: '請先在設定頁面配置 API URL 和 Key。' });
+                    // Look up provider by prefix (personal first, then group)
+                    let providerConf =
+                        providerPrefix
+                            ? await db.query.userProviders.findFirst({
+                                where: and(eq(userProviders.userId, userId), eq(userProviders.prefix, providerPrefix))
+                            })
+                            : await db.query.userProviders.findFirst({
+                                where: and(eq(userProviders.userId, userId), eq(userProviders.enable, 1))
+                            });
+
+                    if (!providerConf && providerPrefix && memberGroupIds.length > 0) {
+                        providerConf = await db.query.groupProviders.findFirst({
+                            where: and(
+                                eq(groupProviders.prefix, providerPrefix),
+                                inArray(groupProviders.groupId, memberGroupIds),
+                                eq(groupProviders.enable, 1),
+                            ),
+                        });
+                    }
+
+                    // Fallback: any enabled group provider if none selected and user has membership
+                    if (!providerConf && memberGroupIds.length > 0) {
+                        providerConf = await db.query.groupProviders.findFirst({
+                            where: and(
+                                inArray(groupProviders.groupId, memberGroupIds),
+                                eq(groupProviders.enable, 1),
+                            ),
+                        });
+                    }
+
+                    if (!providerConf?.apiUrl || !providerConf?.apiKey) {
+                        send({ type: 'error', data: '尚未配置可用的 Provider，若您屬於群組請聯絡管理員。' });
                         controller.close();
                         return;
                     }
 
-                    const cleanApiUrl = userConf.apiUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
+                    const cleanApiUrl = providerConf.apiUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
+                    const visionConfig = (adminConf?.visionModelUrl && adminConf?.visionModelKey && adminConf?.visionModelName)
+                        ? {
+                            url: adminConf.visionModelUrl,
+                            key: adminConf.visionModelKey,
+                            model: adminConf.visionModelName,
+                        }
+                        : null;
 
                     // ─── 3. Build Context from Attachments (all in parallel) ─────────
                     const contextParts: string[] = [];
@@ -126,7 +161,40 @@ export async function POST(req: NextRequest) {
                             attachments.map(async (att: any) => {
                                 const { name, mimeType, base64 } = att;
 
-                                if (isImageFile(name, mimeType)) {
+                                if (isPdf(name, mimeType)) {
+                                    const fallbackParse = async () => {
+                                        try {
+                                            const parsed = await parseFile(name, mimeType, base64);
+                                            return parsed.content
+                                                ? `[PDF ${name} 文本內容]\n${parsed.content}`
+                                                : `[PDF ${name} 解析失敗]`;
+                                        } catch {
+                                            return `[PDF ${name} 解析失敗]`;
+                                        }
+                                    }
+
+                                    if (visionConfig) {
+                                        const summary = await describePdfWithVision({
+                                            name,
+                                            base64,
+                                            vision: visionConfig,
+                                            onProgress: (ev) => {
+                                                if (ev.type === 'status') send({ type: 'status', data: ev.message })
+                                                if (ev.type === 'done') send({ type: 'status', data: `PDF ${name} 解析完成` })
+                                                if (ev.type === 'error') send({ type: 'status', data: `PDF ${name} 解析失敗 (${ev.message})` })
+                                            }
+                                        }).catch(async (e) => {
+                                            send({ type: 'status', data: `PDF ${name} 解析失敗，改用文字解析: ${e?.message || ''}` })
+                                            return await fallbackParse()
+                                        })
+
+                                        if (summary) return `[PDF ${name} 描述]\n${summary}`
+                                        return `[PDF ${name} 解析失敗]`
+                                    }
+
+                                    send({ type: 'status', data: `PDF ${name} 無視覺模型，改用文字解析` })
+                                    return await fallbackParse()
+                                } else if (isImageFile(name, mimeType)) {
                                     if (adminConf?.visionModelUrl && adminConf?.visionModelKey && adminConf?.visionModelName) {
                                         try {
                                             const visionBase = adminConf.visionModelUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
@@ -273,7 +341,7 @@ export async function POST(req: NextRequest) {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${userConf.apiKey}`
+                            'Authorization': `Bearer ${providerConf.apiKey}`
                         },
                         body: JSON.stringify({
                             model: realModelName || selectedModel,

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useCallback } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, usePathname } from "next/navigation"
 import { MessageSquare, Plus, Trash2, Pencil } from "lucide-react"
 import { toast } from "sonner"
 import { ChatInterface } from "@/components/chat/chat-interface"
@@ -26,6 +26,9 @@ export function ProjectPageClient({
     initialActiveMessages?: DBMessage[]
 }) {
     const router = useRouter()
+    const pathname = usePathname()
+    const segments = pathname?.split('/').filter(Boolean) || []
+    const localePrefix = segments.length && segments[0].length <= 5 ? `/${segments[0]}` : ''
     const [sessions, setSessions] = useState<Session[]>(initialSessions)
     const [activeSessionId, setActiveSessionId] = useState<string | undefined>(initialActiveSessionId)
     const [activeMessages, setActiveMessages] = useState<DBMessage[]>(initialActiveMessages)
@@ -45,11 +48,11 @@ export function ProjectPageClient({
             return [{ id: newId, title: title || 'New Chat', updatedAt: new Date().toISOString() }, ...prev]
         })
         // Update URL to reflect the new chat within project context
-        window.history.pushState({}, '', `/p/${project.id}/c/${newId}`)
+        window.history.pushState({}, '', `${localePrefix}/p/${project.id}/c/${newId}`)
     }, [project.id])
 
     const handleSelectSession = (id: string) => {
-        router.push(`/p/${project.id}/c/${id}`)
+        router.push(`${localePrefix}/p/${project.id}/c/${id}`)
     }
 
     const handleDeleteSession = async (id: string, e: React.MouseEvent) => {
@@ -89,7 +92,7 @@ export function ProjectPageClient({
         setActiveSessionId(undefined)
         setActiveMessages([])
         const fresh = Date.now()
-        router.push(`/p/${project.id}?fresh=${fresh}`)
+        router.push(`${localePrefix}/p/${project.id}?fresh=${fresh}`)
     }
 
     return (

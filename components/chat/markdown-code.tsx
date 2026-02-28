@@ -1,138 +1,87 @@
 "use client"
 
-import { useMemo, useState, type HTMLAttributes } from "react"
+import { useState, useEffect } from "react"
+import { Highlight, themes } from "prism-react-renderer"
+import { useTheme } from "next-themes"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
-import { Terminal, Code2, Copy, Check, Maximize2, X } from "lucide-react"
-import { motion, AnimatePresence } from "framer-motion"
+import { Terminal, Copy, Check, Maximize2, X, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-type MarkdownCodeProps = HTMLAttributes<HTMLElement> & {
-    inline?: boolean
-}
-
-export function MarkdownCode({ inline, className, children, ...props }: MarkdownCodeProps) {
+export function MarkdownCode({ className, codeText, language, ...props }: any) {
+    const { resolvedTheme } = useTheme()
+    const [mounted, setMounted] = useState(false)
     const [copied, setCopied] = useState(false)
     const [open, setOpen] = useState(false)
 
-    // Normalize children to a string so we can copy and avoid extra trailing newline from markdown.
-    const codeText = useMemo(() => {
-        const raw = Array.isArray(children) ? children.join("") : children ?? ""
-        const text = typeof raw === "string" ? raw : String(raw)
-        return inline ? text : text.replace(/\n$/, "")
-    }, [children, inline])
+    useEffect(() => setMounted(true), [])
 
-    const language = typeof className === "string"
-        ? className.match(/language-([\w-]+)/)?.[1]
-        : undefined
+    const prismTheme = resolvedTheme === "dark" ? themes.vsDark : themes.vsLight
+    const displayLanguage = language || "code";
 
     const handleCopy = async () => {
-        try {
-            await navigator.clipboard.writeText(codeText)
-            setCopied(true)
-            setTimeout(() => setCopied(false), 1200)
-        } catch { }
+        await navigator.clipboard.writeText(codeText)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1500)
     }
 
-    if (inline) {
+    if (!mounted) {
         return (
-            <code
-                className={cn("rounded bg-muted px-1.5 py-[2px] font-mono text-[13px]", className)}
-                {...props}
-            >
-                {codeText}
-            </code>
+            <div className="my-4 rounded-2xl border bg-muted/20 p-4 font-mono text-sm animate-pulse">
+                <code>{codeText.slice(0, 100)}...</code>
+            </div>
         )
     }
 
-    const Header = ({ compact }: { compact?: boolean }) => (
-        <div className={cn(
-            "flex items-center justify-between px-3 py-2 text-[12px]",
-            compact ? "border-b border-border/70 bg-background/60 dark:bg-background/80" : "border-b border-border/60 bg-muted/40"
-        )}>
-            <div className="flex items-center gap-2 text-muted-foreground">
-                <div className="h-7 w-7 rounded-lg bg-muted flex items-center justify-center">
-                    {language ? <Terminal className="h-3.5 w-3.5" /> : <Code2 className="h-3.5 w-3.5" />}
-                </div>
-                <div className="flex flex-col leading-none">
-                    <span className="text-[12px] font-semibold text-foreground">{language || "code"}</span>
-                    <span className="text-[11px] text-muted-foreground/80">Markdown snippet</span>
-                </div>
-            </div>
-            <div className="flex items-center gap-2">
-                <button
-                    type="button"
-                    onClick={handleCopy}
-                    className={cn(
-                        "inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[12px] font-semibold transition",
-                        copied
-                            ? "bg-primary/10 text-primary"
-                            : "bg-muted text-muted-foreground hover:text-foreground"
-                    )}
-                >
-                    {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                    <span>{copied ? "Copied" : "Copy"}</span>
-                </button>
-                <button
-                    type="button"
-                    onClick={() => setOpen(true)}
-                    className="hidden sm:inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[12px] font-semibold bg-muted text-muted-foreground hover:text-foreground transition"
-                >
-                    <Maximize2 className="h-3.5 w-3.5" />
-                    <span>Expand</span>
-                </button>
-            </div>
-        </div>
-    )
-
-    const CodeSurface = ({ large }: { large?: boolean }) => (
-        <div className={cn("relative", large ? "h-[70vh]" : "max-h-[420px]")}>
-            <pre className={cn(
-                "h-full w-full overflow-auto bg-card px-4 py-3 text-[13px] leading-relaxed scrollbar-hide",
-                large ? "rounded-b-2xl" : ""
-            )}>
-                <code className={cn("font-mono whitespace-pre", className)} {...props}>
-                    {codeText}
-                </code>
-            </pre>
-            {!large && (
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-card to-transparent" />
-            )}
-        </div>
-    )
-
     return (
-        <>
-            <div className="not-prose my-4 overflow-hidden rounded-2xl border border-border bg-background/50 shadow-sm">
-                <Header />
-                <CodeSurface />
+        <div className="not-prose group relative my-6 flex flex-col overflow-hidden rounded-[24px] border border-border bg-card shadow-sm hover:shadow-md transition-all dark:border-white/10 dark:bg-[#1E1F20]">
+            {/* Header: Gemini Style */}
+            <div className="flex items-center justify-between px-5 py-3 shrink-0 bg-muted/30 dark:bg-[#1E1F20]/80 border-b border-border/50">
+                <div className="flex items-center gap-3">
+                    <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                        <Terminal className="h-3.5 w-3.5" />
+                    </div>
+                    <div className="flex items-center gap-1.5 font-mono text-[10px] tracking-[0.1em] uppercase text-muted-foreground/80">
+                        <span>{displayLanguage}</span>
+                        <ChevronRight className="h-3 w-3 opacity-30" />
+                        <span className="font-sans lowercase opacity-50">snippet</span>
+                    </div>
+                </div>
+                <div className="flex items-center gap-2">
+                    <button onClick={handleCopy} className={cn(
+                        "flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[11px] font-bold transition-all border active:scale-95",
+                        copied ? "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20" : "bg-background border-border hover:bg-muted"
+                    )}>
+                        {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                        <span>{copied ? "已複製" : "複製"}</span>
+                    </button>
+                    <button onClick={() => setOpen(true)} className="h-8 w-8 flex items-center justify-center rounded-full border border-border bg-background hover:bg-muted transition-all opacity-0 group-hover:opacity-100 hidden sm:flex">
+                        <Maximize2 className="h-3.5 w-3.5" />
+                    </button>
+                </div>
             </div>
 
-            <Dialog open={open} onOpenChange={setOpen}>
-                <DialogContent className="max-w-5xl w-[95vw] p-0 overflow-hidden rounded-2xl">
-                    <DialogTitle className="sr-only">Code preview</DialogTitle>
-                    <AnimatePresence mode="wait">
-                        <motion.div
-                            key="code-modal"
-                            initial={{ opacity: 0, y: 6 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -6 }}
-                            transition={{ duration: 0.2 }}
-                            className="flex flex-col h-full"
+            {/* Code Content with Line Numbers */}
+            <div className="relative w-full overflow-hidden bg-card dark:bg-[#0B0D0E]">
+                <Highlight theme={prismTheme} code={codeText} language={displayLanguage as any}>
+                    {({ className, style, tokens, getLineProps, getTokenProps }) => (
+                        <pre
+                            className={cn(className, "overflow-auto p-5 text-[13px] leading-[22px] font-mono custom-scrollbar !m-0 w-full selection:bg-primary/30")}
+                            style={{ ...style, backgroundColor: 'transparent' }}
                         >
-                            <Header compact />
-                            <CodeSurface large />
-                            <button
-                                type="button"
-                                onClick={() => setOpen(false)}
-                                className="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-full bg-background/80 text-muted-foreground shadow-sm hover:text-foreground"
-                            >
-                                <X className="h-4 w-4" />
-                                <span className="sr-only">Close</span>
-                            </button>
-                        </motion.div>
-                    </AnimatePresence>
-                </DialogContent>
-            </Dialog>
-        </>
+                            {tokens.map((line, i) => (
+                                <div key={i} {...getLineProps({ line, key: i })} className="table-row">
+                                    <span className="table-cell pr-5 text-muted-foreground/20 text-right select-none text-[10px] w-10 font-sans border-r border-white/5 whitespace-nowrap">
+                                        {i + 1}
+                                    </span>
+                                    <span className="table-cell pl-4 whitespace-pre">
+                                        {line.map((token, key) => <span key={key} {...getTokenProps({ token, key })} />)}
+                                    </span>
+                                </div>
+                            ))}
+                        </pre>
+                    )}
+                </Highlight>
+            </div>
+        </div>
     )
 }

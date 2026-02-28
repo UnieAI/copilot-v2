@@ -1,9 +1,12 @@
 "use client"
 
-import { useState, useRef, useEffect, useCallback } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useRef, useEffect, useCallback, useMemo } from "react"
+import { useRouter, usePathname } from "next/navigation"
 import remarkGfm from "remark-gfm"
 import ReactMarkdown from "react-markdown"
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import {
     Send, Paperclip, X, RefreshCw, Edit2,
     ChevronDown, ChevronUp, Loader2, Check, Settings2,
@@ -27,6 +30,8 @@ import {
     DropdownMenuSubTrigger,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { cn } from "@/lib/utils"
+import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
 
 // ─── Types ─────────────────────────────────────────────────────────────
 type Attachment = {
@@ -139,51 +144,204 @@ function ThinkBlock({ content, isStreaming }: { content: string; isStreaming?: b
     )
 }
 
-// Render content with <think>...</think> blocks collapsed
-function MessageContent({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
-    const parts: { type: 'text' | 'think'; content: string; unfinished?: boolean }[] = []
-    const thinkRegex = /<think>([\s\S]*?)<\/think>/g
-    let lastIndex = 0
-    let match
 
-    while ((match = thinkRegex.exec(content)) !== null) {
-        if (match.index > lastIndex) {
-            parts.push({ type: 'text', content: content.slice(lastIndex, match.index) })
+
+// ─── Gemini Style Markdown Components ────────────────────────────────
+const MarkdownComponents: any = {
+    // 標題：稍微加粗，帶有層次感
+    h1: ({ children }: any) => <h1 className="text-xl font-bold mt-6 mb-2 text-foreground">{children}</h1>,
+    h2: ({ children }: any) => <h2 className="text-lg font-semibold mt-5 mb-2 text-foreground/90">{children}</h2>,
+    h3: ({ children }: any) => <h3 className="text-base font-semibold mt-4 mb-1 text-foreground/80">{children}</h3>,
+
+    // 段落：增加行高，讓閱讀不吃力
+    p: ({ children }: any) => <p className="leading-7 mb-4 last:mb-0 text-foreground/90">{children}</p>,
+
+    // 清單：Gemini 風格的間距
+    ul: ({ children }: any) => <ul className="list-disc pl-6 mb-4 space-y-2 text-foreground/90">{children}</ul>,
+    ol: ({ children }: any) => <ol className="list-decimal pl-6 mb-4 space-y-2 text-foreground/90">{children}</ol>,
+    li: ({ children }: any) => <li className="leading-7">{children}</li>,
+
+    // 引用：左側紫色/藍色漸層條
+    blockquote: ({ children }: any) => (
+        <blockquote className="border-l-4 border-primary/30 pl-4 py-1 my-4 italic bg-primary/5 rounded-r-lg text-muted-foreground">
+            {children}
+        </blockquote>
+    ),
+
+    // 表格：這是最難搞的部分，幫你做成 Gemini 的簡潔風
+    table: ({ children }: any) => (
+        <div className="my-6 overflow-x-auto rounded-xl border border-border/40 shadow-sm">
+            <table className="w-full border-collapse text-sm text-left">
+                {children}
+            </table>
+        </div>
+    ),
+    thead: ({ children }: any) => <thead className="bg-muted/50 border-b border-border/40">{children}</thead>,
+    th: ({ children }: any) => <th className="px-4 py-3 font-semibold text-foreground/80">{children}</th>,
+    td: ({ children }: any) => <td className="px-4 py-3 border-b border-border/20 last:border-0">{children}</td>,
+
+    // 連結：帶有底線動畫
+    a: ({ href, children }: any) => (
+        <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary font-medium underline underline-offset-4 hover:text-primary/80 transition-colors"
+        >
+            {children}
+        </a>
+    ),
+
+    // 行內程式碼：淡色背景與圓角
+    code: ({ node, inline, className, children, ...props }: any) => {
+        // 核心邏輯：將內容轉為字串並檢查是否有換行符
+        const content = String(children).replace(/\n$/, "");
+        const hasNewline = content.includes("\n");
+        const language = className?.replace(/language-/, "");
+
+        // 如果沒有換行符，且不是明確的語言標籤開頭，則判定為 Inline Code
+        if (!hasNewline && !language) {
+            return (
+                <code
+                    className="
+                        mx-1 rounded-md px-1.5 py-0.5 
+                        bg-muted/80 dark:bg-white/10 
+                        text-primary dark:text-primary-foreground 
+                        font-mono text-[0.85em] font-bold
+                        border border-border/40
+                        break-all
+                    "
+                    {...props}
+                >
+                    {content}
+                </code>
+            );
         }
-        parts.push({ type: 'think', content: match[1] })
-        lastIndex = match.index + match[0].length
-    }
 
-    // Handle unclosed <think> tag (still streaming)
-    const remaining = content.slice(lastIndex)
-    const openThink = remaining.indexOf('<think>')
-    if (openThink !== -1) {
-        if (openThink > 0) parts.push({ type: 'text', content: remaining.slice(0, openThink) })
-        parts.push({ type: 'think', content: remaining.slice(openThink + 7) + (isStreaming ? '▋' : ''), unfinished: !!isStreaming })
-    } else if (remaining) {
-        parts.push({ type: 'text', content: remaining })
+        // 否則，渲染為整塊的代碼卡片 (Block Code)
+        return (
+            <MarkdownCode
+                className={className}
+                language={language}
+                codeText={content}
+                {...props}
+            />
+        );
     }
+};
+// Render content with <think>...</think> blocks collapsed
+// function MessageContent({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
+//     const parts: { type: 'text' | 'think'; content: string; unfinished?: boolean }[] = []
+//     const thinkRegex = /<think>([\s\S]*?)<\/think>/g
+//     let lastIndex = 0
+//     let match
 
-    if (parts.length === 0 && isStreaming) {
-        parts.push({ type: 'text', content: '▋' })
-    }
+//     while ((match = thinkRegex.exec(content)) !== null) {
+//         if (match.index > lastIndex) {
+//             parts.push({ type: 'text', content: content.slice(lastIndex, match.index) })
+//         }
+//         parts.push({ type: 'think', content: match[1] })
+//         lastIndex = match.index + match[0].length
+//     }
+
+//     // Handle unclosed <think> tag (still streaming)
+//     const remaining = content.slice(lastIndex)
+//     const openThink = remaining.indexOf('<think>')
+//     if (openThink !== -1) {
+//         if (openThink > 0) parts.push({ type: 'text', content: remaining.slice(0, openThink) })
+//         parts.push({ type: 'think', content: remaining.slice(openThink + 7) + (isStreaming ? '▋' : ''), unfinished: !!isStreaming })
+//     } else if (remaining) {
+//         parts.push({ type: 'text', content: remaining })
+//     }
+
+//     if (parts.length === 0 && isStreaming) {
+//         parts.push({ type: 'text', content: '▋' })
+//     }
+
+//     return (
+//         <div>
+//             {parts.map((p, i) =>
+//                 p.type === 'think'
+//                     ? <ThinkBlock key={i} content={p.content} isStreaming={p.unfinished} />
+//                     : <div key={i} className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1.5 prose-pre:text-xs">
+//                         <ReactMarkdown
+//                             remarkPlugins={[remarkGfm]}
+//                             components={{ code: MarkdownCode }}
+//                         >
+//                             {p.content}
+//                         </ReactMarkdown>
+//                     </div>
+//             )}
+//         </div>
+//     )
+// }
+function MessageContent({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
+    // 使用 useMemo 解析內容，確保只有內容變動時才重新計算 parts
+    const parts = useMemo(() => {
+        const res: { type: 'text' | 'think'; content: string; unfinished?: boolean }[] = [];
+        const thinkRegex = /<think>([\s\S]*?)<\/think>/g;
+        let lastIndex = 0;
+        let match;
+
+        while ((match = thinkRegex.exec(content)) !== null) {
+            if (match.index > lastIndex) {
+                res.push({ type: 'text', content: content.slice(lastIndex, match.index) });
+            }
+            res.push({ type: 'think', content: match[1] });
+            lastIndex = match.index + match[0].length;
+        }
+
+        const remaining = content.slice(lastIndex);
+        const openThinkIndex = remaining.indexOf('<think>');
+
+        if (openThinkIndex !== -1) {
+            if (openThinkIndex > 0) res.push({ type: 'text', content: remaining.slice(0, openThinkIndex) });
+            res.push({
+                type: 'think',
+                content: remaining.slice(openThinkIndex + 7),
+                unfinished: true
+            });
+        } else if (remaining) {
+            res.push({ type: 'text', content: remaining });
+        }
+
+        return res;
+    }, [content]);
 
     return (
-        <div>
-            {parts.map((p, i) =>
-                p.type === 'think'
-                    ? <ThinkBlock key={i} content={p.content} isStreaming={p.unfinished} />
-                    : <div key={i} className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1.5 prose-pre:text-xs">
-                        <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            components={{ code: MarkdownCode }}
-                        >
-                            {p.content}
-                        </ReactMarkdown>
+        <div className="flex flex-col gap-3 overflow-anchor-auto min-h-[1.5em]">
+            {parts.map((p, i) => {
+                const isLast = i === parts.length - 1;
+                return (
+                    <div
+                        key={`${p.type}-${i}`}
+                        className={cn(
+                            "transition-opacity duration-300",
+                            isStreaming && isLast ? "opacity-100" : "opacity-100"
+                        )}
+                    >
+                        {p.type === 'think' ? (
+                            <ThinkBlock content={p.content} isStreaming={p.unfinished && isStreaming} />
+                        ) : (
+                            <div className="prose-container relative">
+                                <ReactMarkdown
+                                    remarkPlugins={[remarkGfm, remarkMath]}
+                                    rehypePlugins={[rehypeKatex]}
+                                    components={MarkdownComponents}
+                                >
+                                    {p.content}
+                                </ReactMarkdown>
+                                {/* 流式游標 (Gemini Style) */}
+                                {isStreaming && isLast && (
+                                    <span className="inline-block w-1.5 h-4 ml-1 bg-primary/60 rounded-full animate-pulse vertical-middle" />
+                                )}
+                            </div>
+                        )}
                     </div>
-            )}
+                );
+            })}
         </div>
-    )
+    );
 }
 
 // ─── Image / File Attachment Thumbnail ───────────────────────────────────
@@ -193,6 +351,7 @@ function AttachmentThumbnail({ attachment, onRemove, onClick }: {
     onClick?: () => void
 }) {
     const isImage = attachment.mimeType.startsWith('image/')
+    const isPdf = attachment.mimeType === 'application/pdf'
     const imgSrc = attachment.previewUrl || (attachment.base64 ? `data:${attachment.mimeType};base64,${attachment.base64}` : undefined)
 
     // Extract simple extension (.pdf, .csv, string)
@@ -207,6 +366,16 @@ function AttachmentThumbnail({ attachment, onRemove, onClick }: {
             onClick={onClick}>
             {isImage && imgSrc ? (
                 <img src={imgSrc} alt="attachment" className="w-full h-full object-cover" />
+            ) : isPdf && imgSrc ? (
+                <div className="w-full h-full relative bg-white overflow-hidden">
+                    <iframe
+                        src={`${imgSrc}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+                        className="w-full h-full border-0 pointer-events-none"
+                        scrolling="no"
+                        aria-hidden
+                    />
+                    <span className="absolute bottom-1 left-1.5 px-1.5 py-0.5 rounded-md bg-black/60 text-[9px] font-semibold text-white">PDF</span>
+                </div>
             ) : (
                 <div className="flex flex-col items-center justify-center w-full h-full p-2 text-muted-foreground bg-card">
                     <FileText className="h-6 w-6 md:h-8 md:w-8 mb-1 opacity-80" />
@@ -366,6 +535,9 @@ export function ChatInterface({
     onSessionCreated?: (id: string, title: string) => void  // called when a new session is created
 }) {
     const router = useRouter()
+    const pathname = usePathname()
+    const segments = pathname?.split('/').filter(Boolean) || []
+    const localePrefix = segments.length && segments[0].length <= 5 ? `/${segments[0]}` : ''
     const t = useTranslations('Home')
     const [sessionId, setSessionId] = useState(initialSessionId)
     // Track whether we have an active stream registered in the module store
@@ -564,11 +736,12 @@ export function ChatInterface({
         for (const file of Array.from(files)) {
             const mimeType = getMimeType(file)
             const base64 = await fileToBase64(file)
+            const canPreview = mimeType.startsWith('image/') || mimeType === 'application/pdf'
             newAtts.push({
                 name: file.name,
                 mimeType,
                 base64,
-                previewUrl: mimeType.startsWith('image/') ? URL.createObjectURL(file) : undefined
+                previewUrl: canPreview ? URL.createObjectURL(file) : undefined
             })
         }
         if (isEdit) setEditAttachments(prev => [...prev, ...newAtts])
@@ -648,6 +821,7 @@ export function ChatInterface({
             ]
             streamStore.register(tempKey, initialStoreMessages as any, ac)
             storeKeyRef.current = tempKey
+            window.dispatchEvent(new CustomEvent('chat:active', { detail: tempKey }))
 
             const res = await fetch("/api/chat/stream", {
                 method: "POST",
@@ -697,9 +871,11 @@ export function ChatInterface({
                             if (storeKeyRef.current && storeKeyRef.current !== realId) {
                                 streamStore.rekey(storeKeyRef.current, realId)
                                 storeKeyRef.current = realId
+                                window.dispatchEvent(new CustomEvent('chat:active', { detail: realId }))
                             }
                             setSessionId(realId)
-                            window.history.pushState({}, '', `/c/${realId}`)
+                            const targetPath = projectId ? `${localePrefix}/p/${projectId}/c/${realId}` : `${localePrefix}/c/${realId}`
+                            router.replace(targetPath)
                             onSessionCreated?.(realId, '')
                         } else if (ev.type === 'status') {
                             setStatusText(ev.data)
@@ -742,12 +918,16 @@ export function ChatInterface({
                     } catch { }
                 }
             }
-            // Stream fully closed — clean up store and refresh
-            if (storeKeyRef.current) {
-                streamStore.finish(storeKeyRef.current)
+            // Stream fully closed — clean up store and refresh only if we have a real session id
+            const finishedKey = storeKeyRef.current
+            if (finishedKey) {
+                streamStore.finish(finishedKey)
+                window.dispatchEvent(new CustomEvent('chat:active', { detail: null }))
                 storeKeyRef.current = null
+                if (!finishedKey.startsWith('pending-')) {
+                    router.refresh()
+                }
             }
-            router.refresh()
 
         } catch (e: any) {
             if (e.name === 'AbortError') {
@@ -756,6 +936,7 @@ export function ChatInterface({
                 setStatusText('')
                 if (storeKeyRef.current) {
                     streamStore.abort(storeKeyRef.current)
+                    window.dispatchEvent(new CustomEvent('chat:active', { detail: null }))
                     storeKeyRef.current = null
                 }
                 return
@@ -862,7 +1043,7 @@ export function ChatInterface({
                     } catch { }
                 }
             }
-            router.refresh()
+            if (sessionId) router.refresh()
         } catch { } finally {
             setIsGenerating(false)
             setStatusText("")
@@ -1027,99 +1208,6 @@ export function ChatInterface({
                 <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 bg-background/80 backdrop-blur sticky top-0 z-10 shrink-0">
 
                     {/* Dropdown model selector with hoverable submenus */}
-                    {/* <DropdownMenu
-                        open={modelPickerOpen}
-                        onOpenChange={(open) => {
-                            setModelPickerOpen(open)
-                            if (!open) setModelSearch("")
-                        }}
-                    >
-                        <DropdownMenuTrigger asChild>
-                            <button
-                                className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-muted/60 transition-colors group"
-                            >
-                                <div className="flex flex-col items-start">
-                                    <span className="text-sm font-semibold tracking-tight text-foreground/90 group-hover:text-foreground leading-tight">
-                                        {selectedModelLabel}
-                                    </span>
-                                    {selectedModelObj && (
-                                        <span className="text-[10px] text-muted-foreground leading-tight">{selectedModelObj.providerName}</span>
-                                    )}
-                                </div>
-                                <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground opacity-60" />
-                            </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start" sideOffset={8} className="w-80 p-0 max-h-[440px] overflow-y-auto">
-                            <div className="px-3 py-2 border-b border-border/60">
-                                <input
-                                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                                    placeholder="搜尋模型..."
-                                    value={modelSearch}
-                                    onChange={(e) => setModelSearch(e.target.value)}
-                                />
-                            </div>
-
-                            {filteredUserModels.length > 0 && (
-                                <DropdownMenuGroup className="py-1">
-                                    {filteredUserModels.map(m => (
-                                        <DropdownMenuItem
-                                            key={m.value}
-                                            onSelect={() => { handleModelChange(m.value); setModelPickerOpen(false) }}
-                                            className="flex items-center justify-between gap-2"
-                                        >
-                                            <div className="flex flex-col">
-                                                <span className="text-sm">{m.label}</span>
-                                                <span className="text-[10px] text-muted-foreground">{m.providerName}</span>
-                                            </div>
-                                            {selectedModel === m.value && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
-                                        </DropdownMenuItem>
-                                    ))}
-                                </DropdownMenuGroup>
-                            )}
-
-                            {filteredUserModels.length > 0 && groupEntries.length > 0 && <DropdownMenuSeparator />}
-
-                            {groupEntries.length > 0 && (
-                                <DropdownMenuGroup className="max-h-[320px] overflow-y-auto py-1">
-                                    {groupEntries.map(({ gName, filtered, total }) => (
-                                        <DropdownMenuSub key={gName}>
-                                            <DropdownMenuSubTrigger className="flex items-center justify-between gap-3">
-                                                <div className="flex flex-col">
-                                                    <span className="text-sm font-medium">{gName}</span>
-                                                    <span className="text-[10px] text-muted-foreground">{filtered.length} / {total} 模型</span>
-                                                </div>
-                                            </DropdownMenuSubTrigger>
-                                            <DropdownMenuPortal>
-                                                <DropdownMenuSubContent className="w-64 rounded-lg">
-                                                    {filtered.length > 0 ? filtered.map(m => (
-                                                        <DropdownMenuItem
-                                                            key={m.value}
-                                                            onSelect={() => { handleModelChange(m.value); setModelPickerOpen(false) }}
-                                                            className="flex items-center justify-between gap-2"
-                                                        >
-                                                            <div className="flex flex-col">
-                                                                <span className="text-sm">{m.label}</span>
-                                                                <span className="text-[10px] text-muted-foreground">{m.providerName}</span>
-                                                            </div>
-                                                            {selectedModel === m.value && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
-                                                        </DropdownMenuItem>
-                                                    )) : (
-                                                        <div className="px-3 py-2 text-xs text-muted-foreground">此群組無符合的模型</div>
-                                                    )}
-                                                </DropdownMenuSubContent>
-                                            </DropdownMenuPortal>
-                                        </DropdownMenuSub>
-                                    ))}
-                                </DropdownMenuGroup>
-                            )}
-
-                            {!hasAnyMatch && (
-                                <div className="py-6 text-center text-sm text-muted-foreground">
-                                    找不到符合的模型
-                                </div>
-                            )}
-                        </DropdownMenuContent>
-                    </DropdownMenu> */}
                     <DropdownMenu
                         open={modelPickerOpen}
                         onOpenChange={(open) => {
@@ -1301,12 +1389,18 @@ export function ChatInterface({
                 >
                     <div className={`mx-auto w-full space-y-8 py-8 ${selectedPreviewAttachment ? 'px-6 max-w-full' : 'px-4 max-w-3xl'}`}>
                         {messages.length === 0 && !isGenerating && (
-                            <div className="flex flex-col items-center justify-center h-full min-h-[50vh] gap-4 text-muted-foreground">
-                                <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
-                                    <Brain className="h-8 w-8 text-muted-foreground/50" />
-                                </div>
-                                <p className="text-sm font-medium flex items-center gap-1">
-                                    <DynamicGreeting className="inline-block" />, {t('subtitle')}
+                            <div className="flex flex-col items-center justify-center min-h-[30vh] text-center animate-in fade-in slide-in-from-bottom-4 duration-1000">
+                                {/* <div className="relative mb-6">
+                                    <div className="absolute inset-0 blur-3xl bg-gradient-to-tr from-blue-500/10 via-purple-500/10 to-pink-500/10 rounded-full" />
+                                    <div className="relative w-20 h-20 rounded-2xl bg-gradient-to-br from-background to-muted border border-border flex items-center justify-center shadow-2xl">
+                                        <Brain className="h-10 w-10 text-primary animate-pulse" />
+                                    </div>
+                                </div> */}
+                                <h1 className="mt-52 text-4xl font-semibold tracking-tight mb-3 bg-gradient-to-r from-foreground via-foreground/80 to-muted-foreground bg-clip-text">
+                                    <DynamicGreeting />
+                                </h1>
+                                <p className="text-lg text-muted-foreground max-w-md leading-relaxed">
+                                    {t('subtitle') || '今天我能幫你處理什麼？'}
                                 </p>
                             </div>
                         )}
