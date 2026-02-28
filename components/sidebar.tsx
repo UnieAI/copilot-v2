@@ -14,6 +14,7 @@ import {
 import { useTheme } from "next-themes"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 
 import {
     Sidebar as ShadcnSidebar,
@@ -61,6 +62,9 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
     // Move-to-folder menu
     const [moveMenuId, setMoveMenuId] = useState<string | null>(null)
 
+    // Confirm delete project dialog
+    const [confirmDeleteProject, setConfirmDeleteProject] = useState<{ id: string; name: string } | null>(null)
+
     const renameInputRef = useRef<HTMLInputElement>(null)
     const renameFolderInputRef = useRef<HTMLInputElement>(null)
 
@@ -71,6 +75,13 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
         window.addEventListener('sidebar:refresh', handler)
         return () => window.removeEventListener('sidebar:refresh', handler)
     }, [])
+
+    // Auto-collapse sidebar when entering project pages
+    useEffect(() => {
+        if (pathname?.includes('/p/')) {
+            setOpen(false)
+        }
+    }, [pathname])
 
     // Close move menu on outside click
     useEffect(() => {
@@ -109,7 +120,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
         try {
             await fetch(`/api/chat/${id}`, { method: 'DELETE' })
             setSessions(prev => prev.filter(s => s.id !== id))
-            if (pathname?.includes(id)) router.push('/')
+            if (pathname?.includes(id)) router.push('/chat')
             toast.success("對話已刪除")
         } catch { toast.error("刪除失敗") }
     }
@@ -164,11 +175,23 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
 
     const deleteProject = async (id: string, e: React.MouseEvent) => {
         e.preventDefault(); e.stopPropagation()
-        if (!confirm('確定要刪除此資料夾嗎？資料夾內的對話不會被刪除。')) return
+        const project = projects.find(p => p.id === id)
+        setConfirmDeleteProject({ id, name: project?.name || '此資料夾' })
+    }
+
+    const confirmDeleteProjectAction = async () => {
+        if (!confirmDeleteProject) return
+        const { id } = confirmDeleteProject
+        setConfirmDeleteProject(null)
         try {
             await fetch(`/api/chat/projects/${id}`, { method: 'DELETE' })
             setProjects(prev => prev.filter(p => p.id !== id))
-            setSessions(prev => prev.map(s => s.projectId === id ? { ...s, projectId: null } : s))
+            // Remove sessions that belonged to this project
+            setSessions(prev => prev.filter(s => s.projectId !== id))
+            // If currently viewing a session in this project, go home
+            const sessionInProject = sessions.find(s => s.projectId === id && pathname?.includes(s.id))
+            if (sessionInProject || pathname?.includes(`/p/${id}`)) router.push('/chat')
+            toast.success("資料夾及所有對話已刪除")
         } catch { toast.error("刪除失敗") }
     }
 
@@ -200,7 +223,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
             key={s.id}
             className={`group relative flex items-center gap-1.5 rounded-[12px] px-3 py-2 cursor-pointer transition-colors text-sm
                 ${currentSessionId === s.id ? 'bg-muted/80 text-foreground font-medium' : 'hover:bg-muted/50 text-muted-foreground hover:text-foreground'}`}
-            onClick={() => { if (renamingId !== s.id) router.push(`/c/${s.id}`) }}
+            onClick={() => { if (renamingId !== s.id) router.push(s.projectId ? `/p/${s.projectId}/c/${s.id}` : `/c/${s.id}`) }}
         >
             <MessageSquare className="h-3 w-3 shrink-0 opacity-50" />
 
@@ -260,7 +283,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
         </div>
     )
 
-    return (
+    return (<>
         <ShadcnSidebar
             collapsible="icon"
             className="border-none !bg-transparent [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']"
@@ -270,17 +293,24 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                 <div className="relative flex h-[32px] items-center">
                     {/* Logo - fixed position on left */}
                     <div className={cn(
-                        "absolute flex items-center justify-center group/logo left-6"
+                        "absolute flex items-center justify-center group/logo",
+                        state === 'expanded' ? "left-6" : "left-1"
                     )}>
-                        <Link href="/" onClick={() => isMobile && setOpenMobile(false)} className="flex items-center gap-2 justify-center">
+                        <button
+                            onClick={() => {
+                                state === 'expanded' ? router.push('/') : window.location.href = '/chat'
+                                isMobile && setOpenMobile(false)
+                            }}
+                            className="flex items-center gap-2 justify-center"
+                        >
                             <div className={cn(
                                 "flex-shrink-0 h-6 w-6 rounded bg-foreground text-background flex items-center justify-center text-xs font-bold transition-[transform,opacity] duration-300 ease-out hover:rotate-180 hover:duration-700 transform-gpu",
                                 state === 'collapsed' && "group-hover/logo:opacity-0 group-hover/logo:scale-90"
                             )}>U</div>
-                            {state !== 'collapsed' && (
+                            {state === 'expanded' && (
                                 <span className="text-sm font-semibold tracking-tight transition-opacity duration-300">UnieAI</span>
                             )}
-                        </Link>
+                        </button>
                         {/* Expand button - only shows on hover when collapsed */}
                         {state === 'collapsed' && (
                             <button
@@ -338,9 +368,12 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                     )}
                 >
                     <div className="w-full flex flex-col items-center space-y-3">
-                        <Link href="/chat" className="h-10 w-10 flex items-center justify-center rounded-[14px] border border-border/40 bg-background hover:bg-muted/50 shadow-sm transition-all focus:ring-2 focus:ring-ring focus:outline-none">
+                        <button
+                            onClick={() => { window.location.href = '/chat' }}
+                            className="h-10 w-10 flex items-center justify-center rounded-[14px] border border-border/40 bg-background hover:bg-muted/50 shadow-sm transition-all focus:ring-2 focus:ring-ring focus:outline-none"
+                        >
                             <Plus className="h-4 w-4" />
-                        </Link>
+                        </button>
                         <button onClick={createProject} className="h-10 w-10 flex items-center justify-center rounded-md hover:bg-card hover:border-[1.5px] hover:border-border text-muted-foreground">
                             <FolderPlus className="h-4 w-4" />
                         </button>
@@ -364,17 +397,18 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                     <div className="px-6 pt-4 space-y-4">
                         {/* New Chat Button */}
                         <div className="w-full">
-                            <Link href="/chat">
-                                <button className="w-full flex items-center justify-between h-11 px-4 rounded-[16px] border border-border/40 shadow-sm bg-background hover:bg-muted/50 hover:shadow-md text-sm font-medium transition-all group/new-chat focus:outline-none focus:ring-2 focus:ring-ring">
-                                    <div className="flex items-center gap-2">
-                                        <Plus className="h-4 w-4" />
-                                        新對話
-                                    </div>
-                                    <button onClick={(e) => { e.preventDefault(); createProject() }} className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted opacity-0 group-hover/new-chat:opacity-100 transition-opacity" title="新增資料夾">
-                                        <FolderPlus className="h-4 w-4" />
-                                    </button>
+                            <a
+                                onClick={() => { window.location.href = '/chat' }} // 一定要用 window.location.href = '/chat' 不要用router.push或Link herf
+                                className="cursor-pointer w-full flex items-center justify-between h-11 px-4 rounded-[16px] border border-border/40 shadow-sm bg-background hover:bg-muted/50 hover:shadow-md text-sm font-medium transition-all group/new-chat focus:outline-none focus:ring-2 focus:ring-ring"
+                            >
+                                <div className="flex items-center gap-2">
+                                    <Plus className="h-4 w-4" />
+                                    新對話
+                                </div>
+                                <button onClick={(e) => { e.stopPropagation(); createProject() }} className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted opacity-0 group-hover/new-chat:opacity-100 transition-opacity" title="新增資料夾">
+                                    <FolderPlus className="h-4 w-4" />
                                 </button>
-                            </Link>
+                            </a>
                         </div>
                     </div>
 
@@ -387,13 +421,18 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                                     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
                                 const isOpen = !collapsedFolders.has(p.id)
                                 const FolderIcon = isOpen ? FolderOpen : Folder
+                                const isProjectActive = pathname?.includes(`/p/${p.id}`)
 
                                 return (
                                     <div key={p.id}>
                                         {/* Folder row */}
-                                        <div className="group flex items-center gap-1.5 rounded-[12px] px-3 py-2 hover:bg-muted/50 transition-colors cursor-pointer"
-                                            onClick={() => toggleFolder(p.id)}>
-                                            <button onClick={e => { e.stopPropagation(); toggleFolder(p.id) }} className="text-muted-foreground">
+                                        <div className={`group flex items-center gap-1.5 rounded-[12px] px-3 py-2 hover:bg-muted/50 transition-colors ${isProjectActive ? 'bg-muted/80' : ''
+                                            }`}>
+                                            {/* Chevron — toggles expand/collapse */}
+                                            <button
+                                                onClick={e => { e.stopPropagation(); toggleFolder(p.id) }}
+                                                className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                                            >
                                                 {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                                             </button>
                                             <FolderIcon className="h-3.5 w-3.5 text-amber-500 shrink-0" />
@@ -409,7 +448,13 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                                                     className="flex-1 text-xs bg-transparent outline-none border-b border-primary"
                                                 />
                                             ) : (
-                                                <span className="flex-1 text-xs font-medium truncate">{p.name}</span>
+                                                // Folder name — navigates to /p/[id]
+                                                <span
+                                                    className="flex-1 text-xs font-medium truncate cursor-pointer hover:text-foreground"
+                                                    onClick={() => router.push(`/p/${p.id}`)}
+                                                >
+                                                    {p.name}
+                                                </span>
                                             )}
 
                                             <span className="text-[10px] text-muted-foreground/60 shrink-0">{folderSessions.length}</span>
@@ -519,5 +564,20 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
 
             <SidebarRail />
         </ShadcnSidebar>
-    )
+
+        {/* Custom Confirm Delete Dialog */}
+        {
+            confirmDeleteProject && (
+                <ConfirmDialog
+                    title={`刪除「${confirmDeleteProject.name}」`}
+                    message="確定要刪除此資料夾嗎？資料夾內的所有對話也會一併刪除，此操作無法復原。"
+                    confirmLabel="刪除"
+                    cancelLabel="取消"
+                    variant="danger"
+                    onConfirm={confirmDeleteProjectAction}
+                    onCancel={() => setConfirmDeleteProject(null)}
+                />
+            )
+        }
+    </>)
 }

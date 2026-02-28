@@ -1,25 +1,33 @@
 import { db } from "@/lib/db"
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
-import { userProviders, userPreferences, chatMessages } from "@/lib/db/schema"
+import { chatProjects, chatSessions, userProviders, userPreferences } from "@/lib/db/schema"
 import { eq, and } from "drizzle-orm"
-import { ChatInterface } from "@/components/chat/chat-interface"
+import { ProjectPageClient } from "@/components/project/project-page-client"
 
-export default async function ChatPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
+export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
     const session = await auth()
     if (!session?.user?.id) redirect('/login')
 
     const userId = session.user.id as string
-    const params = await searchParams
-    const sessionId = params.id as string | undefined
-    const initialQuery = params.q as string | undefined
+    const { id: projectId } = await params
 
-    // Fetch enabled providers with their model lists
+    // Verify the project belongs to this user
+    const project = await db.query.chatProjects.findFirst({
+        where: and(eq(chatProjects.id, projectId), eq(chatProjects.userId, userId)),
+    })
+    if (!project) redirect('/chat')
+
+    // Get all chats in this project, sorted by newest first
+    const projectSessions = await db.query.chatSessions.findMany({
+        where: and(eq(chatSessions.projectId, projectId), eq(chatSessions.userId, userId)),
+        orderBy: (s, { desc }) => [desc(s.updatedAt)],
+    })
+
+    // Get enabled providers for model selector
     const providers = await db.query.userProviders.findMany({
         where: and(eq(userProviders.userId, userId), eq(userProviders.enable, 1)),
     })
-
-    // Build flat model option list: value = "{prefix}-{modelId}"
     const availableModels = providers.flatMap(p => {
         const models = Array.isArray(p.modelList) ? (p.modelList as any[]) : []
         return models.map((m: any) => ({
@@ -30,12 +38,10 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
         }))
     })
 
-    // Fetch user preference for previously selected model
+    // User preference for model
     const pref = await db.query.userPreferences.findFirst({
         where: eq(userPreferences.userId, userId),
     })
-
-    // Determine initial model value: preference → first available
     let initialSelectedModel = availableModels[0]?.value || ""
     if (pref?.selectedModel && pref?.selectedProviderPrefix) {
         const compositeValue = `${pref.selectedProviderPrefix}-${pref.selectedModel}`
@@ -44,25 +50,16 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
         }
     }
 
-    // Load messages for the current session (if provided)
-    let initialMessages: any[] = []
-    if (sessionId) {
-        initialMessages = await db.query.chatMessages.findMany({
-            where: and(
-                eq(chatMessages.sessionId, sessionId),
-                eq(chatMessages.userId, userId)
-            ),
-            orderBy: (m, { asc }) => [asc(m.createdAt)]
-        })
-    }
-
     return (
-        <ChatInterface
-            sessionId={sessionId}
+        <ProjectPageClient
+            project={{ id: project.id, name: project.name }}
+            initialSessions={projectSessions.map(s => ({
+                id: s.id,
+                title: s.title,
+                updatedAt: String(s.updatedAt),
+            }))}
             availableModels={availableModels}
             initialSelectedModel={initialSelectedModel}
-            initialMessages={initialMessages}
-            initialQuery={initialQuery as string | undefined}
         />
     )
 }

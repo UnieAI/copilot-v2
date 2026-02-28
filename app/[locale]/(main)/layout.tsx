@@ -2,10 +2,13 @@ import { Sidebar } from "@/components/sidebar"
 import { SidebarProvider } from "@/components/ui/sidebar"
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
+import { SetupChecker } from "@/components/setup-checker"
 
 export default async function MainLayout({ children }: { children: React.ReactNode }) {
     const session = await auth()
     if (!session?.user) redirect('/login')
+
+    const userRole = (session.user as any).role as string ?? "user"
 
     return (
         <div className="flex h-screen w-screen overflow-hidden bg-muted/20 dark:bg-background/95">
@@ -17,6 +20,8 @@ export default async function MainLayout({ children }: { children: React.ReactNo
                     </div>
                 </main>
             </SidebarProvider>
+            <SetupChecker userRole={userRole} />
         </div>
     )
 }
+

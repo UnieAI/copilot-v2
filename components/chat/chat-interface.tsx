@@ -10,8 +10,7 @@ import {
     Brain, FileText, Bot, User
 } from "lucide-react"
 import { toast } from "sonner"
-import { useTranslations } from "next-intl"
-import { DynamicGreeting } from "@/components/ui/dynamic-greeting"
+import { streamStore } from "@/lib/stream-store"
 
 // ─── Types ─────────────────────────────────────────────────────────────
 type Attachment = {
@@ -211,21 +210,36 @@ function StatusBadge({ text }: { text: string }) {
     )
 }
 
+// ─── Model Type ─────────────────────────────────────────────────────────
+type AvailableModel = {
+    value: string      // "{prefix}-{modelId}"
+    label: string      // modelId only
+    providerName: string
+    providerPrefix: string
+}
+
 // ─── Main Chat Interface ─────────────────────────────────────────────────
 export function ChatInterface({
     sessionId: initialSessionId,
     availableModels,
+    initialSelectedModel,
     initialMessages = [],
-    initialQuery
+    projectId,
+    onSessionCreated,
 }: {
     sessionId?: string
-    availableModels: string[]
+    availableModels: AvailableModel[]
+    initialSelectedModel?: string
     initialMessages?: DBMessage[]
-    initialQuery?: string
+    projectId?: string          // if set, new sessions are placed in this project
+    onSessionCreated?: (id: string, title: string) => void  // called when a new session is created
 }) {
     const router = useRouter()
     const t = useTranslations('Home')
     const [sessionId, setSessionId] = useState(initialSessionId)
+    // Track whether we have an active stream registered in the module store
+    const storeKeyRef = useRef<string | null>(null)
+    const abortControllerRef = useRef<AbortController | null>(null)
     const [messages, setMessages] = useState<UIMessage[]>(
         initialMessages.map(m => ({
             id: m.id,
@@ -236,7 +250,7 @@ export function ChatInterface({
         }))
     )
     const [input, setInput] = useState("")
-    const [selectedModel, setSelectedModel] = useState(availableModels[0] || "")
+    const [selectedModel, setSelectedModel] = useState(initialSelectedModel || availableModels[0]?.value || "")
     const [systemPrompt, setSystemPrompt] = useState("")
     const [showSystemPrompt, setShowSystemPrompt] = useState(false)
     const [isGenerating, setIsGenerating] = useState(false)
@@ -251,21 +265,134 @@ export function ChatInterface({
     const [selectedPreviewAttachment, setSelectedPreviewAttachment] = useState<Attachment | null>(null)
 
     const messagesEndRef = useRef<HTMLDivElement>(null)
+    const scrollContainerRef = useRef<HTMLDivElement>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
     const editFileInputRef = useRef<HTMLInputElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const hasFiredInitialQuery = useRef(false)
 
+    // Scroll state — mirrors the pattern from step2.tsx
+    const [isAutoScrolling, setIsAutoScrolling] = useState(true)
+    const [showScrollButton, setShowScrollButton] = useState(false)
+
+    // IntersectionObserver: show/hide the scroll button based on messagesEndRef visibility
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+        const chatContainer = scrollContainerRef.current
+        const messagesEnd = messagesEndRef.current
+        if (!chatContainer || !messagesEnd) return
+
+        const checkScrollPosition = (isEndVisible?: boolean) => {
+            const { scrollHeight, scrollTop, clientHeight } = chatContainer
+            const distanceToBottom = scrollHeight - scrollTop - clientHeight
+            const isAtBottom = Math.abs(distanceToBottom) < 1
+
+            const containerRect = chatContainer.getBoundingClientRect()
+            const endRect = messagesEnd.getBoundingClientRect()
+            const computedVisible =
+                typeof isEndVisible !== "undefined"
+                    ? isEndVisible
+                    : endRect.top >= containerRect.top && endRect.bottom <= containerRect.bottom
+
+            setShowScrollButton(computedVisible ? false : !isAtBottom)
+        }
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                entries.forEach((entry) => checkScrollPosition(entry.isIntersecting))
+            },
+            { root: chatContainer, threshold: 0.1 }
+        )
+        observer.observe(messagesEnd)
+
+        const handleScroll = () => checkScrollPosition()
+        chatContainer.addEventListener("scroll", handleScroll)
+
+        const resizeObserver = new ResizeObserver(() => checkScrollPosition())
+        resizeObserver.observe(chatContainer)
+
+        checkScrollPosition()
+
+        return () => {
+            chatContainer.removeEventListener("scroll", handleScroll)
+            resizeObserver.disconnect()
+            observer.disconnect()
+        }
     }, [messages, statusText])
 
+    // rAF loop + wheel listener: the core auto-scroll engine
+    useEffect(() => {
+        if (!isAutoScrolling) return
+
+        const chatContainer = scrollContainerRef.current
+        if (!chatContainer) return
+
+        let animationFrameId: number
+
+        // Use direct scrollTop assignment — calling scrollIntoView({ behavior: "smooth" })
+        // on every frame starts a new animation each frame and causes severe jitter.
+        // rAF at ~60fps is already visually smooth without a CSS animation.
+        const tick = () => {
+            chatContainer.scrollTop = chatContainer.scrollHeight
+            animationFrameId = requestAnimationFrame(tick)
+        }
+
+        const handleWheel = (event: WheelEvent) => {
+            if (chatContainer.contains(event.target as Node)) {
+                setIsAutoScrolling(false)
+            }
+        }
+
+        animationFrameId = requestAnimationFrame(tick)
+        window.addEventListener("wheel", handleWheel, { passive: true })
+
+        return () => {
+            cancelAnimationFrame(animationFrameId)
+            window.removeEventListener("wheel", handleWheel)
+        }
+    }, [isAutoScrolling])
+
+    // Start auto-scroll when generation begins; stop when it ends
+    const prevIsGeneratingRef = useRef(false)
+    useEffect(() => {
+        if (isGenerating && !prevIsGeneratingRef.current) {
+            setIsAutoScrolling(true)
+        }
+        prevIsGeneratingRef.current = isGenerating
+    }, [isGenerating])
 
     useEffect(() => {
         if (availableModels.length > 0 && !selectedModel) {
-            setSelectedModel(availableModels[0])
+            setSelectedModel(availableModels[0].value)
         }
     }, [availableModels])
+
+    // ── Mount: abort orphaned streams (Bug 1) & reconnect to live stream (Bug 2) ──
+    useEffect(() => {
+        // Abort any stream that isn't for this session (handles "navigate to /chat" case)
+        streamStore.abortAllExcept(initialSessionId)
+
+        // If there's already a live stream for this session, subscribe to it
+        if (initialSessionId && streamStore.isActive(initialSessionId)) {
+            const snap = streamStore.getSnapshot(initialSessionId)
+            if (snap) {
+                setMessages(snap.messages as UIMessage[])
+                setIsGenerating(snap.isGenerating)
+            }
+            const unsub = streamStore.subscribe(initialSessionId, (msgs, generating, status) => {
+                setMessages(msgs as UIMessage[])
+                setIsGenerating(generating)
+                setStatusText(status)
+            })
+            storeKeyRef.current = initialSessionId
+            return unsub  // cleanup: just removes listener, stream stays alive
+        }
+
+        // Cleanup on unmount: if a stream is registered under our key, just remove listeners
+        return () => {
+            // nothing to do — streamStore keeps the stream alive for reconnect
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []) // intentionally only on mount
 
     useEffect(() => {
         if (textareaRef.current) {
@@ -307,6 +434,19 @@ export function ChatInterface({
             return
         }
 
+        // Save model preference (optimistic, non-blocking)
+        const selModelObj = availableModels.find(m => m.value === selectedModel)
+        if (selModelObj) {
+            fetch('/api/user/preference', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    selectedModel: selModelObj.label,
+                    selectedProviderPrefix: selModelObj.providerPrefix,
+                }),
+            }).catch(() => { })
+        }
+
         setIsGenerating(true)
         setStatusText("正在連線...")
 
@@ -337,9 +477,24 @@ export function ChatInterface({
         conversationHistory.push({ role: 'user', content })
 
         try {
+            // Create AbortController for this stream
+            const ac = new AbortController()
+            abortControllerRef.current = ac
+
+            // Use a temporary key for the store before we know the real sessionId
+            const tempKey = sessionId || `pending-${Date.now()}`
+            const initialStoreMessages: UIMessage[] = [
+                ...historyMessages,
+                userMsg,
+                { id: aiMsgId, role: 'assistant' as const, content: '', isStreaming: true }
+            ]
+            streamStore.register(tempKey, initialStoreMessages as any, ac)
+            storeKeyRef.current = tempKey
+
             const res = await fetch("/api/chat/stream", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
+                signal: ac.signal,
                 body: JSON.stringify({
                     messages: conversationHistory,
                     sessionId: sessionId || null,
@@ -347,6 +502,7 @@ export function ChatInterface({
                     systemPrompt: systemPrompt || null,
                     attachments: allAtts,
                     editMessageId: safeEditId || null,
+                    projectId: projectId || null,
                 })
             })
 
@@ -378,42 +534,78 @@ export function ChatInterface({
                     try {
                         const ev = JSON.parse(dataStr)
                         if (ev.type === 'session_id') {
-                            setSessionId(ev.data)
-                            window.history.pushState({}, '', `/c/${ev.data}`)
+                            const realId = ev.data as string
+                            // Rekey the store entry from temp key to real session ID
+                            if (storeKeyRef.current && storeKeyRef.current !== realId) {
+                                streamStore.rekey(storeKeyRef.current, realId)
+                                storeKeyRef.current = realId
+                            }
+                            setSessionId(realId)
+                            window.history.pushState({}, '', `/c/${realId}`)
+                            onSessionCreated?.(realId, '')
                         } else if (ev.type === 'status') {
                             setStatusText(ev.data)
+                            if (storeKeyRef.current) streamStore.update(storeKeyRef.current, e => { e.statusText = ev.data })
                         } else if (ev.type === 'chunk') {
                             setMessages(prev => prev.map(m =>
                                 m.id === aiMsgId ? { ...m, content: m.content + ev.data } : m
                             ))
+                            if (storeKeyRef.current) streamStore.update(storeKeyRef.current, e => {
+                                const msg = e.messages.find(m => m.id === aiMsgId)
+                                if (msg) msg.content += ev.data
+                            })
                         } else if (ev.type === 'error') {
                             toast.error(ev.data)
                         } else if (ev.type === 'title_updated') {
                             window.dispatchEvent(new CustomEvent('sidebar:refresh'))
+                            if (ev.data?.sessionId && ev.data?.title) {
+                                onSessionCreated?.(ev.data.sessionId, ev.data.title)
+                            }
                         } else if (ev.type === 'done') {
                             aiMsgDbId = ev.data?.messageId
                             userMsgDbId = ev.data?.userMessageId
-                            // Unlock UI immediately — don't wait for stream close (title generation)
                             setMessages(prev => prev.map(m => {
                                 if (m.id === aiMsgId) return { ...m, isStreaming: false, dbId: aiMsgDbId }
                                 if (m.id === tempUserMsgId) return { ...m, dbId: userMsgDbId }
                                 return m
                             }))
                             setIsGenerating(false)
-                            setStatusText("")
+                            setStatusText('')
+                            // Update store messages to mark done
+                            if (storeKeyRef.current) streamStore.update(storeKeyRef.current, e => {
+                                const aiMsg = e.messages.find(m => m.id === aiMsgId)
+                                if (aiMsg) { aiMsg.isStreaming = false; aiMsg.dbId = aiMsgDbId }
+                                const usrMsg = e.messages.find(m => m.id === tempUserMsgId)
+                                if (usrMsg) usrMsg.dbId = userMsgDbId
+                                e.isGenerating = false
+                                e.statusText = ''
+                            })
                         }
                     } catch { }
                 }
             }
-            // Stream fully closed — refresh to sync any server state
+            // Stream fully closed — clean up store and refresh
+            if (storeKeyRef.current) {
+                streamStore.finish(storeKeyRef.current)
+                storeKeyRef.current = null
+            }
             router.refresh()
 
         } catch (e: any) {
-            toast.error("串流連線失敗: " + e.message)
+            if (e.name === 'AbortError') {
+                // User navigated away — clean up silently
+                setIsGenerating(false)
+                setStatusText('')
+                if (storeKeyRef.current) {
+                    streamStore.abort(storeKeyRef.current)
+                    storeKeyRef.current = null
+                }
+                return
+            }
+            toast.error('串流連線失敗: ' + e.message)
         } finally {
-            // Ensure we always clean up even if done event was never received
             setIsGenerating(false)
-            setStatusText("")
+            setStatusText('')
         }
     }, [isGenerating, messages, sessionId, selectedModel, systemPrompt, router])
 
@@ -554,6 +746,40 @@ export function ChatInterface({
     }
 
     const [showModelDropdown, setShowModelDropdown] = useState(false)
+    // Derived: selected model display label
+    const selectedModelObj = availableModels.find(m => m.value === selectedModel)
+    const selectedModelLabel = selectedModelObj ? `${selectedModelObj.label}` : (selectedModel || "未選擇模型")
+
+    // Called when user picks a model from the dropdown
+    const handleModelChange = (modelValue: string) => {
+        setSelectedModel(modelValue)
+        setShowModelDropdown(false)
+
+        const modelObj = availableModels.find(m => m.value === modelValue)
+        if (!modelObj) return
+
+        // Persist user global preference (non-blocking)
+        fetch('/api/user/preference', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                selectedModel: modelObj.label,
+                selectedProviderPrefix: modelObj.providerPrefix,
+            }),
+        }).catch(() => { })
+
+        // If in an existing session, also update the session's model record
+        if (sessionId) {
+            fetch(`/api/chat/${sessionId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    modelName: modelObj.label,
+                    providerPrefix: modelObj.providerPrefix,
+                }),
+            }).catch(() => { })
+        }
+    }
 
     const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault()
@@ -569,7 +795,7 @@ export function ChatInterface({
 
     return (
         <div className="flex h-full w-full bg-background overflow-hidden relative">
-            <div className={`flex flex-col h-full bg-background transition-all duration-300 ease-in-out ${selectedPreviewAttachment ? 'w-1/2 min-w-0 border-r border-border' : 'w-full'} `}>
+            <div className={`relative flex flex-col h-full bg-background transition-all duration-300 ease-in-out ${selectedPreviewAttachment ? 'w-1/2 min-w-0 border-r border-border' : 'w-full'} `}>
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 bg-background/80 backdrop-blur sticky top-0 z-10 shrink-0">
 
@@ -579,9 +805,14 @@ export function ChatInterface({
                             onClick={() => setShowModelDropdown(!showModelDropdown)}
                             className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-muted/60 transition-colors group"
                         >
-                            <span className="text-sm font-semibold tracking-tight text-foreground/90 group-hover:text-foreground">
-                                {selectedModel || "未選擇模型"}
-                            </span>
+                            <div className="flex flex-col items-start">
+                                <span className="text-sm font-semibold tracking-tight text-foreground/90 group-hover:text-foreground leading-tight">
+                                    {selectedModelLabel}
+                                </span>
+                                {selectedModelObj && (
+                                    <span className="text-[10px] text-muted-foreground leading-tight">{selectedModelObj.providerName}</span>
+                                )}
+                            </div>
                             <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform duration-200 ${showModelDropdown ? 'rotate-180' : ''}`} />
                         </button>
 
@@ -602,17 +833,17 @@ export function ChatInterface({
                                             ) : (
                                                 availableModels.map(m => (
                                                     <button
-                                                        key={m}
-                                                        onClick={() => {
-                                                            setSelectedModel(m)
-                                                            setShowModelDropdown(false)
-                                                        }}
+                                                        key={m.value}
+                                                        onClick={() => handleModelChange(m.value)}
                                                         className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center justify-between
-                                                            ${selectedModel === m ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted text-foreground/80 hover:text-foreground'}
+                                                            ${selectedModel === m.value ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted text-foreground/80 hover:text-foreground'}
                                                         `}
                                                     >
-                                                        {m}
-                                                        {selectedModel === m && <Check className="h-4 w-4" />}
+                                                        <div className="flex flex-col items-start">
+                                                            <span>{m.label}</span>
+                                                            <span className="text-[10px] text-muted-foreground">{m.providerName}</span>
+                                                        </div>
+                                                        {selectedModel === m.value && <Check className="h-4 w-4 shrink-0" />}
                                                     </button>
                                                 ))
                                             )}
@@ -647,7 +878,10 @@ export function ChatInterface({
                 )}
 
                 {/* Messages Container */}
-                <div className="flex-1 overflow-y-auto w-full">
+                <div
+                    ref={scrollContainerRef}
+                    className="flex-1 overflow-y-auto w-full relative"
+                >
                     <div className={`mx-auto w-full space-y-8 py-8 ${selectedPreviewAttachment ? 'px-6 max-w-full' : 'px-4 max-w-3xl'}`}>
                         {messages.length === 0 && !isGenerating && (
                             <div className="flex flex-col items-center justify-center h-full min-h-[50vh] gap-4 text-muted-foreground">
@@ -778,6 +1012,23 @@ export function ChatInterface({
                         <StatusBadge text={statusText} />
                         <div ref={messagesEndRef} className="h-4" />
                     </div>
+
+                    {/* Scroll to bottom floating button — sticky inside the scroll container */}
+                    {showScrollButton && (
+                        <div className="sticky bottom-4 flex justify-center w-full pointer-events-none z-20">
+                            <button
+                                onClick={() => {
+                                    // One-shot smooth scroll to bottom, then re-enable rAF auto-scroll
+                                    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+                                    setTimeout(() => setIsAutoScrolling(true), 500)
+                                }}
+                                className="pointer-events-auto flex items-center justify-center h-8 w-8 rounded-full bg-background/80 backdrop-blur border border-border shadow-md text-muted-foreground hover:text-foreground hover:bg-background transition-all"
+                                aria-label="捲動到最底部"
+                            >
+                                <ChevronDown className="h-4 w-4" />
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 {/* Input Area */}

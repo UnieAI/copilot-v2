@@ -2,9 +2,9 @@ import { auth, signIn } from "@/auth";
 import { redirect } from "next/navigation";
 import Link from 'next/link';
 import { Suspense, lazy } from 'react';
-import { KortixLogo } from '@/components/sidebar/kortix-logo';
 import { ExampleShowcase } from '@/components/auth/example-showcase';
 import { getTranslations } from 'next-intl/server';
+import { UnieAIIcon } from "@/components/sidebar/unieai-logo";
 
 // Lazy loading animated background to avoid heavy JS blocking on initial render
 const AnimatedBg = lazy(() => import('@/components/ui/animated-bg').then(mod => ({ default: mod.AnimatedBg })));
@@ -21,7 +21,7 @@ export default async function LoginPage() {
             <div className="absolute top-4 sm:top-6 left-4 sm:left-6 z-10">
                 <Link href="/" className="flex items-center space-x-2">
                     <div className="flex flex-row items-center gap-2">
-                        <KortixLogo size={24} className="sm:w-7 sm:h-7" />
+                        <UnieAIIcon className="sm:w-7 sm:h-7" />
                         <span className="font-semibold tracking-tight text-foreground">UnieAI</span>
                     </div>
                 </Link>

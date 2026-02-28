@@ -51,9 +51,7 @@ export default function Home() {
         <section id="hero" className="w-full h-full relative overflow-hidden bg-background">
             {/* Simple Header */}
             <header className="absolute top-0 left-0 right-0 z-50 px-6 py-4 flex items-center justify-between">
-                <Link href="/" className="flex items-center gap-2">
-                    <span className="font-bold text-xl tracking-tight text-foreground">UnieAI Agent</span>
-                </Link>
+                <div />
                 <div className="flex items-center gap-4">
                     <Link href="/tutorials" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
                         {tHeader('tutorials')}

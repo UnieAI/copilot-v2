@@ -7,7 +7,7 @@ const sql = postgres(connectionString, { max: 1 });
 const db = drizzle(sql);
 
 async function main() {
-  await migrate(db, { migrationsFolder: "./drizzle" });
+  await migrate(db, { migrationsFolder: "./lib/db/migrations" });
   console.log("Migration complete!");
   process.exit(0);
 }
