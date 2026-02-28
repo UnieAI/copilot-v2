@@ -175,6 +175,24 @@ export const chatMessages = pgTable('chat_messages', {
 });
 
 // ----------------------------------------------------------------------------
+// 5. Chat File Attachments (one row per file per message)
+// ----------------------------------------------------------------------------
+
+export const chatFiles = pgTable('chat_files', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    messageId: uuid('message_id')
+        .notNull()
+        .references(() => chatMessages.id, { onDelete: 'cascade' }),
+
+    name: text('name').notNull(),
+    mimeType: text('mime_type').notNull(),
+    data: text('data'),              // base64-encoded raw file
+    parsedContent: text('parsed_content'), // result from Vision model or file parser
+
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// ----------------------------------------------------------------------------
 // Export Type Definitions
 // ----------------------------------------------------------------------------
 
@@ -185,3 +203,4 @@ export type UserModel = InferSelectModel<typeof userModels>;
 export type McpTool = InferSelectModel<typeof mcpTools>;
 export type ChatSession = InferSelectModel<typeof chatSessions>;
 export type ChatMessage = InferSelectModel<typeof chatMessages>;
+export type ChatFile = InferSelectModel<typeof chatFiles>;

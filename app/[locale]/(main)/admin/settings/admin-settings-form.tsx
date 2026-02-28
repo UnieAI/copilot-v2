@@ -3,8 +3,21 @@
 import { useState } from "react";
 import { adminConfigActions } from "./actions";
 import { toast } from "sonner";
-import { AdminSettings } from "@/lib/db/schema";
 import { useRouter } from "next/navigation";
+
+type AdminSettings = {
+    defaultUserRole?: string | null;
+    pendingMessage?: string | null;
+    workModelUrl?: string | null;
+    workModelKey?: string | null;
+    workModelName?: string | null;
+    taskModelUrl?: string | null;
+    taskModelKey?: string | null;
+    taskModelName?: string | null;
+    visionModelUrl?: string | null;
+    visionModelKey?: string | null;
+    visionModelName?: string | null;
+};
 
 export function AdminSettingsForm({ settings }: { settings: AdminSettings | undefined }) {
     const router = useRouter();
@@ -71,6 +84,8 @@ export function AdminSettingsForm({ settings }: { settings: AdminSettings | unde
         }
     };
 
+    const v = (val: string | null | undefined) => val ?? ""
+
     return (
         <form onSubmit={handleSubmit} className="space-y-8">
             <section className="border p-6 rounded-lg">
@@ -85,7 +100,7 @@ export function AdminSettingsForm({ settings }: { settings: AdminSettings | unde
                     </div>
                     <div>
                         <label className="block text-sm font-medium mb-1">Pending Screen Message</label>
-                        <textarea name="pendingMessage" defaultValue={settings?.pendingMessage} className="w-full border rounded p-2 bg-background text-foreground" rows={3}></textarea>
+                        <textarea name="pendingMessage" defaultValue={v(settings?.pendingMessage)} className="w-full border rounded p-2 bg-background text-foreground" rows={3}></textarea>
                     </div>
                 </div>
             </section>
