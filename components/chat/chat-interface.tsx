@@ -10,6 +10,7 @@ import {
     Brain, FileText, Bot, User
 } from "lucide-react"
 import { toast } from "sonner"
+import { streamStore } from "@/lib/stream-store"
 
 // ─── Types ─────────────────────────────────────────────────────────────
 type Attachment = {
@@ -209,18 +210,35 @@ function StatusBadge({ text }: { text: string }) {
     )
 }
 
+// ─── Model Type ─────────────────────────────────────────────────────────
+type AvailableModel = {
+    value: string      // "{prefix}-{modelId}"
+    label: string      // modelId only
+    providerName: string
+    providerPrefix: string
+}
+
 // ─── Main Chat Interface ─────────────────────────────────────────────────
 export function ChatInterface({
     sessionId: initialSessionId,
     availableModels,
-    initialMessages = []
+    initialSelectedModel,
+    initialMessages = [],
+    projectId,
+    onSessionCreated,
 }: {
     sessionId?: string
-    availableModels: string[]
+    availableModels: AvailableModel[]
+    initialSelectedModel?: string
     initialMessages?: DBMessage[]
+    projectId?: string          // if set, new sessions are placed in this project
+    onSessionCreated?: (id: string, title: string) => void  // called when a new session is created
 }) {
     const router = useRouter()
     const [sessionId, setSessionId] = useState(initialSessionId)
+    // Track whether we have an active stream registered in the module store
+    const storeKeyRef = useRef<string | null>(null)
+    const abortControllerRef = useRef<AbortController | null>(null)
     const [messages, setMessages] = useState<UIMessage[]>(
         initialMessages.map(m => ({
             id: m.id,
@@ -231,7 +249,7 @@ export function ChatInterface({
         }))
     )
     const [input, setInput] = useState("")
-    const [selectedModel, setSelectedModel] = useState(availableModels[0] || "")
+    const [selectedModel, setSelectedModel] = useState(initialSelectedModel || availableModels[0]?.value || "")
     const [systemPrompt, setSystemPrompt] = useState("")
     const [showSystemPrompt, setShowSystemPrompt] = useState(false)
     const [isGenerating, setIsGenerating] = useState(false)
@@ -256,9 +274,37 @@ export function ChatInterface({
 
     useEffect(() => {
         if (availableModels.length > 0 && !selectedModel) {
-            setSelectedModel(availableModels[0])
+            setSelectedModel(availableModels[0].value)
         }
     }, [availableModels])
+
+    // ── Mount: abort orphaned streams (Bug 1) & reconnect to live stream (Bug 2) ──
+    useEffect(() => {
+        // Abort any stream that isn't for this session (handles "navigate to /chat" case)
+        streamStore.abortAllExcept(initialSessionId)
+
+        // If there's already a live stream for this session, subscribe to it
+        if (initialSessionId && streamStore.isActive(initialSessionId)) {
+            const snap = streamStore.getSnapshot(initialSessionId)
+            if (snap) {
+                setMessages(snap.messages as UIMessage[])
+                setIsGenerating(snap.isGenerating)
+            }
+            const unsub = streamStore.subscribe(initialSessionId, (msgs, generating, status) => {
+                setMessages(msgs as UIMessage[])
+                setIsGenerating(generating)
+                setStatusText(status)
+            })
+            storeKeyRef.current = initialSessionId
+            return unsub  // cleanup: just removes listener, stream stays alive
+        }
+
+        // Cleanup on unmount: if a stream is registered under our key, just remove listeners
+        return () => {
+            // nothing to do — streamStore keeps the stream alive for reconnect
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []) // intentionally only on mount
 
     useEffect(() => {
         if (textareaRef.current) {
@@ -300,6 +346,19 @@ export function ChatInterface({
             return
         }
 
+        // Save model preference (optimistic, non-blocking)
+        const selModelObj = availableModels.find(m => m.value === selectedModel)
+        if (selModelObj) {
+            fetch('/api/user/preference', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    selectedModel: selModelObj.label,
+                    selectedProviderPrefix: selModelObj.providerPrefix,
+                }),
+            }).catch(() => { })
+        }
+
         setIsGenerating(true)
         setStatusText("正在連線...")
 
@@ -330,9 +389,24 @@ export function ChatInterface({
         conversationHistory.push({ role: 'user', content })
 
         try {
+            // Create AbortController for this stream
+            const ac = new AbortController()
+            abortControllerRef.current = ac
+
+            // Use a temporary key for the store before we know the real sessionId
+            const tempKey = sessionId || `pending-${Date.now()}`
+            const initialStoreMessages: UIMessage[] = [
+                ...historyMessages,
+                userMsg,
+                { id: aiMsgId, role: 'assistant' as const, content: '', isStreaming: true }
+            ]
+            streamStore.register(tempKey, initialStoreMessages as any, ac)
+            storeKeyRef.current = tempKey
+
             const res = await fetch("/api/chat/stream", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
+                signal: ac.signal,
                 body: JSON.stringify({
                     messages: conversationHistory,
                     sessionId: sessionId || null,
@@ -340,6 +414,7 @@ export function ChatInterface({
                     systemPrompt: systemPrompt || null,
                     attachments: allAtts,
                     editMessageId: safeEditId || null,
+                    projectId: projectId || null,
                 })
             })
 
@@ -371,42 +446,78 @@ export function ChatInterface({
                     try {
                         const ev = JSON.parse(dataStr)
                         if (ev.type === 'session_id') {
-                            setSessionId(ev.data)
-                            window.history.pushState({}, '', `/c/${ev.data}`)
+                            const realId = ev.data as string
+                            // Rekey the store entry from temp key to real session ID
+                            if (storeKeyRef.current && storeKeyRef.current !== realId) {
+                                streamStore.rekey(storeKeyRef.current, realId)
+                                storeKeyRef.current = realId
+                            }
+                            setSessionId(realId)
+                            window.history.pushState({}, '', `/c/${realId}`)
+                            onSessionCreated?.(realId, '')
                         } else if (ev.type === 'status') {
                             setStatusText(ev.data)
+                            if (storeKeyRef.current) streamStore.update(storeKeyRef.current, e => { e.statusText = ev.data })
                         } else if (ev.type === 'chunk') {
                             setMessages(prev => prev.map(m =>
                                 m.id === aiMsgId ? { ...m, content: m.content + ev.data } : m
                             ))
+                            if (storeKeyRef.current) streamStore.update(storeKeyRef.current, e => {
+                                const msg = e.messages.find(m => m.id === aiMsgId)
+                                if (msg) msg.content += ev.data
+                            })
                         } else if (ev.type === 'error') {
                             toast.error(ev.data)
                         } else if (ev.type === 'title_updated') {
                             window.dispatchEvent(new CustomEvent('sidebar:refresh'))
+                            if (ev.data?.sessionId && ev.data?.title) {
+                                onSessionCreated?.(ev.data.sessionId, ev.data.title)
+                            }
                         } else if (ev.type === 'done') {
                             aiMsgDbId = ev.data?.messageId
                             userMsgDbId = ev.data?.userMessageId
-                            // Unlock UI immediately — don't wait for stream close (title generation)
                             setMessages(prev => prev.map(m => {
                                 if (m.id === aiMsgId) return { ...m, isStreaming: false, dbId: aiMsgDbId }
                                 if (m.id === tempUserMsgId) return { ...m, dbId: userMsgDbId }
                                 return m
                             }))
                             setIsGenerating(false)
-                            setStatusText("")
+                            setStatusText('')
+                            // Update store messages to mark done
+                            if (storeKeyRef.current) streamStore.update(storeKeyRef.current, e => {
+                                const aiMsg = e.messages.find(m => m.id === aiMsgId)
+                                if (aiMsg) { aiMsg.isStreaming = false; aiMsg.dbId = aiMsgDbId }
+                                const usrMsg = e.messages.find(m => m.id === tempUserMsgId)
+                                if (usrMsg) usrMsg.dbId = userMsgDbId
+                                e.isGenerating = false
+                                e.statusText = ''
+                            })
                         }
                     } catch { }
                 }
             }
-            // Stream fully closed — refresh to sync any server state
+            // Stream fully closed — clean up store and refresh
+            if (storeKeyRef.current) {
+                streamStore.finish(storeKeyRef.current)
+                storeKeyRef.current = null
+            }
             router.refresh()
 
         } catch (e: any) {
-            toast.error("串流連線失敗: " + e.message)
+            if (e.name === 'AbortError') {
+                // User navigated away — clean up silently
+                setIsGenerating(false)
+                setStatusText('')
+                if (storeKeyRef.current) {
+                    streamStore.abort(storeKeyRef.current)
+                    storeKeyRef.current = null
+                }
+                return
+            }
+            toast.error('串流連線失敗: ' + e.message)
         } finally {
-            // Ensure we always clean up even if done event was never received
             setIsGenerating(false)
-            setStatusText("")
+            setStatusText('')
         }
     }, [isGenerating, messages, sessionId, selectedModel, systemPrompt, router])
 
@@ -534,6 +645,40 @@ export function ChatInterface({
     }
 
     const [showModelDropdown, setShowModelDropdown] = useState(false)
+    // Derived: selected model display label
+    const selectedModelObj = availableModels.find(m => m.value === selectedModel)
+    const selectedModelLabel = selectedModelObj ? `${selectedModelObj.label}` : (selectedModel || "未選擇模型")
+
+    // Called when user picks a model from the dropdown
+    const handleModelChange = (modelValue: string) => {
+        setSelectedModel(modelValue)
+        setShowModelDropdown(false)
+
+        const modelObj = availableModels.find(m => m.value === modelValue)
+        if (!modelObj) return
+
+        // Persist user global preference (non-blocking)
+        fetch('/api/user/preference', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                selectedModel: modelObj.label,
+                selectedProviderPrefix: modelObj.providerPrefix,
+            }),
+        }).catch(() => { })
+
+        // If in an existing session, also update the session's model record
+        if (sessionId) {
+            fetch(`/api/chat/${sessionId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    modelName: modelObj.label,
+                    providerPrefix: modelObj.providerPrefix,
+                }),
+            }).catch(() => { })
+        }
+    }
 
     const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault()
@@ -559,9 +704,14 @@ export function ChatInterface({
                             onClick={() => setShowModelDropdown(!showModelDropdown)}
                             className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-muted/60 transition-colors group"
                         >
-                            <span className="text-sm font-semibold tracking-tight text-foreground/90 group-hover:text-foreground">
-                                {selectedModel || "未選擇模型"}
-                            </span>
+                            <div className="flex flex-col items-start">
+                                <span className="text-sm font-semibold tracking-tight text-foreground/90 group-hover:text-foreground leading-tight">
+                                    {selectedModelLabel}
+                                </span>
+                                {selectedModelObj && (
+                                    <span className="text-[10px] text-muted-foreground leading-tight">{selectedModelObj.providerName}</span>
+                                )}
+                            </div>
                             <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform duration-200 ${showModelDropdown ? 'rotate-180' : ''}`} />
                         </button>
 
@@ -582,17 +732,17 @@ export function ChatInterface({
                                             ) : (
                                                 availableModels.map(m => (
                                                     <button
-                                                        key={m}
-                                                        onClick={() => {
-                                                            setSelectedModel(m)
-                                                            setShowModelDropdown(false)
-                                                        }}
+                                                        key={m.value}
+                                                        onClick={() => handleModelChange(m.value)}
                                                         className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center justify-between
-                                                            ${selectedModel === m ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted text-foreground/80 hover:text-foreground'}
+                                                            ${selectedModel === m.value ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted text-foreground/80 hover:text-foreground'}
                                                         `}
                                                     >
-                                                        {m}
-                                                        {selectedModel === m && <Check className="h-4 w-4" />}
+                                                        <div className="flex flex-col items-start">
+                                                            <span>{m.label}</span>
+                                                            <span className="text-[10px] text-muted-foreground">{m.providerName}</span>
+                                                        </div>
+                                                        {selectedModel === m.value && <Check className="h-4 w-4 shrink-0" />}
                                                     </button>
                                                 ))
                                             )}
