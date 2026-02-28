@@ -38,7 +38,29 @@ export async function middleware(request: NextRequest) {
   const currentLocale = routing.locales.includes(pathParts[0] as any) ? pathParts[0] : '';
   const pathWithoutLocale = currentLocale ? `/${pathParts.slice(1).join('/')}` : pathname;
 
-  const publicRoutes = ['/', '/login', '/register'];
+  // Suna public routes merged with original
+  const publicRoutes = [
+    '/',
+    '/login',
+    '/register',
+    '/auth',
+    '/legal',
+    '/share',
+    '/templates',
+    '/support',
+    '/suna',
+    '/help',
+    '/agents-101',
+    '/about',
+    '/milano',
+    '/berlin',
+    '/app',
+    '/careers',
+    '/pricing',
+    '/tutorials',
+    '/countryerror'
+  ];
+  
   const isPublicRoute = publicRoutes.some(route =>
     pathWithoutLocale === route || pathWithoutLocale.startsWith(`${route}/`) || pathWithoutLocale === ''
   );

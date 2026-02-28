@@ -7,9 +7,10 @@ import remarkGfm from "remark-gfm"
 import {
     Send, Paperclip, X, RefreshCw, Edit2,
     ChevronDown, ChevronUp, Loader2, Check, Settings2,
-    Brain, Image as ImageIcon, FileText
+    Brain, FileText, Bot, User
 } from "lucide-react"
 import { toast } from "sonner"
+import { streamStore } from "@/lib/stream-store"
 
 // ─── Types ─────────────────────────────────────────────────────────────
 type Attachment = {
@@ -49,22 +50,26 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 // ─── Think Tag Parser ──────────────────────────────────────────────────
-function ThinkBlock({ content }: { content: string }) {
-    const [expanded, setExpanded] = useState(false)
+function ThinkBlock({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
+    const [userExpanded, setUserExpanded] = useState<boolean | null>(null)
+    const expanded = userExpanded !== null ? userExpanded : !!isStreaming
+
     return (
-        <div className="my-2 rounded-lg border border-border/60 overflow-hidden">
+        <div className="my-3 flex flex-col gap-2">
             <button
-                onClick={() => setExpanded(v => !v)}
-                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-muted/50 transition-colors text-left"
+                onClick={() => setUserExpanded(!expanded)}
+                className="w-fit flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors group"
             >
-                <Brain className="h-3.5 w-3.5 shrink-0 text-violet-400" />
-                <span className="font-medium">思考過程</span>
-                <span className="ml-auto">
-                    {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                </span>
+                {isStreaming ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground/70" />
+                ) : (
+                    <Brain className="h-3.5 w-3.5 text-muted-foreground/70 group-hover:text-foreground transition-colors" />
+                )}
+                <span>思考過程</span>
+                {expanded ? <ChevronUp className="h-3 w-3 opacity-50" /> : <ChevronDown className="h-3 w-3 opacity-50" />}
             </button>
             {expanded && (
-                <div className="px-3 pb-3 pt-1 text-xs text-muted-foreground bg-muted/20 border-t border-border/40 whitespace-pre-wrap font-mono leading-relaxed">
+                <div className="pl-4 ml-[7px] border-l-2 border-border/60 text-[13px] text-muted-foreground whitespace-pre-wrap font-mono leading-relaxed animate-in fade-in slide-in-from-top-1 duration-300">
                     {content.trim()}
                 </div>
             )}
@@ -74,7 +79,7 @@ function ThinkBlock({ content }: { content: string }) {
 
 // Render content with <think>...</think> blocks collapsed
 function MessageContent({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
-    const parts: { type: 'text' | 'think'; content: string }[] = []
+    const parts: { type: 'text' | 'think'; content: string; unfinished?: boolean }[] = []
     const thinkRegex = /<think>([\s\S]*?)<\/think>/g
     let lastIndex = 0
     let match
@@ -92,7 +97,7 @@ function MessageContent({ content, isStreaming }: { content: string; isStreaming
     const openThink = remaining.indexOf('<think>')
     if (openThink !== -1) {
         if (openThink > 0) parts.push({ type: 'text', content: remaining.slice(0, openThink) })
-        parts.push({ type: 'think', content: remaining.slice(openThink + 7) + (isStreaming ? '▋' : '') })
+        parts.push({ type: 'think', content: remaining.slice(openThink + 7) + (isStreaming ? '▋' : ''), unfinished: !!isStreaming })
     } else if (remaining) {
         parts.push({ type: 'text', content: remaining })
     }
@@ -105,7 +110,7 @@ function MessageContent({ content, isStreaming }: { content: string; isStreaming
         <div>
             {parts.map((p, i) =>
                 p.type === 'think'
-                    ? <ThinkBlock key={i} content={p.content} />
+                    ? <ThinkBlock key={i} content={p.content} isStreaming={p.unfinished} />
                     : <div key={i} className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1.5 prose-pre:text-xs">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>{p.content}</ReactMarkdown>
                     </div>
@@ -114,60 +119,81 @@ function MessageContent({ content, isStreaming }: { content: string; isStreaming
     )
 }
 
-// ─── Image / File Attachment Chip with Dialog ──────────────────────────
-function AttachmentChip({ name, mimeType, base64, previewUrl, onRemove }: {
-    name: string
-    mimeType: string
-    base64?: string
-    previewUrl?: string
+// ─── Image / File Attachment Thumbnail ───────────────────────────────────
+function AttachmentThumbnail({ attachment, onRemove, onClick }: {
+    attachment: Attachment
     onRemove?: () => void
+    onClick?: () => void
 }) {
-    const [dialogOpen, setDialogOpen] = useState(false)
-    const isImage = mimeType.startsWith('image/')
+    const isImage = attachment.mimeType.startsWith('image/')
+    const imgSrc = attachment.previewUrl || (attachment.base64 ? `data:${attachment.mimeType};base64,${attachment.base64}` : undefined)
 
-    const imgSrc = previewUrl || (base64 ? `data:${mimeType};base64,${base64}` : undefined)
+    // Extract simple extension (.pdf, .csv, string)
+    let ext = ''
+    try {
+        const parts = attachment.name.split('.')
+        ext = parts.length > 1 ? parts[parts.length - 1].toUpperCase() : 'DOC'
+    } catch { ext = 'FILE' }
 
     return (
-        <>
-            <button
-                type="button"
-                onClick={() => setDialogOpen(true)}
-                className="flex items-center gap-1.5 bg-muted border border-border rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted/80 max-w-[160px] group"
-            >
-                {isImage && imgSrc
-                    ? <img src={imgSrc} alt={name} className="h-4 w-4 rounded object-cover" />
-                    : isImage
-                        ? <ImageIcon className="h-3 w-3 shrink-0" />
-                        : <FileText className="h-3 w-3 shrink-0" />
-                }
-                <span className="truncate flex-1">{name}</span>
-                {onRemove && (
-                    <span onClick={e => { e.stopPropagation(); onRemove?.() }} className="ml-0.5 hover:text-destructive shrink-0">
-                        <X className="h-3 w-3" />
-                    </span>
-                )}
-            </button>
-
-            {dialogOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setDialogOpen(false)}>
-                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-                    <div className="relative z-10 bg-card rounded-xl border border-border shadow-xl max-w-2xl w-full max-h-[80vh] overflow-auto" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center justify-between p-4 border-b border-border">
-                            <p className="text-sm font-medium truncate">{name}</p>
-                            <button onClick={() => setDialogOpen(false)} className="p-1 rounded hover:bg-muted text-muted-foreground">
-                                <X className="h-4 w-4" />
-                            </button>
-                        </div>
-                        <div className="p-4">
-                            {isImage && imgSrc
-                                ? <img src={imgSrc} alt={name} className="w-full h-auto rounded-lg object-contain max-h-[60vh]" />
-                                : <p className="text-sm text-muted-foreground">此附件為 {mimeType} 類型文件，已傳送至 AI 進行分析。</p>
-                            }
-                        </div>
-                    </div>
+        <div className="group relative h-16 w-16 md:h-20 md:w-20 shrink-0 rounded-2xl border border-border bg-muted overflow-hidden cursor-pointer hover:ring-2 hover:ring-ring transition-all"
+            onClick={onClick}>
+            {isImage && imgSrc ? (
+                <img src={imgSrc} alt="attachment" className="w-full h-full object-cover" />
+            ) : (
+                <div className="flex flex-col items-center justify-center w-full h-full p-2 text-muted-foreground bg-card">
+                    <FileText className="h-6 w-6 md:h-8 md:w-8 mb-1 opacity-80" />
+                    <span className="text-[9px] font-bold tracking-wider">{ext}</span>
                 </div>
             )}
-        </>
+
+            {onRemove && (
+                <button
+                    onClick={(e) => { e.stopPropagation(); onRemove() }}
+                    className="absolute -top-1 -right-1 h-5 w-5 bg-background border border-border rounded-full flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                >
+                    <X className="h-3 w-3" />
+                </button>
+            )}
+        </div>
+    )
+}
+
+// ─── Split Right Sidebar for File Previews ──────────────────────────────
+function FilePreviewSidebar({ attachment, onClose }: { attachment: Attachment, onClose: () => void }) {
+    const isImage = attachment.mimeType.startsWith('image/')
+    const imgSrc = attachment.previewUrl || (attachment.base64 ? `data:${attachment.mimeType};base64,${attachment.base64}` : undefined)
+
+    return (
+        <div className="w-1/2 min-w-[300px] border-l border-border bg-card flex flex-col h-full animate-in slide-in-from-right-8 duration-300 relative z-20 shadow-xl">
+            <div className="flex items-center justify-between p-4 border-b border-border bg-background">
+                <div className="flex flex-col overflow-hidden px-2">
+                    <p className="text-sm font-semibold truncate" title={attachment.name}>{attachment.name}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-widest">{attachment.mimeType}</p>
+                </div>
+                <button onClick={onClose} className="p-2 rounded-md hover:bg-muted text-muted-foreground transition-colors shrink-0">
+                    <X className="h-4 w-4" />
+                </button>
+            </div>
+            <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-muted/20">
+                {isImage && imgSrc ? (
+                    <img src={imgSrc} alt={attachment.name} className="max-w-full max-h-full rounded-md shadow-sm border border-border object-contain" />
+                ) : attachment.mimeType === 'application/pdf' ? (
+                    <iframe src={imgSrc} className="w-full h-full rounded-md border border-border bg-white" title={attachment.name} />
+                ) : (
+                    <div className="text-center p-8 bg-background border border-border shadow-sm rounded-xl max-w-sm">
+                        <FileText className="h-16 w-16 mx-auto mb-4 text-muted-foreground/50" />
+                        <h3 className="text-sm font-medium mb-1 truncate">{attachment.name}</h3>
+                        <p className="text-xs text-muted-foreground mb-4">無法在瀏覽器中直接預覽此格式 ({attachment.mimeType})</p>
+                        {imgSrc && (
+                            <a href={imgSrc} download={attachment.name} className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium transition-colors bg-primary text-primary-foreground rounded-md shadow hover:bg-primary/90">
+                                下載檔案
+                            </a>
+                        )}
+                    </div>
+                )}
+            </div>
+        </div>
     )
 }
 
@@ -184,18 +210,35 @@ function StatusBadge({ text }: { text: string }) {
     )
 }
 
+// ─── Model Type ─────────────────────────────────────────────────────────
+type AvailableModel = {
+    value: string      // "{prefix}-{modelId}"
+    label: string      // modelId only
+    providerName: string
+    providerPrefix: string
+}
+
 // ─── Main Chat Interface ─────────────────────────────────────────────────
 export function ChatInterface({
     sessionId: initialSessionId,
     availableModels,
-    initialMessages = []
+    initialSelectedModel,
+    initialMessages = [],
+    projectId,
+    onSessionCreated,
 }: {
     sessionId?: string
-    availableModels: string[]
+    availableModels: AvailableModel[]
+    initialSelectedModel?: string
     initialMessages?: DBMessage[]
+    projectId?: string          // if set, new sessions are placed in this project
+    onSessionCreated?: (id: string, title: string) => void  // called when a new session is created
 }) {
     const router = useRouter()
     const [sessionId, setSessionId] = useState(initialSessionId)
+    // Track whether we have an active stream registered in the module store
+    const storeKeyRef = useRef<string | null>(null)
+    const abortControllerRef = useRef<AbortController | null>(null)
     const [messages, setMessages] = useState<UIMessage[]>(
         initialMessages.map(m => ({
             id: m.id,
@@ -206,7 +249,7 @@ export function ChatInterface({
         }))
     )
     const [input, setInput] = useState("")
-    const [selectedModel, setSelectedModel] = useState(availableModels[0] || "")
+    const [selectedModel, setSelectedModel] = useState(initialSelectedModel || availableModels[0]?.value || "")
     const [systemPrompt, setSystemPrompt] = useState("")
     const [showSystemPrompt, setShowSystemPrompt] = useState(false)
     const [isGenerating, setIsGenerating] = useState(false)
@@ -217,20 +260,137 @@ export function ChatInterface({
     const [editAttachments, setEditAttachments] = useState<Attachment[]>([])
     const [editKeepAttachments, setEditKeepAttachments] = useState<Attachment[]>([])
 
+    // Split view state
+    const [selectedPreviewAttachment, setSelectedPreviewAttachment] = useState<Attachment | null>(null)
+
     const messagesEndRef = useRef<HTMLDivElement>(null)
+    const scrollContainerRef = useRef<HTMLDivElement>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
     const editFileInputRef = useRef<HTMLInputElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+    // Scroll state — mirrors the pattern from step2.tsx
+    const [isAutoScrolling, setIsAutoScrolling] = useState(true)
+    const [showScrollButton, setShowScrollButton] = useState(false)
+
+    // IntersectionObserver: show/hide the scroll button based on messagesEndRef visibility
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+        const chatContainer = scrollContainerRef.current
+        const messagesEnd = messagesEndRef.current
+        if (!chatContainer || !messagesEnd) return
+
+        const checkScrollPosition = (isEndVisible?: boolean) => {
+            const { scrollHeight, scrollTop, clientHeight } = chatContainer
+            const distanceToBottom = scrollHeight - scrollTop - clientHeight
+            const isAtBottom = Math.abs(distanceToBottom) < 1
+
+            const containerRect = chatContainer.getBoundingClientRect()
+            const endRect = messagesEnd.getBoundingClientRect()
+            const computedVisible =
+                typeof isEndVisible !== "undefined"
+                    ? isEndVisible
+                    : endRect.top >= containerRect.top && endRect.bottom <= containerRect.bottom
+
+            setShowScrollButton(computedVisible ? false : !isAtBottom)
+        }
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                entries.forEach((entry) => checkScrollPosition(entry.isIntersecting))
+            },
+            { root: chatContainer, threshold: 0.1 }
+        )
+        observer.observe(messagesEnd)
+
+        const handleScroll = () => checkScrollPosition()
+        chatContainer.addEventListener("scroll", handleScroll)
+
+        const resizeObserver = new ResizeObserver(() => checkScrollPosition())
+        resizeObserver.observe(chatContainer)
+
+        checkScrollPosition()
+
+        return () => {
+            chatContainer.removeEventListener("scroll", handleScroll)
+            resizeObserver.disconnect()
+            observer.disconnect()
+        }
     }, [messages, statusText])
+
+    // rAF loop + wheel listener: the core auto-scroll engine
+    useEffect(() => {
+        if (!isAutoScrolling) return
+
+        const chatContainer = scrollContainerRef.current
+        if (!chatContainer) return
+
+        let animationFrameId: number
+
+        // Use direct scrollTop assignment — calling scrollIntoView({ behavior: "smooth" })
+        // on every frame starts a new animation each frame and causes severe jitter.
+        // rAF at ~60fps is already visually smooth without a CSS animation.
+        const tick = () => {
+            chatContainer.scrollTop = chatContainer.scrollHeight
+            animationFrameId = requestAnimationFrame(tick)
+        }
+
+        const handleWheel = (event: WheelEvent) => {
+            if (chatContainer.contains(event.target as Node)) {
+                setIsAutoScrolling(false)
+            }
+        }
+
+        animationFrameId = requestAnimationFrame(tick)
+        window.addEventListener("wheel", handleWheel, { passive: true })
+
+        return () => {
+            cancelAnimationFrame(animationFrameId)
+            window.removeEventListener("wheel", handleWheel)
+        }
+    }, [isAutoScrolling])
+
+    // Start auto-scroll when generation begins; stop when it ends
+    const prevIsGeneratingRef = useRef(false)
+    useEffect(() => {
+        if (isGenerating && !prevIsGeneratingRef.current) {
+            setIsAutoScrolling(true)
+        }
+        prevIsGeneratingRef.current = isGenerating
+    }, [isGenerating])
 
     useEffect(() => {
         if (availableModels.length > 0 && !selectedModel) {
-            setSelectedModel(availableModels[0])
+            setSelectedModel(availableModels[0].value)
         }
     }, [availableModels])
+
+    // ── Mount: abort orphaned streams (Bug 1) & reconnect to live stream (Bug 2) ──
+    useEffect(() => {
+        // Abort any stream that isn't for this session (handles "navigate to /chat" case)
+        streamStore.abortAllExcept(initialSessionId)
+
+        // If there's already a live stream for this session, subscribe to it
+        if (initialSessionId && streamStore.isActive(initialSessionId)) {
+            const snap = streamStore.getSnapshot(initialSessionId)
+            if (snap) {
+                setMessages(snap.messages as UIMessage[])
+                setIsGenerating(snap.isGenerating)
+            }
+            const unsub = streamStore.subscribe(initialSessionId, (msgs, generating, status) => {
+                setMessages(msgs as UIMessage[])
+                setIsGenerating(generating)
+                setStatusText(status)
+            })
+            storeKeyRef.current = initialSessionId
+            return unsub  // cleanup: just removes listener, stream stays alive
+        }
+
+        // Cleanup on unmount: if a stream is registered under our key, just remove listeners
+        return () => {
+            // nothing to do — streamStore keeps the stream alive for reconnect
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []) // intentionally only on mount
 
     useEffect(() => {
         if (textareaRef.current) {
@@ -272,6 +432,19 @@ export function ChatInterface({
             return
         }
 
+        // Save model preference (optimistic, non-blocking)
+        const selModelObj = availableModels.find(m => m.value === selectedModel)
+        if (selModelObj) {
+            fetch('/api/user/preference', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    selectedModel: selModelObj.label,
+                    selectedProviderPrefix: selModelObj.providerPrefix,
+                }),
+            }).catch(() => { })
+        }
+
         setIsGenerating(true)
         setStatusText("正在連線...")
 
@@ -302,9 +475,24 @@ export function ChatInterface({
         conversationHistory.push({ role: 'user', content })
 
         try {
+            // Create AbortController for this stream
+            const ac = new AbortController()
+            abortControllerRef.current = ac
+
+            // Use a temporary key for the store before we know the real sessionId
+            const tempKey = sessionId || `pending-${Date.now()}`
+            const initialStoreMessages: UIMessage[] = [
+                ...historyMessages,
+                userMsg,
+                { id: aiMsgId, role: 'assistant' as const, content: '', isStreaming: true }
+            ]
+            streamStore.register(tempKey, initialStoreMessages as any, ac)
+            storeKeyRef.current = tempKey
+
             const res = await fetch("/api/chat/stream", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
+                signal: ac.signal,
                 body: JSON.stringify({
                     messages: conversationHistory,
                     sessionId: sessionId || null,
@@ -312,6 +500,7 @@ export function ChatInterface({
                     systemPrompt: systemPrompt || null,
                     attachments: allAtts,
                     editMessageId: safeEditId || null,
+                    projectId: projectId || null,
                 })
             })
 
@@ -343,42 +532,78 @@ export function ChatInterface({
                     try {
                         const ev = JSON.parse(dataStr)
                         if (ev.type === 'session_id') {
-                            setSessionId(ev.data)
-                            window.history.pushState({}, '', `/c/${ev.data}`)
+                            const realId = ev.data as string
+                            // Rekey the store entry from temp key to real session ID
+                            if (storeKeyRef.current && storeKeyRef.current !== realId) {
+                                streamStore.rekey(storeKeyRef.current, realId)
+                                storeKeyRef.current = realId
+                            }
+                            setSessionId(realId)
+                            window.history.pushState({}, '', `/c/${realId}`)
+                            onSessionCreated?.(realId, '')
                         } else if (ev.type === 'status') {
                             setStatusText(ev.data)
+                            if (storeKeyRef.current) streamStore.update(storeKeyRef.current, e => { e.statusText = ev.data })
                         } else if (ev.type === 'chunk') {
                             setMessages(prev => prev.map(m =>
                                 m.id === aiMsgId ? { ...m, content: m.content + ev.data } : m
                             ))
+                            if (storeKeyRef.current) streamStore.update(storeKeyRef.current, e => {
+                                const msg = e.messages.find(m => m.id === aiMsgId)
+                                if (msg) msg.content += ev.data
+                            })
                         } else if (ev.type === 'error') {
                             toast.error(ev.data)
                         } else if (ev.type === 'title_updated') {
                             window.dispatchEvent(new CustomEvent('sidebar:refresh'))
+                            if (ev.data?.sessionId && ev.data?.title) {
+                                onSessionCreated?.(ev.data.sessionId, ev.data.title)
+                            }
                         } else if (ev.type === 'done') {
                             aiMsgDbId = ev.data?.messageId
                             userMsgDbId = ev.data?.userMessageId
-                            // Unlock UI immediately — don't wait for stream close (title generation)
                             setMessages(prev => prev.map(m => {
                                 if (m.id === aiMsgId) return { ...m, isStreaming: false, dbId: aiMsgDbId }
                                 if (m.id === tempUserMsgId) return { ...m, dbId: userMsgDbId }
                                 return m
                             }))
                             setIsGenerating(false)
-                            setStatusText("")
+                            setStatusText('')
+                            // Update store messages to mark done
+                            if (storeKeyRef.current) streamStore.update(storeKeyRef.current, e => {
+                                const aiMsg = e.messages.find(m => m.id === aiMsgId)
+                                if (aiMsg) { aiMsg.isStreaming = false; aiMsg.dbId = aiMsgDbId }
+                                const usrMsg = e.messages.find(m => m.id === tempUserMsgId)
+                                if (usrMsg) usrMsg.dbId = userMsgDbId
+                                e.isGenerating = false
+                                e.statusText = ''
+                            })
                         }
                     } catch { }
                 }
             }
-            // Stream fully closed — refresh to sync any server state
+            // Stream fully closed — clean up store and refresh
+            if (storeKeyRef.current) {
+                streamStore.finish(storeKeyRef.current)
+                storeKeyRef.current = null
+            }
             router.refresh()
 
         } catch (e: any) {
-            toast.error("串流連線失敗: " + e.message)
+            if (e.name === 'AbortError') {
+                // User navigated away — clean up silently
+                setIsGenerating(false)
+                setStatusText('')
+                if (storeKeyRef.current) {
+                    streamStore.abort(storeKeyRef.current)
+                    storeKeyRef.current = null
+                }
+                return
+            }
+            toast.error('串流連線失敗: ' + e.message)
         } finally {
-            // Ensure we always clean up even if done event was never received
             setIsGenerating(false)
-            setStatusText("")
+            setStatusText('')
         }
     }, [isGenerating, messages, sessionId, selectedModel, systemPrompt, router])
 
@@ -499,212 +724,364 @@ export function ChatInterface({
     }
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit() }
+        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+            e.preventDefault()
+            handleSubmit()
+        }
+    }
+
+    const [showModelDropdown, setShowModelDropdown] = useState(false)
+    // Derived: selected model display label
+    const selectedModelObj = availableModels.find(m => m.value === selectedModel)
+    const selectedModelLabel = selectedModelObj ? `${selectedModelObj.label}` : (selectedModel || "未選擇模型")
+
+    // Called when user picks a model from the dropdown
+    const handleModelChange = (modelValue: string) => {
+        setSelectedModel(modelValue)
+        setShowModelDropdown(false)
+
+        const modelObj = availableModels.find(m => m.value === modelValue)
+        if (!modelObj) return
+
+        // Persist user global preference (non-blocking)
+        fetch('/api/user/preference', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                selectedModel: modelObj.label,
+                selectedProviderPrefix: modelObj.providerPrefix,
+            }),
+        }).catch(() => { })
+
+        // If in an existing session, also update the session's model record
+        if (sessionId) {
+            fetch(`/api/chat/${sessionId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    modelName: modelObj.label,
+                    providerPrefix: modelObj.providerPrefix,
+                }),
+            }).catch(() => { })
+        }
+    }
+
+    const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault()
+        const files = e.dataTransfer.files
+        if (files && files.length > 0) {
+            handleFileSelect(files)
+        }
+    }
+
+    const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault()
     }
 
     return (
-        <div className="flex flex-col h-full bg-background">
-            {/* Header */}
-            <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-background/80 backdrop-blur sticky top-0 z-10">
-                <select
-                    value={selectedModel}
-                    onChange={e => setSelectedModel(e.target.value)}
-                    className="h-8 rounded-md border border-input bg-transparent px-2 py-1 text-sm ring-offset-background focus:outline-none focus:ring-1 focus:ring-ring"
-                >
-                    {availableModels.length === 0
-                        ? <option value="">未配置模型</option>
-                        : availableModels.map(m => <option key={m} value={m}>{m}</option>)
-                    }
-                </select>
-                <button
-                    onClick={() => setShowSystemPrompt(v => !v)}
-                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors ml-auto"
-                >
-                    <Settings2 className="h-4 w-4" />
-                    System Prompt
-                    {showSystemPrompt ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                </button>
-            </div>
+        <div className="flex h-full w-full bg-background overflow-hidden relative">
+            <div className={`relative flex flex-col h-full bg-background transition-all duration-300 ease-in-out ${selectedPreviewAttachment ? 'w-1/2 min-w-0 border-r border-border' : 'w-full'} `}>
+                {/* Header */}
+                <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 bg-background/80 backdrop-blur sticky top-0 z-10 shrink-0">
 
-            {/* System Prompt Panel */}
-            {showSystemPrompt && (
-                <div className="px-4 py-3 border-b border-border bg-muted/30">
-                    <textarea
-                        value={systemPrompt}
-                        onChange={e => setSystemPrompt(e.target.value)}
-                        placeholder="輸入 System Prompt（留空則不使用）..."
-                        rows={3}
-                        className="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                    />
+                    {/* Gemini-style Model Selector */}
+                    <div className="relative">
+                        <button
+                            onClick={() => setShowModelDropdown(!showModelDropdown)}
+                            className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-muted/60 transition-colors group"
+                        >
+                            <div className="flex flex-col items-start">
+                                <span className="text-sm font-semibold tracking-tight text-foreground/90 group-hover:text-foreground leading-tight">
+                                    {selectedModelLabel}
+                                </span>
+                                {selectedModelObj && (
+                                    <span className="text-[10px] text-muted-foreground leading-tight">{selectedModelObj.providerName}</span>
+                                )}
+                            </div>
+                            <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform duration-200 ${showModelDropdown ? 'rotate-180' : ''}`} />
+                        </button>
+
+                        {/* Dropdown Menu */}
+                        {showModelDropdown && (
+                            <>
+                                <div className="fixed inset-0 z-40" onClick={() => setShowModelDropdown(false)} />
+                                <div className="absolute top-full left-0 mt-2 w-56 rounded-xl border border-border bg-card shadow-lg z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                                    <div className="py-2">
+                                        <div className="px-3 pb-2 text-xs font-semibold tracking-wider text-muted-foreground uppercase border-b border-border/40">
+                                            可用模型
+                                        </div>
+                                        <div className="max-h-[300px] overflow-y-auto mt-1">
+                                            {availableModels.length === 0 ? (
+                                                <div className="px-4 py-3 text-sm text-muted-foreground text-center">
+                                                    尚未配置任何模型
+                                                </div>
+                                            ) : (
+                                                availableModels.map(m => (
+                                                    <button
+                                                        key={m.value}
+                                                        onClick={() => handleModelChange(m.value)}
+                                                        className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center justify-between
+                                                            ${selectedModel === m.value ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted text-foreground/80 hover:text-foreground'}
+                                                        `}
+                                                    >
+                                                        <div className="flex flex-col items-start">
+                                                            <span>{m.label}</span>
+                                                            <span className="text-[10px] text-muted-foreground">{m.providerName}</span>
+                                                        </div>
+                                                        {selectedModel === m.value && <Check className="h-4 w-4 shrink-0" />}
+                                                    </button>
+                                                ))
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </>
+                        )}
+                    </div>
+
+                    {/* Settings Toggles */}
+                    <button
+                        onClick={() => setShowSystemPrompt(v => !v)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors"
+                    >
+                        <Settings2 className="h-4 w-4" />
+                        Prompt 設定
+                    </button>
                 </div>
-            )}
 
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
-                {messages.length === 0 && !isGenerating && (
-                    <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
-                        <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
-                            <Send className="h-5 w-5" />
-                        </div>
-                        <p className="text-sm">開始一段新的對話</p>
+                {/* System Prompt Panel */}
+                {showSystemPrompt && (
+                    <div className="px-4 py-3 border-b border-border bg-muted/30 shrink-0">
+                        <textarea
+                            value={systemPrompt}
+                            onChange={e => setSystemPrompt(e.target.value)}
+                            placeholder="輸入 System Prompt（留空則不使用）..."
+                            rows={3}
+                            className="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                        />
                     </div>
                 )}
 
-                {messages.map(msg => (
-                    <div key={msg.id} className={`flex flex-col gap-1.5 group ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground px-1">
-                            <span className="font-medium">{msg.role === 'user' ? '你' : 'AI'}</span>
-                        </div>
+                {/* Messages Container */}
+                <div
+                    ref={scrollContainerRef}
+                    className="flex-1 overflow-y-auto w-full relative"
+                >
+                    <div className={`mx-auto w-full space-y-8 py-8 ${selectedPreviewAttachment ? 'px-6 max-w-full' : 'px-4 max-w-3xl'}`}>
+                        {messages.length === 0 && !isGenerating && (
+                            <div className="flex flex-col items-center justify-center h-full min-h-[50vh] gap-4 text-muted-foreground">
+                                <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+                                    <Brain className="h-8 w-8 text-muted-foreground/50" />
+                                </div>
+                                <p className="text-sm font-medium">Hello, how can I help you today?</p>
+                            </div>
+                        )}
 
-                        {/* Attachment chips */}
-                        {msg.attachments && msg.attachments.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5 max-w-[80%]">
-                                {msg.attachments.map((att, i) => (
-                                    <AttachmentChip
-                                        key={i}
-                                        name={att.name}
-                                        mimeType={att.mimeType}
-                                        base64={att.base64}
-                                    />
+                        {messages.map((msg, index) => (
+                            <div key={msg.id} className={`flex w-full group ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+
+                                {/* Assistant Avatar */}
+                                {msg.role === 'assistant' && (
+                                    <div className="flex-shrink-0 mr-4 h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center mt-1 outline outline-1 outline-border">
+                                        <Bot className="h-5 w-5 text-primary" />
+                                    </div>
+                                )}
+
+                                <div className={`flex flex-col gap-2 max-w-[85%] ${msg.role === 'user' ? 'items-end' : 'items-start w-full'}`}>
+
+                                    {/* Edit Mode vs Render Mode */}
+                                    {editingId === msg.id ? (
+                                        <div className="w-full space-y-3 bg-card p-4 rounded-xl border border-border shadow-sm">
+                                            <textarea
+                                                value={editContent}
+                                                onChange={e => setEditContent(e.target.value)}
+                                                rows={4}
+                                                autoFocus
+                                                className="w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary shadow-inner"
+                                            />
+                                            {msg.role === 'user' && (
+                                                <div className="space-y-2">
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {editKeepAttachments.map((att, i) => (
+                                                            <AttachmentThumbnail key={`keep-${i}`} attachment={att} onRemove={() => setEditKeepAttachments(prev => prev.filter((_, j) => j !== i))} onClick={() => setSelectedPreviewAttachment(att)} />
+                                                        ))}
+                                                        {editAttachments.map((att, i) => (
+                                                            <AttachmentThumbnail key={`new-${i}`} attachment={att} onRemove={() => setEditAttachments(prev => prev.filter((_, j) => j !== i))} onClick={() => setSelectedPreviewAttachment(att)} />
+                                                        ))}
+                                                    </div>
+                                                    <input type="file" ref={editFileInputRef} className="hidden" multiple
+                                                        accept={`${ACCEPTED_IMAGE_TYPES},${ACCEPTED_DOC_TYPES}`}
+                                                        onChange={e => { handleFileSelect(e.target.files, true); e.target.value = '' }}
+                                                    />
+                                                    <button type="button" onClick={() => editFileInputRef.current?.click()}
+                                                        disabled={isGenerating}
+                                                        className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed bg-muted px-3 py-1.5 rounded-md"
+                                                    >
+                                                        <Paperclip className="h-3.5 w-3.5" /> 附加檔案
+                                                    </button>
+                                                </div>
+                                            )}
+                                            <div className="flex gap-2 justify-end pt-2">
+                                                <button onClick={cancelEdit}
+                                                    disabled={isGenerating}
+                                                    className="text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted px-4 py-2 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    取消
+                                                </button>
+                                                <button onClick={() => commitEdit(msg)}
+                                                    disabled={isGenerating}
+                                                    className="flex items-center gap-1.5 text-xs font-medium bg-primary text-primary-foreground px-4 py-2 rounded-md hover:bg-primary/90 shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    <Check className="h-3.5 w-3.5" />
+                                                    {msg.role === 'user' ? '儲存並重新生成' : '儲存'}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            {/* Normal Render */}
+                                            {msg.attachments && msg.attachments.length > 0 && (
+                                                <div className={`flex flex-wrap gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                                    {msg.attachments.map((att, i) => (
+                                                        <AttachmentThumbnail key={i} attachment={{ ...att, base64: att.base64 || '' }} onClick={() => setSelectedPreviewAttachment({ ...att, base64: att.base64 || '' })} />
+                                                    ))}
+                                                </div>
+                                            )}
+
+                                            {msg.content && (
+                                                <div className={`
+                                                    relative text-[15px] leading-relaxed
+                                                    ${msg.role === 'user'
+                                                        ? 'bg-muted text-foreground px-5 py-3.5 rounded-[24px] rounded-br-sm'
+                                                        : 'bg-transparent text-foreground py-1 w-full'
+                                                    }
+                                                `}>
+                                                    {msg.role === 'assistant'
+                                                        ? <MessageContent content={msg.content} isStreaming={msg.isStreaming} />
+                                                        : <p className="whitespace-pre-wrap">{msg.content}</p>
+                                                    }
+
+                                                    {/* Action buttons (Edit/Regenerate) */}
+                                                    {!msg.isStreaming && (
+                                                        <div className={`absolute -bottom-9 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ${msg.role === 'user' ? 'right-0' : '-left-2'}`}>
+                                                            <button
+                                                                onClick={() => startEdit(msg)}
+                                                                disabled={isGenerating}
+                                                                className="flex items-center gap-1.5 p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted bg-background/50 backdrop-blur-sm border border-transparent hover:border-border transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                                                                title="編輯"
+                                                            >
+                                                                <Edit2 className="h-3.5 w-3.5" />
+                                                            </button>
+                                                            {msg.role === 'assistant' && (
+                                                                <button
+                                                                    onClick={() => handleRegenerate(msg.id)}
+                                                                    disabled={isGenerating}
+                                                                    className="flex items-center gap-1.5 p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted bg-background/50 backdrop-blur-sm border border-transparent hover:border-border transition-all disabled:opacity-50 shadow-sm"
+                                                                    title="重新生成"
+                                                                >
+                                                                    <RefreshCw className="h-3.5 w-3.5" />
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+
+                        <StatusBadge text={statusText} />
+                        <div ref={messagesEndRef} className="h-4" />
+                    </div>
+
+                    {/* Scroll to bottom floating button — sticky inside the scroll container */}
+                    {showScrollButton && (
+                        <div className="sticky bottom-4 flex justify-center w-full pointer-events-none z-20">
+                            <button
+                                onClick={() => {
+                                    // One-shot smooth scroll to bottom, then re-enable rAF auto-scroll
+                                    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+                                    setTimeout(() => setIsAutoScrolling(true), 500)
+                                }}
+                                className="pointer-events-auto flex items-center justify-center h-8 w-8 rounded-full bg-background/80 backdrop-blur border border-border shadow-md text-muted-foreground hover:text-foreground hover:bg-background transition-all"
+                                aria-label="捲動到最底部"
+                            >
+                                <ChevronDown className="h-4 w-4" />
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                {/* Input Area */}
+                <div className="bg-background px-4 py-4 shrink-0">
+                    <div
+                        className={`relative mx-auto flex flex-col rounded-[24px] bg-muted/30 transition-all shadow-sm
+                                     border border-border/80 focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/50 focus-within:bg-background
+                                     hover:border-primary/30
+                                     ${selectedPreviewAttachment ? 'max-w-full' : 'max-w-3xl'}`}
+                        onDrop={handleDrop}
+                        onDragOver={handleDragOver}
+                    >
+                        {/* Attachments Section Inside Input Box */}
+                        {attachments.length > 0 && (
+                            <div className="flex flex-wrap gap-2 px-5 pt-4 pb-0">
+                                {attachments.map((att, i) => (
+                                    <AttachmentThumbnail key={i} attachment={att} onRemove={() => setAttachments(prev => prev.filter((_, j) => j !== i))} onClick={() => setSelectedPreviewAttachment(att)} />
                                 ))}
                             </div>
                         )}
 
-                        {/* Message bubble or Edit mode */}
-                        {editingId === msg.id ? (
-                            <div className="w-full max-w-[85%] space-y-2">
-                                <textarea
-                                    value={editContent}
-                                    onChange={e => setEditContent(e.target.value)}
-                                    rows={4}
-                                    autoFocus
-                                    className="w-full resize-none rounded-lg border border-ring bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        <textarea
+                            ref={textareaRef}
+                            value={input}
+                            onChange={e => setInput(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            placeholder="輸入訊息或拖曳檔案/圖片至此處... (Shift+Enter 換行)"
+                            disabled={isGenerating}
+                            rows={1}
+                            className={`w-full resize-none bg-transparent px-5 py-4 text-[15px] leading-relaxed focus:outline-none placeholder:text-muted-foreground disabled:opacity-50 min-h-[56px] max-h-[30vh] overflow-y-auto ${attachments.length > 0 ? 'pt-3' : ''}`}
+                        />
+
+                        {/* Input Actions Footer */}
+                        <div className="flex items-center justify-between px-3 pb-3 pt-1">
+                            <div className="flex items-center gap-1">
+                                <input ref={fileInputRef} type="file" multiple className="hidden"
+                                    accept={`${ACCEPTED_IMAGE_TYPES},${ACCEPTED_DOC_TYPES}`}
+                                    onChange={e => { handleFileSelect(e.target.files); e.target.value = '' }}
                                 />
-                                {msg.role === 'user' && (
-                                    <div className="space-y-1.5">
-                                        <div className="flex flex-wrap gap-1.5">
-                                            {editKeepAttachments.map((att, i) => (
-                                                <AttachmentChip key={`keep-${i}`} name={att.name} mimeType={att.mimeType}
-                                                    base64={att.base64}
-                                                    onRemove={() => setEditKeepAttachments(prev => prev.filter((_, j) => j !== i))}
-                                                />
-                                            ))}
-                                            {editAttachments.map((att, i) => (
-                                                <AttachmentChip key={`new-${i}`} name={att.name} mimeType={att.mimeType} previewUrl={att.previewUrl}
-                                                    onRemove={() => setEditAttachments(prev => prev.filter((_, j) => j !== i))}
-                                                />
-                                            ))}
-                                        </div>
-                                        <input type="file" ref={editFileInputRef} className="hidden" multiple
-                                            accept={`${ACCEPTED_IMAGE_TYPES},${ACCEPTED_DOC_TYPES}`}
-                                            onChange={e => { handleFileSelect(e.target.files, true); e.target.value = '' }}
-                                        />
-                                        <button type="button" onClick={() => editFileInputRef.current?.click()}
-                                            disabled={isGenerating}
-                                            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
-                                            <Paperclip className="h-3 w-3" /> 附加檔案
-                                        </button>
-                                    </div>
-                                )}
-                                <div className="flex gap-2">
-                                    <button onClick={() => commitEdit(msg)}
-                                        disabled={isGenerating}
-                                        className="flex items-center gap-1 text-xs bg-primary text-primary-foreground px-3 py-1.5 rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        <Check className="h-3 w-3" />
-                                        {msg.role === 'user' ? '儲存並重新生成' : '儲存'}
-                                    </button>
-                                    <button onClick={cancelEdit}
-                                        disabled={isGenerating}
-                                        className="text-xs text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md border border-border disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        取消
-                                    </button>
-                                </div>
+                                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isGenerating}
+                                    className="p-2 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
+                                    title="附加圖片或文件"
+                                >
+                                    <Paperclip className="h-5 w-5" />
+                                </button>
                             </div>
-                        ) : (
-                            <div className={`
-                                relative max-w-[85%] rounded-xl px-4 py-3 text-sm leading-relaxed
-                                ${msg.role === 'user'
-                                    ? 'bg-primary text-primary-foreground rounded-tr-sm'
-                                    : 'bg-muted text-foreground rounded-tl-sm border border-border'
-                                }
-                            `}>
-                                {msg.role === 'assistant'
-                                    ? <MessageContent content={msg.content} isStreaming={msg.isStreaming} />
-                                    : <p className="whitespace-pre-wrap">{msg.content}</p>
-                                }
 
-                                {!msg.isStreaming && (
-                                    <div className={`absolute -bottom-7 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ${msg.role === 'user' ? 'right-0' : 'left-0'}`}>
-                                        <button
-                                            onClick={() => startEdit(msg)}
-                                            disabled={isGenerating}
-                                            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground bg-background border border-border rounded px-2 py-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
-                                            <Edit2 className="h-3 w-3" /> 編輯
-                                        </button>
-                                        {msg.role === 'assistant' && (
-                                            <button
-                                                onClick={() => handleRegenerate(msg.id)}
-                                                disabled={isGenerating}
-                                                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground bg-background border border-border rounded px-2 py-0.5 disabled:opacity-50"
-                                            >
-                                                <RefreshCw className="h-3 w-3" /> 重新生成
-                                            </button>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        )}
+                            <button type="button" onClick={() => handleSubmit()}
+                                disabled={(!input.trim() && attachments.length === 0) || isGenerating}
+                                className={`flex items-center justify-center p-2.5 rounded-full transition-all duration-200 
+                                    ${(!input.trim() && attachments.length === 0)
+                                        ? 'bg-muted/80 text-muted-foreground'
+                                        : 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-md transform hover:scale-105 active:scale-95'
+                                    } disabled:opacity-50 disabled:hover:scale-100 disabled:shadow-none mr-1`}
+                            >
+                                {isGenerating ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5 pl-0.5" />}
+                            </button>
+                        </div>
                     </div>
-                ))}
-
-                <StatusBadge text={statusText} />
-                <div ref={messagesEndRef} />
-            </div>
-
-            {/* Input */}
-            <div className="border-t border-border bg-background p-4">
-                {attachments.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mb-3">
-                        {attachments.map((att, i) => (
-                            <AttachmentChip key={i} name={att.name} mimeType={att.mimeType} previewUrl={att.previewUrl}
-                                onRemove={() => setAttachments(prev => prev.filter((_, j) => j !== i))}
-                            />
-                        ))}
-                    </div>
-                )}
-                <div className="flex items-end gap-2 rounded-xl border border-input bg-background px-3 py-2 focus-within:ring-1 focus-within:ring-ring">
-                    <input ref={fileInputRef} type="file" multiple className="hidden"
-                        accept={`${ACCEPTED_IMAGE_TYPES},${ACCEPTED_DOC_TYPES}`}
-                        onChange={e => { handleFileSelect(e.target.files); e.target.value = '' }}
-                    />
-                    <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isGenerating}
-                        className="shrink-0 p-1 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
-                    >
-                        <Paperclip className="h-4 w-4" />
-                    </button>
-                    <textarea
-                        ref={textareaRef}
-                        value={input}
-                        onChange={e => setInput(e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        placeholder="輸入訊息... (Shift+Enter 換行)"
-                        disabled={isGenerating}
-                        rows={1}
-                        className="flex-1 resize-none bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground disabled:opacity-50 max-h-[200px] overflow-y-auto"
-                    />
-                    <button type="button" onClick={() => handleSubmit()}
-                        disabled={(!input.trim() && attachments.length === 0) || isGenerating}
-                        className="shrink-0 h-8 w-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 disabled:opacity-40 transition-colors"
-                    >
-                        {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                    </button>
+                    <p className="text-xs text-muted-foreground/50 text-center mt-3 font-medium">AI 助手可能會產生錯誤資訊，請小心查證。</p>
                 </div>
-                <p className="text-xs text-muted-foreground text-center mt-2">支援 JPG、PNG、PDF、DOC、CSV、TXT、MD 附件</p>
             </div>
+
+            {/* Split Sidebar View */}
+            {selectedPreviewAttachment && (
+                <FilePreviewSidebar
+                    attachment={selectedPreviewAttachment}
+                    onClose={() => setSelectedPreviewAttachment(null)}
+                />
+            )}
         </div>
     )
 }

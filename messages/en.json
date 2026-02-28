@@ -1,1 +1,72 @@
-{}
+{
+    "Home": {
+        "greeting": "Good afternoon",
+        "subtitle": "What do you want to achieve today?",
+        "research": "Research",
+        "documents": "Documents",
+        "code": "Code",
+        "images": "Images",
+        "placeholder": "Describe what you need help with...",
+        "concept": "Suna AI Interface Concept. Type a message and hit enter."
+    },
+    "Header": {
+        "tutorials": "Tutorials",
+        "login": "Log in",
+        "goToChat": "Go to Chat"
+    },
+    "Tutorials": {
+        "title": "Tutorials",
+        "subtitle": "Learn Kortix",
+        "description": "Step-by-step interactive tutorials to help you get the most out of Kortix. From getting started to advanced workflows, master every feature.",
+        "comingSoon": "More tutorials coming soon",
+        "checkBack": "We're always adding new tutorials to help you get the most out of Kortix. Check back regularly for fresh content and tips.",
+        "chapters": "Chapters",
+        "support": "Support",
+        "contact": "Contact us",
+        "resources": "Resources",
+        "chapterLabel": "Chapter {number}",
+        "comingSoonBadge": "Coming Soon",
+        "clickToInteract": "Click to interact"
+    },
+    "TutorialItems": {
+        "intro": {
+            "title": "Introduction to Kortix",
+            "desc": "Get a comprehensive overview of Kortix and discover the different AI-powered content generation modes available to supercharge your workflow."
+        },
+        "first_task": {
+            "title": "Getting Started: Your First Task",
+            "desc": "Learn the basics of creating and completing your first task with Kortix. This tutorial walks you through the essential workflow to get you productive right away."
+        },
+        "presentations": {
+            "title": "How to Create and Export Presentations",
+            "desc": "Discover how to create stunning presentations with Kortix and export them in various formats for sharing and presenting."
+        },
+        "manage_files": {
+            "title": "How to Create and Manage Files with Kortix",
+            "desc": "Learn how to create, organize, and manage files with Kortix. This tutorial covers downloading data, exporting to different formats like Excel, and more."
+        },
+        "media": {
+            "title": "Create Videos and Images",
+            "desc": "Explore the powerful media creation capabilities of Kortix. Learn how to generate videos and images using AI to enhance your projects."
+        },
+        "canvas": {
+            "title": "Use Our Canvas Feature",
+            "desc": "Master the Canvas feature to visually design and organize your content. This tutorial shows you how to leverage the canvas for creative workflows."
+        },
+        "custom_workers": {
+            "title": "Creating Custom Workers - Manual Configuration",
+            "desc": "Learn how to set up custom AI assistant workers with manual configuration. Explore integration options and tailor workers to your specific needs."
+        }
+    },
+    "Login": {
+        "welcomeBack": "Welcome back",
+        "signInToAccount": "Sign in to your account",
+        "continueWithGoogle": "Continue with Google",
+        "continueWithMicrosoft": "Continue with Microsoft",
+        "termsPart1": "By continuing, you agree to our ",
+        "termsOfService": "Terms of Service",
+        "termsPart2": " and ",
+        "privacyPolicy": "Privacy Policy",
+        "termsPart3": "."
+    }
+}

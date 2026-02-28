@@ -45,6 +45,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ se
         updates.projectId = body.projectId ?? null;
     }
 
+    // Update model + provider when user switches model in an existing session
+    if (typeof body.modelName === 'string' && body.modelName) {
+        updates.modelName = body.modelName;
+    }
+    if ('providerPrefix' in body) {
+        updates.providerPrefix = body.providerPrefix ?? null;
+    }
+
     await db.update(chatSessions).set(updates).where(eq(chatSessions.id, sessionId));
     return Response.json({ success: true });
 }

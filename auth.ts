@@ -77,17 +77,25 @@ export const authConfig = {
             }
 
             if (trigger === "update" && session !== null) {
-                token = { ...token, ...session };
+                token = { ...token, ...session }
+                // Also re-fetch name from DB to ensure latest value
+                if (token.id) {
+                    const fresh = await db.query.users.findFirst({
+                        where: eq(users.id, token.id as string)
+                    })
+                    if (fresh) token.name = fresh.name
+                }
             }
 
-            return token;
+            return token
         },
         async session({ session, token }) {
             if (session.user && token) {
-                session.user.id = token.id as string;
-                session.user.role = token.role as string;
+                session.user.id = token.id as string
+                session.user.role = token.role as string
+                if (token.name) session.user.name = token.name as string
             }
-            return session;
+            return session
         },
     },
 } satisfies NextAuthConfig;

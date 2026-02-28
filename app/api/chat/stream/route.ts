@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { adminSettings, userModels, mcpTools, chatSessions, chatMessages, chatFiles } from "@/lib/db/schema";
+import { adminSettings, userProviders, mcpTools, chatSessions, chatMessages, chatFiles } from "@/lib/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { parseFile, isImageFile, isDocumentFile } from "@/lib/parsers";
 
@@ -31,6 +31,7 @@ export async function POST(req: NextRequest) {
             editMessageId,  // string | null - if editing, truncate history at this point
             keepFileIds,    // string[] — file IDs from the old user message to keep
             newAttachments, // { name, mimeType, base64 }[] — additional files in edit mode
+            projectId,      // string | null — assign new session to a project
         } = body;
 
         const userId = session.user.id as string;
@@ -48,11 +49,18 @@ export async function POST(req: NextRequest) {
                     // ─── 1. Session Management ───────────────────────────────────────
                     let currentSessionId = sessionId as string | null;
 
+                    // Parse composite model value "{prefix}-{modelId}"
+                    const dashIdx = (selectedModel as string || '').indexOf('-');
+                    const providerPrefix = dashIdx > -1 ? (selectedModel as string).slice(0, dashIdx) : '';
+                    const realModelName = dashIdx > -1 ? (selectedModel as string).slice(dashIdx + 1) : (selectedModel as string);
+
                     if (!currentSessionId) {
                         const [newSession] = await db.insert(chatSessions).values({
                             userId,
-                            modelName: selectedModel || 'default',
+                            modelName: realModelName || selectedModel || 'default',
+                            providerPrefix: providerPrefix || null,
                             title: 'New Chat',
+                            projectId: projectId || null,
                         }).returning({ id: chatSessions.id });
                         currentSessionId = newSession.id;
                         send({ type: 'session_id', data: currentSessionId });
@@ -82,13 +90,21 @@ export async function POST(req: NextRequest) {
                     }
 
                     // ─── 2. Fetch Config ─────────────────────────────────────────────
-                    const [adminConf, userConf, allMcpTools] = await Promise.all([
+                    const [adminConf, allMcpTools] = await Promise.all([
                         db.query.adminSettings.findFirst(),
-                        db.query.userModels.findFirst({ where: eq(userModels.userId, userId) }),
                         db.query.mcpTools.findMany({
                             where: and(eq(mcpTools.userId, userId), eq(mcpTools.isActive, 1))
                         })
                     ]);
+
+                    // Look up provider by prefix
+                    const userConf = providerPrefix
+                        ? await db.query.userProviders.findFirst({
+                            where: and(eq(userProviders.userId, userId), eq(userProviders.prefix, providerPrefix))
+                        })
+                        : await db.query.userProviders.findFirst({
+                            where: and(eq(userProviders.userId, userId), eq(userProviders.enable, 1))
+                        });
 
                     if (!userConf?.apiUrl || !userConf?.apiKey) {
                         send({ type: 'error', data: '請先在設定頁面配置 API URL 和 Key。' });
@@ -260,7 +276,7 @@ export async function POST(req: NextRequest) {
                             'Authorization': `Bearer ${userConf.apiKey}`
                         },
                         body: JSON.stringify({
-                            model: selectedModel,
+                            model: realModelName || selectedModel,
                             messages: finalMessages,
                             stream: true
                         })

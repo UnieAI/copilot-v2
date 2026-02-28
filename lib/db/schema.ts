@@ -8,6 +8,7 @@ import {
     text,
     primaryKey,
     integer,
+    boolean,
 } from 'drizzle-orm/pg-core';
 import type { AdapterAccount } from '@auth/core/adapters';
 
@@ -102,15 +103,32 @@ export const adminSettings = pgTable('admin_settings', {
 // 3. User Specific Configuration
 // ----------------------------------------------------------------------------
 
-export const userModels = pgTable('user_models', {
+export const userProviders = pgTable('user_providers', {
     id: uuid('id').primaryKey().defaultRandom(),
     userId: uuid('userId')
         .notNull()
         .references(() => users.id, { onDelete: 'cascade' }),
 
+    enable: integer('enable').notNull().default(1),           // 1 = enabled, 0 = disabled
+    displayName: text('display_name').notNull().default(''),   // user-defined display name
+    prefix: varchar('prefix', { length: 4 }).notNull(),        // 4-char alphanumeric, unique per user
+
     apiUrl: text('api_url').notNull(),
     apiKey: text('api_key').notNull(),
-    modelList: json('model_list').notNull().default('[]'), // result from /v1/models
+    modelList: json('model_list').notNull().default('[]'),      // result from /v1/models (filtered)
+
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const userPreferences = pgTable('user_preferences', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('userId')
+        .notNull()
+        .unique()
+        .references(() => users.id, { onDelete: 'cascade' }),
+
+    selectedModel: text('selected_model'),           // the model ID (e.g. 'gpt-4o')
+    selectedProviderPrefix: text('selected_provider_prefix'), // provider prefix (e.g. 'OAI1')
 
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -168,6 +186,7 @@ export const chatSessions = pgTable('chat_sessions', {
     title: text('title').notNull().default('New Chat'),
     systemPrompt: text('system_prompt'),
     modelName: text('model_name').notNull(), // the model user selected for this chat
+    providerPrefix: text('provider_prefix'), // prefix of the provider this model belongs to
 
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -217,7 +236,8 @@ export const chatFiles = pgTable('chat_files', {
 export type User = InferSelectModel<typeof users>;
 export type NewUser = InferInsertModel<typeof users>;
 export type AdminSettings = InferSelectModel<typeof adminSettings>;
-export type UserModel = InferSelectModel<typeof userModels>;
+export type UserProvider = InferSelectModel<typeof userProviders>;
+export type UserPreference = InferSelectModel<typeof userPreferences>;
 export type McpTool = InferSelectModel<typeof mcpTools>;
 export type ChatProject = InferSelectModel<typeof chatProjects>;
 export type ChatSession = InferSelectModel<typeof chatSessions>;

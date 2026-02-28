@@ -7,12 +7,22 @@ import { useState, useEffect, useRef } from "react"
 import {
     MessageSquare, Settings, Users, SlidersHorizontal,
     Plus, Trash2, LogOut, Sun, Moon, Monitor,
-    PanelLeftClose, PanelLeft, Pencil, Check, X,
+    PanelLeftClose, PanelLeftOpen, Pencil, Check, X,
     FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown,
-    MoreHorizontal, FolderInput, FolderOutput
+    MoreHorizontal, FolderInput, FolderOutput, Search, MessageCircle
 } from "lucide-react"
 import { useTheme } from "next-themes"
 import { toast } from "sonner"
+import { cn } from "@/lib/utils"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+
+import {
+    Sidebar as ShadcnSidebar,
+    SidebarContent,
+    SidebarHeader,
+    SidebarRail,
+    useSidebar,
+} from '@/components/ui/sidebar';
 
 type ChatSession = {
     id: string
@@ -27,7 +37,7 @@ type ChatProject = {
     updatedAt: string
 }
 
-export function Sidebar() {
+export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>) {
     const pathname = usePathname()
     const router = useRouter()
     const { data: session } = useSession()
@@ -35,7 +45,8 @@ export function Sidebar() {
     const [sessions, setSessions] = useState<ChatSession[]>([])
     const [projects, setProjects] = useState<ChatProject[]>([])
     const [mounted, setMounted] = useState(false)
-    const [collapsed, setCollapsed] = useState(false)
+
+    const { state, setOpen, setOpenMobile, isMobile } = useSidebar()
 
     // Rename chat state
     const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -51,6 +62,9 @@ export function Sidebar() {
     // Move-to-folder menu
     const [moveMenuId, setMoveMenuId] = useState<string | null>(null)
 
+    // Confirm delete project dialog
+    const [confirmDeleteProject, setConfirmDeleteProject] = useState<{ id: string; name: string } | null>(null)
+
     const renameInputRef = useRef<HTMLInputElement>(null)
     const renameFolderInputRef = useRef<HTMLInputElement>(null)
 
@@ -61,6 +75,13 @@ export function Sidebar() {
         window.addEventListener('sidebar:refresh', handler)
         return () => window.removeEventListener('sidebar:refresh', handler)
     }, [])
+
+    // Auto-collapse sidebar when entering project pages
+    useEffect(() => {
+        if (pathname?.includes('/p/')) {
+            setOpen(false)
+        }
+    }, [pathname])
 
     // Close move menu on outside click
     useEffect(() => {
@@ -99,7 +120,7 @@ export function Sidebar() {
         try {
             await fetch(`/api/chat/${id}`, { method: 'DELETE' })
             setSessions(prev => prev.filter(s => s.id !== id))
-            if (pathname.includes(id)) router.push('/')
+            if (pathname?.includes(id)) router.push('/chat')
             toast.success("對話已刪除")
         } catch { toast.error("刪除失敗") }
     }
@@ -154,11 +175,23 @@ export function Sidebar() {
 
     const deleteProject = async (id: string, e: React.MouseEvent) => {
         e.preventDefault(); e.stopPropagation()
-        if (!confirm('確定要刪除此資料夾嗎？資料夾內的對話不會被刪除。')) return
+        const project = projects.find(p => p.id === id)
+        setConfirmDeleteProject({ id, name: project?.name || '此資料夾' })
+    }
+
+    const confirmDeleteProjectAction = async () => {
+        if (!confirmDeleteProject) return
+        const { id } = confirmDeleteProject
+        setConfirmDeleteProject(null)
         try {
             await fetch(`/api/chat/projects/${id}`, { method: 'DELETE' })
             setProjects(prev => prev.filter(p => p.id !== id))
-            setSessions(prev => prev.map(s => s.projectId === id ? { ...s, projectId: null } : s))
+            // Remove sessions that belonged to this project
+            setSessions(prev => prev.filter(s => s.projectId !== id))
+            // If currently viewing a session in this project, go home
+            const sessionInProject = sessions.find(s => s.projectId === id && pathname?.includes(s.id))
+            if (sessionInProject || pathname?.includes(`/p/${id}`)) router.push('/chat')
+            toast.success("資料夾及所有對話已刪除")
         } catch { toast.error("刪除失敗") }
     }
 
@@ -188,9 +221,9 @@ export function Sidebar() {
     const renderSession = (s: ChatSession) => (
         <div
             key={s.id}
-            className={`group relative flex items-center gap-1.5 rounded-md px-2 py-1.5 cursor-pointer transition-colors text-xs
-                ${currentSessionId === s.id ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/70 text-muted-foreground hover:text-foreground'}`}
-            onClick={() => { if (renamingId !== s.id) router.push(`/c/${s.id}`) }}
+            className={`group relative flex items-center gap-1.5 rounded-[12px] px-3 py-2 cursor-pointer transition-colors text-sm
+                ${currentSessionId === s.id ? 'bg-muted/80 text-foreground font-medium' : 'hover:bg-muted/50 text-muted-foreground hover:text-foreground'}`}
+            onClick={() => { if (renamingId !== s.id) router.push(s.projectId ? `/p/${s.projectId}/c/${s.id}` : `/c/${s.id}`) }}
         >
             <MessageSquare className="h-3 w-3 shrink-0 opacity-50" />
 
@@ -250,147 +283,255 @@ export function Sidebar() {
         </div>
     )
 
-    if (collapsed) {
-        return (
-            <aside className="w-12 h-full border-r border-border bg-background flex flex-col items-center py-4 gap-4">
-                <button onClick={() => setCollapsed(false)} className="p-2 rounded-md hover:bg-muted text-muted-foreground">
-                    <PanelLeft className="h-4 w-4" />
-                </button>
-                <Link href="/" className="p-2 rounded-md hover:bg-muted text-muted-foreground">
-                    <MessageSquare className="h-4 w-4" />
-                </Link>
-                <Link href="/settings" className="p-2 rounded-md hover:bg-muted text-muted-foreground">
-                    <Settings className="h-4 w-4" />
-                </Link>
-            </aside>
-        )
-    }
+    return (<>
+        <ShadcnSidebar
+            collapsible="icon"
+            className="border-none !bg-transparent [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']"
+            {...props}
+        >
+            <SidebarHeader className="pt-4 overflow-visible">
+                <div className="relative flex h-[32px] items-center">
+                    {/* Logo - fixed position on left */}
+                    <div className={cn(
+                        "absolute flex items-center justify-center group/logo",
+                        state === 'expanded' ? "left-6" : "left-1"
+                    )}>
+                        <button
+                            onClick={() => {
+                                state === 'expanded' ? router.push('/') : window.location.href = '/chat'
+                                isMobile && setOpenMobile(false)
+                            }}
+                            className="flex items-center gap-2 justify-center"
+                        >
+                            <div className={cn(
+                                "flex-shrink-0 h-6 w-6 rounded bg-foreground text-background flex items-center justify-center text-xs font-bold transition-[transform,opacity] duration-300 ease-out hover:rotate-180 hover:duration-700 transform-gpu",
+                                state === 'collapsed' && "group-hover/logo:opacity-0 group-hover/logo:scale-90"
+                            )}>U</div>
+                            {state === 'expanded' && (
+                                <span className="text-sm font-semibold tracking-tight transition-opacity duration-300">UnieAI</span>
+                            )}
+                        </button>
+                        {/* Expand button - only shows on hover when collapsed */}
+                        {state === 'collapsed' && (
+                            <button
+                                className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center cursor-pointer opacity-0 scale-75 group-hover/logo:opacity-100 group-hover/logo:scale-100 transition-[opacity,transform] duration-300 ease-out transform-gpu"
+                                onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setOpen(true);
+                                }}
+                                aria-label="Expand sidebar"
+                            >
+                                <PanelLeftOpen className="h-5 w-5" />
+                            </button>
+                        )}
+                    </div>
 
-    return (
-        <aside className="w-64 h-full border-r border-border bg-background flex flex-col shrink-0">
-            {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-                <div className="flex items-center gap-2">
-                    <div className="h-6 w-6 rounded bg-foreground text-background flex items-center justify-center text-xs font-bold">U</div>
-                    <span className="text-sm font-semibold tracking-tight">UnieAI Chatroom</span>
+                    {/* Right side buttons - fade in/out */}
+                    <div
+                        className={cn(
+                            "absolute right-4 flex items-center gap-1 transition-[opacity,right] duration-300 ease-out transform-gpu",
+                            state === 'collapsed'
+                                ? "opacity-0 pointer-events-none right-0"
+                                : "opacity-100 pointer-events-auto"
+                        )}
+                    >
+                        {/* 
+                        <button className="h-8 w-8 rounded-md flex items-center justify-center hover:bg-muted text-muted-foreground transition-colors">
+                            <Search className="h-4 w-4" />
+                        </button>
+                        */}
+                        <button
+                            onClick={() => {
+                                if (isMobile) {
+                                    setOpenMobile(false);
+                                } else {
+                                    setOpen(false);
+                                }
+                            }}
+                            className="h-8 w-8 rounded-md flex items-center justify-center hover:bg-muted text-muted-foreground transition-colors"
+                        >
+                            <PanelLeftClose className="h-4 w-4" />
+                        </button>
+                    </div>
                 </div>
-                <button onClick={() => setCollapsed(true)} className="p-1 rounded hover:bg-muted text-muted-foreground">
-                    <PanelLeftClose className="h-4 w-4" />
-                </button>
-            </div>
+            </SidebarHeader>
 
-            {/* New Chat + New Folder */}
-            <div className="px-3 py-2 flex gap-2">
-                <Link href="/" className="flex-1 flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium bg-muted/50 hover:bg-muted transition-colors">
-                    <Plus className="h-4 w-4" /> 新對話
-                </Link>
-                <button onClick={createProject} className="p-2 rounded-md bg-muted/50 hover:bg-muted transition-colors text-muted-foreground hover:text-foreground" title="新增資料夾">
-                    <FolderPlus className="h-4 w-4" />
-                </button>
-            </div>
+            <SidebarContent className="[&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none'] relative overflow-hidden">
+                {/* Collapsed layout Buttons */}
+                <div
+                    className={cn(
+                        "absolute inset-0 px-6 pt-4 space-y-3 flex flex-col items-center transition-opacity duration-150 ease-out transform-gpu",
+                        state === 'collapsed'
+                            ? "opacity-100 pointer-events-auto delay-100"
+                            : "opacity-0 pointer-events-none delay-0"
+                    )}
+                >
+                    <div className="w-full flex flex-col items-center space-y-3">
+                        <button
+                            onClick={() => { window.location.href = '/chat' }}
+                            className="h-10 w-10 flex items-center justify-center rounded-[14px] border border-border/40 bg-background hover:bg-muted/50 shadow-sm transition-all focus:ring-2 focus:ring-ring focus:outline-none"
+                        >
+                            <Plus className="h-4 w-4" />
+                        </button>
+                        <button onClick={createProject} className="h-10 w-10 flex items-center justify-center rounded-md hover:bg-card hover:border-[1.5px] hover:border-border text-muted-foreground">
+                            <FolderPlus className="h-4 w-4" />
+                        </button>
+                    </div>
+                    <div className="w-full flex flex-col items-center mt-auto space-y-3 pb-4">
+                        <Link href="/settings" className="h-10 w-10 flex items-center justify-center rounded-md hover:bg-card hover:border-[1.5px] hover:border-border text-muted-foreground">
+                            <Settings className="h-4 w-4" />
+                        </Link>
+                    </div>
+                </div>
 
-            {/* Chat List */}
-            <div className="flex-1 overflow-y-auto px-3 py-1 space-y-1 min-h-0">
-
-                {/* Folders */}
-                {projectsWithLatest.map(p => {
-                    const folderSessions = sessions.filter(s => s.projectId === p.id)
-                        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-                    const isOpen = !collapsedFolders.has(p.id)
-                    const FolderIcon = isOpen ? FolderOpen : Folder
-
-                    return (
-                        <div key={p.id}>
-                            {/* Folder row */}
-                            <div className="group flex items-center gap-1.5 rounded-md px-2 py-1.5 hover:bg-muted/50 transition-colors cursor-pointer"
-                                onClick={() => toggleFolder(p.id)}>
-                                <button onClick={e => { e.stopPropagation(); toggleFolder(p.id) }} className="text-muted-foreground">
-                                    {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                                </button>
-                                <FolderIcon className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-
-                                {renamingProjectId === p.id ? (
-                                    <input
-                                        ref={renameFolderInputRef}
-                                        value={renameProjectValue}
-                                        onChange={e => setRenameProjectValue(e.target.value)}
-                                        onKeyDown={e => { if (e.key === 'Enter') commitRenameProject(p.id); if (e.key === 'Escape') setRenamingProjectId(null) }}
-                                        onBlur={() => commitRenameProject(p.id)}
-                                        onClick={e => e.stopPropagation()}
-                                        className="flex-1 text-xs bg-transparent outline-none border-b border-primary"
-                                    />
-                                ) : (
-                                    <span className="flex-1 text-xs font-medium truncate">{p.name}</span>
-                                )}
-
-                                <span className="text-[10px] text-muted-foreground/60 shrink-0">{folderSessions.length}</span>
-
-                                {renamingProjectId !== p.id && (
-                                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                                        <button onClick={e => startRenameProject(p, e)} className="p-0.5 rounded hover:text-foreground" title="重命名">
-                                            <Pencil className="h-3 w-3" />
-                                        </button>
-                                        <button onClick={e => deleteProject(p.id, e)} className="p-0.5 rounded hover:text-destructive" title="刪除資料夾">
-                                            <Trash2 className="h-3 w-3" />
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Chats inside folder */}
-                            {isOpen && (
-                                <div className="ml-5 space-y-0.5">
-                                    {folderSessions.map(renderSession)}
-                                    {folderSessions.length === 0 && (
-                                        <p className="text-[10px] text-muted-foreground/50 px-2 py-1">空資料夾</p>
-                                    )}
+                {/* Expanded Layout Areas */}
+                <div
+                    className={cn(
+                        "flex flex-col h-full transition-opacity duration-150 ease-out transform-gpu",
+                        state === 'collapsed'
+                            ? "opacity-0 pointer-events-none delay-0"
+                            : "opacity-100 pointer-events-auto delay-100"
+                    )}
+                >
+                    <div className="px-6 pt-4 space-y-4">
+                        {/* New Chat Button */}
+                        <div className="w-full">
+                            <a
+                                onClick={() => { window.location.href = '/chat' }} // 一定要用 window.location.href = '/chat' 不要用router.push或Link herf
+                                className="cursor-pointer w-full flex items-center justify-between h-11 px-4 rounded-[16px] border border-border/40 shadow-sm bg-background hover:bg-muted/50 hover:shadow-md text-sm font-medium transition-all group/new-chat focus:outline-none focus:ring-2 focus:ring-ring"
+                            >
+                                <div className="flex items-center gap-2">
+                                    <Plus className="h-4 w-4" />
+                                    新對話
                                 </div>
+                                <button onClick={(e) => { e.stopPropagation(); createProject() }} className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted opacity-0 group-hover/new-chat:opacity-100 transition-opacity" title="新增資料夾">
+                                    <FolderPlus className="h-4 w-4" />
+                                </button>
+                            </a>
+                        </div>
+                    </div>
+
+                    {/* Chat Lists and Folders Container */}
+                    <div className="flex-1 overflow-hidden flex flex-col mt-4">
+                        <div className="flex-1 overflow-y-auto px-6 space-y-1 pb-4 min-h-0">
+                            {/* Folders */}
+                            {projectsWithLatest.map(p => {
+                                const folderSessions = sessions.filter(s => s.projectId === p.id)
+                                    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+                                const isOpen = !collapsedFolders.has(p.id)
+                                const FolderIcon = isOpen ? FolderOpen : Folder
+                                const isProjectActive = pathname?.includes(`/p/${p.id}`)
+
+                                return (
+                                    <div key={p.id}>
+                                        {/* Folder row */}
+                                        <div className={`group flex items-center gap-1.5 rounded-[12px] px-3 py-2 hover:bg-muted/50 transition-colors ${isProjectActive ? 'bg-muted/80' : ''
+                                            }`}>
+                                            {/* Chevron — toggles expand/collapse */}
+                                            <button
+                                                onClick={e => { e.stopPropagation(); toggleFolder(p.id) }}
+                                                className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                                            >
+                                                {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                                            </button>
+                                            <FolderIcon className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+
+                                            {renamingProjectId === p.id ? (
+                                                <input
+                                                    ref={renameFolderInputRef}
+                                                    value={renameProjectValue}
+                                                    onChange={e => setRenameProjectValue(e.target.value)}
+                                                    onKeyDown={e => { if (e.key === 'Enter') commitRenameProject(p.id); if (e.key === 'Escape') setRenamingProjectId(null) }}
+                                                    onBlur={() => commitRenameProject(p.id)}
+                                                    onClick={e => e.stopPropagation()}
+                                                    className="flex-1 text-xs bg-transparent outline-none border-b border-primary"
+                                                />
+                                            ) : (
+                                                // Folder name — navigates to /p/[id]
+                                                <span
+                                                    className="flex-1 text-xs font-medium truncate cursor-pointer hover:text-foreground"
+                                                    onClick={() => router.push(`/p/${p.id}`)}
+                                                >
+                                                    {p.name}
+                                                </span>
+                                            )}
+
+                                            <span className="text-[10px] text-muted-foreground/60 shrink-0">{folderSessions.length}</span>
+
+                                            {renamingProjectId !== p.id && (
+                                                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                                    <button onClick={e => startRenameProject(p, e)} className="p-0.5 rounded hover:text-foreground" title="重命名">
+                                                        <Pencil className="h-3 w-3" />
+                                                    </button>
+                                                    <button onClick={e => deleteProject(p.id, e)} className="p-0.5 rounded hover:text-destructive" title="刪除資料夾">
+                                                        <Trash2 className="h-3 w-3" />
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Chats inside folder */}
+                                        {isOpen && (
+                                            <div className="ml-5 space-y-0.5">
+                                                {folderSessions.map(renderSession)}
+                                                {folderSessions.length === 0 && (
+                                                    <p className="text-[10px] text-muted-foreground/50 px-2 py-1">空資料夾</p>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                )
+                            })}
+
+                            {/* Unassigned chats */}
+                            {unassigned.length > 0 && (
+                                <>
+                                    {projectsWithLatest.length > 0 && (
+                                        <p className="text-[10px] font-medium text-muted-foreground/60 px-2 pt-2 pb-0.5">最近對話</p>
+                                    )}
+                                    <div className="space-y-0.5">
+                                        {unassigned.map(renderSession)}
+                                    </div>
+                                </>
+                            )}
+
+                            {sessions.length === 0 && projects.length === 0 && (
+                                <p className="text-xs text-muted-foreground px-2 py-4 text-center">尚無對話紀錄</p>
                             )}
                         </div>
-                    )
-                })}
 
-                {/* Unassigned chats */}
-                {unassigned.length > 0 && (
-                    <>
-                        {projectsWithLatest.length > 0 && (
-                            <p className="text-[10px] font-medium text-muted-foreground/60 px-2 pt-2 pb-0.5">最近對話</p>
-                        )}
-                        <div className="space-y-0.5">
-                            {unassigned.map(renderSession)}
+                        {/* Bottom Settings & Admin Links */}
+                        <div className="px-5 pb-3 space-y-1">
+                            <Link href="/settings" className={`flex items-center gap-2 rounded-[12px] px-3 py-2.5 text-sm transition-colors ${pathname?.includes('/settings') && !pathname?.includes('/admin') ? 'bg-muted/80 font-medium text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'}`}>
+                                <Settings className="h-4 w-4" /> 設定
+                            </Link>
+                            {isAdmin && (
+                                <>
+                                    <Link href="/admin/users" className={`flex items-center gap-2 rounded-[12px] px-3 py-2.5 text-sm transition-colors ${pathname?.includes('/admin/users') ? 'bg-muted/80 font-medium text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'}`}>
+                                        <Users className="h-4 w-4" /> 使用者管理
+                                    </Link>
+                                    <Link href="/admin/settings" className={`flex items-center gap-2 rounded-[12px] px-3 py-2.5 text-sm transition-colors ${pathname?.includes('/admin/settings') ? 'bg-muted/80 font-medium text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'}`}>
+                                        <SlidersHorizontal className="h-4 w-4" /> 系統設定
+                                    </Link>
+                                </>
+                            )}
                         </div>
-                    </>
-                )}
+                    </div>
+                </div>
 
-                {sessions.length === 0 && projects.length === 0 && (
-                    <p className="text-xs text-muted-foreground px-2 py-4 text-center">尚無對話紀錄</p>
-                )}
-            </div>
+            </SidebarContent>
 
-            {/* Nav Links */}
-            <div className="px-3 py-2 border-t border-border space-y-0.5">
-                <Link href="/settings" className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${pathname?.includes('/settings') && !pathname?.includes('/admin') ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
-                    <Settings className="h-4 w-4" /> 設定
-                </Link>
-                {isAdmin && (
-                    <>
-                        <Link href="/admin/users" className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${pathname?.includes('/admin/users') ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
-                            <Users className="h-4 w-4" /> 使用者管理
-                        </Link>
-                        <Link href="/admin/settings" className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${pathname?.includes('/admin/settings') ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
-                            <SlidersHorizontal className="h-4 w-4" /> 系統設定
-                        </Link>
-                    </>
-                )}
-            </div>
-
-            {/* User & Theme */}
-            <div className="px-3 py-3 border-t border-border">
+            <div className={cn(
+                "px-6 pb-4 pt-2 border-t border-border/50",
+                state === 'collapsed' ? "hidden" : "block"
+            )}>
+                {/* User Info and Theme Area */}
                 <div className="flex items-center gap-2 mb-2">
                     {session?.user?.image ? (
                         <img src={session.user.image} alt="avatar" className="h-7 w-7 rounded-full" />
                     ) : (
-                        <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center text-xs font-medium">
+                        <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center text-xs font-medium shrink-0">
                             {session?.user?.name?.[0]?.toUpperCase() || 'U'}
                         </div>
                     )}
@@ -399,25 +540,44 @@ export function Sidebar() {
                         <p className="text-xs text-muted-foreground truncate">{(session?.user as any)?.role}</p>
                     </div>
                 </div>
-                <div className="flex items-center gap-1">
-                    {mounted && (
-                        <>
-                            <button onClick={() => setTheme('light')} className={`flex-1 p-1.5 rounded text-xs flex items-center justify-center transition-colors ${theme === 'light' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50'}`}>
-                                <Sun className="h-3.5 w-3.5" />
-                            </button>
-                            <button onClick={() => setTheme('dark')} className={`flex-1 p-1.5 rounded text-xs flex items-center justify-center transition-colors ${theme === 'dark' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50'}`}>
-                                <Moon className="h-3.5 w-3.5" />
-                            </button>
-                            <button onClick={() => setTheme('system')} className={`flex-1 p-1.5 rounded text-xs flex items-center justify-center transition-colors ${theme === 'system' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50'}`}>
-                                <Monitor className="h-3.5 w-3.5" />
-                            </button>
-                        </>
-                    )}
-                    <button onClick={() => signOut({ callbackUrl: '/login' })} className="flex-1 p-1.5 rounded text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 flex items-center justify-center transition-colors">
+                <div className="flex items-center justify-between gap-1 w-full">
+                    <div className="flex gap-1 flex-1">
+                        {mounted && (
+                            <>
+                                <button onClick={() => setTheme('light')} className={`flex-1 p-1.5 rounded text-xs flex items-center justify-center transition-colors ${theme === 'light' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50'}`}>
+                                    <Sun className="h-3.5 w-3.5" />
+                                </button>
+                                <button onClick={() => setTheme('dark')} className={`flex-1 p-1.5 rounded text-xs flex items-center justify-center transition-colors ${theme === 'dark' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50'}`}>
+                                    <Moon className="h-3.5 w-3.5" />
+                                </button>
+                                <button onClick={() => setTheme('system')} className={`flex-1 p-1.5 rounded text-xs flex items-center justify-center transition-colors ${theme === 'system' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50'}`}>
+                                    <Monitor className="h-3.5 w-3.5" />
+                                </button>
+                            </>
+                        )}
+                    </div>
+                    <button onClick={() => signOut({ callbackUrl: '/login' })} className="p-1.5 rounded text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 flex items-center justify-center transition-colors" title="Logout">
                         <LogOut className="h-3.5 w-3.5" />
                     </button>
                 </div>
             </div>
-        </aside>
-    )
+
+            <SidebarRail />
+        </ShadcnSidebar>
+
+        {/* Custom Confirm Delete Dialog */}
+        {
+            confirmDeleteProject && (
+                <ConfirmDialog
+                    title={`刪除「${confirmDeleteProject.name}」`}
+                    message="確定要刪除此資料夾嗎？資料夾內的所有對話也會一併刪除，此操作無法復原。"
+                    confirmLabel="刪除"
+                    cancelLabel="取消"
+                    variant="danger"
+                    onConfirm={confirmDeleteProjectAction}
+                    onCancel={() => setConfirmDeleteProject(null)}
+                />
+            )
+        }
+    </>)
 }
