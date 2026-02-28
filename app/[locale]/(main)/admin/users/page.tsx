@@ -5,6 +5,7 @@ import { users } from "@/lib/db/schema"
 import { eq } from "drizzle-orm"
 import { revalidatePath } from "next/cache"
 import { DeleteUserButton } from "@/components/admin/delete-user-button"
+import { RoleSelect } from "@/components/admin/role-select"
 
 const ROLE_LABELS: Record<string, string> = {
     super: '超級管理員',
@@ -127,22 +128,11 @@ export default async function AdminUsersPage() {
                                             <td className="px-4 py-3">
                                                 <div className="flex items-center justify-end gap-2">
                                                     {canEdit ? (
-                                                        <form action={changeRole} className="flex items-center gap-2">
-                                                            <input type="hidden" name="userId" value={u.id} />
-                                                            <select
-                                                                name="role"
-                                                                defaultValue={u.role}
-                                                                className="h-9 rounded-xl border border-input/60 bg-background px-3 text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all font-medium"
-                                                            >
-                                                                <option value="pending">待審核</option>
-                                                                <option value="user">用戶</option>
-                                                                <option value="admin">管理員</option>
-                                                                {/* "super" is intentionally NOT listed — only one super can exist */}
-                                                            </select>
-                                                            <button type="submit" className="h-9 px-4 text-xs font-medium rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-all shadow-sm active:scale-95">
-                                                                更新
-                                                            </button>
-                                                        </form>
+                                                        <RoleSelect
+                                                            userId={u.id}
+                                                            currentRole={u.role}
+                                                            changeAction={changeRole}
+                                                        />
                                                     ) : (
                                                         <span className="text-xs text-muted-foreground">—</span>
                                                     )}
