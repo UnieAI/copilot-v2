@@ -81,14 +81,14 @@ export function SettingsMcpSection({ initialTools }: SettingsMcpSectionProps) {
 
     return (
         <>
-            <section className="rounded-xl border border-border bg-card p-5 space-y-4">
+            <section className="space-y-4">
                 <div className="flex items-center justify-between">
                     <div>
                         <h2 className="font-semibold">MCP 工具</h2>
                         <p className="text-xs text-muted-foreground mt-0.5">管理 AI 可調用的外部工具，規範透過 OpenAPI 自動取得</p>
                     </div>
-                    <Button size="sm" variant="outline" onClick={openCreate} className="gap-1.5">
-                        <Plus className="h-3.5 w-3.5" />
+                    <Button size="sm" variant="outline" onClick={openCreate} className="gap-1.5 h-10 px-5 rounded-xl border border-input/60 shadow-sm hover:bg-muted transition-all active:scale-95">
+                        <Plus className="h-4 w-4" />
                         新增工具
                     </Button>
                 </div>
@@ -102,8 +102,8 @@ export function SettingsMcpSection({ initialTools }: SettingsMcpSectionProps) {
                         {tools.map(tool => {
                             const info = getInfo(tool)
                             return (
-                                <div key={tool.id} className="flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-muted/30 transition-colors">
-                                    <span className="text-muted-foreground shrink-0 text-sm">🔗</span>
+                                <div key={tool.id} className="flex items-center gap-3 p-4 rounded-xl border border-border/50 bg-background hover:bg-muted/50 transition-colors shadow-sm">
+                                    <span className="text-muted-foreground shrink-0 text-lg">🔗</span>
                                     <div className="flex-1 min-w-0">
                                         <p className="text-sm font-medium truncate">{info.name || tool.url}</p>
                                         <p className="text-xs text-muted-foreground truncate">
@@ -115,9 +115,9 @@ export function SettingsMcpSection({ initialTools }: SettingsMcpSectionProps) {
                                     <button
                                         onClick={() => handleToggle(tool)}
                                         disabled={isPending}
-                                        className={`text-xs px-2 py-0.5 rounded-full border transition-colors shrink-0 ${tool.isActive
+                                        className={`text-xs px-3 py-1 rounded-full border transition-colors shrink-0 font-medium ${tool.isActive
                                             ? "bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800"
-                                            : "bg-muted text-muted-foreground border-border"
+                                            : "bg-muted text-muted-foreground border-border/50"
                                             }`}
                                     >
                                         {tool.isActive ? "啟用" : "停用"}
@@ -125,19 +125,19 @@ export function SettingsMcpSection({ initialTools }: SettingsMcpSectionProps) {
 
                                     <button
                                         onClick={() => openEdit(tool)}
-                                        className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded hover:bg-muted"
+                                        className="p-2 text-muted-foreground hover:text-foreground transition-colors rounded-lg hover:bg-muted active:scale-95"
                                         title="編輯"
                                     >
-                                        <Pencil className="h-3.5 w-3.5" />
+                                        <Pencil className="h-4 w-4" />
                                     </button>
 
                                     <button
                                         onClick={() => handleDelete(tool)}
                                         disabled={isPending}
-                                        className="p-1.5 text-muted-foreground hover:text-destructive transition-colors rounded hover:bg-muted"
+                                        className="p-2 text-muted-foreground hover:text-destructive transition-colors rounded-lg hover:bg-destructive/10 active:scale-95"
                                         title="刪除"
                                     >
-                                        <Trash2 className="h-3.5 w-3.5" />
+                                        <Trash2 className="h-4 w-4" />
                                     </button>
                                 </div>
                             )

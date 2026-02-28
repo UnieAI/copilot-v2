@@ -2,7 +2,13 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+First, setup your environment variables by copying the example file:
+
+```bash
+cp .env.exmaple .env
+```
+
+Then, install dependencies and run the development server:
 
 ```bash
 npm i
@@ -16,11 +22,32 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 To run the required PostgreSQL and Redis instances locally:
 
 ```bash
-# PostgreSQL
+# PostgreSQL @ Windows
 docker run -d --name unieai-postgres -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=105114 -e POSTGRES_DB=UnieAI_Chatroom_DB -p 5432:5432 -v D:/Docker/Database/unieai-chatroom:/var/lib/postgresql/data --restart unless-stopped postgres:16
 
-# Redis
+# PostgreSQL @ Mac
+docker run -d \
+  --name unieai-postgres \
+  -e POSTGRES_USER=admin \
+  -e POSTGRES_PASSWORD=105114 \
+  -e POSTGRES_DB=UnieAI_Chatroom_DB \
+  -p 5432:5432 \
+  -v unieai-postgres-data:/var/lib/postgresql/data \
+  --restart unless-stopped \
+  postgres:16
+
+# Redis @ Windows
 docker run -d --name unieai-redis -p 6379:6379 -v D:/Docker/Database/unieai-redis:/data --restart unless-stopped redis:7
+
+# Redis @ Mac
+docker run -d \
+  --name unieai-redis \
+  -p 6379:6379 \
+  -v unieai-redis-data:/data \
+  --restart unless-stopped \
+  redis:7
+
+
 ```
 
 ## Drizzle ORM Migrations
