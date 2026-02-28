@@ -1,1 +1,72 @@
-{}
+{
+    "Home": {
+        "greeting": "午安",
+        "subtitle": "您今天想完成什麼？",
+        "research": "研究",
+        "documents": "文件",
+        "code": "程式碼",
+        "images": "圖片",
+        "placeholder": "描述您需要什麼幫助...",
+        "concept": "Suna AI 測試介面。輸入訊息並按下 Enter。"
+    },
+    "Header": {
+        "tutorials": "教學",
+        "login": "登入",
+        "goToChat": "前往聊天"
+    },
+    "Tutorials": {
+        "title": "教學指南",
+        "subtitle": "學習 Kortix",
+        "description": "循序漸進的互動式教學，幫助您充分利用 Kortix。從入門到進階工作流程，精通每個功能。",
+        "comingSoon": "即將推出更多教學",
+        "checkBack": "我們隨時新增教學內容，協助您發揮最大效益。請定期回來查看最新的內容與提示。",
+        "chapters": "章節",
+        "support": "支援",
+        "contact": "聯絡我們",
+        "resources": "資源",
+        "chapterLabel": "第 {number} 章",
+        "comingSoonBadge": "即將推出",
+        "clickToInteract": "點擊互動"
+    },
+    "TutorialItems": {
+        "intro": {
+            "title": "Kortix 簡介",
+            "desc": "全面了解 Kortix，探索不同的 AI 驅動內容生成模式，以增強您的工作流程。"
+        },
+        "first_task": {
+            "title": "開始使用：您的第一個任務",
+            "desc": "學習建立和完成 Kortix 第一個任務的基礎知識。本教學引導您完成基本工作流程，讓您立即提升效率。"
+        },
+        "presentations": {
+            "title": "如何建立和匯出簡報",
+            "desc": "探索如何使用 Kortix 建立令人驚豔的簡報，並將其匯出為各種格式以進行分享和簡報。"
+        },
+        "manage_files": {
+            "title": "如何使用 Kortix 建立和管理文件",
+            "desc": "了解如何使用 Kortix 建立、組織和管理文件。本教學涵蓋下載資料、匯出成 Excel 等不同格式的其他功能。"
+        },
+        "media": {
+            "title": "建立影片和圖片",
+            "desc": "探索 Kortix 強大的多媒體建立功能。了解如何使用 AI 生成影片和圖片來增強您的專案。"
+        },
+        "canvas": {
+            "title": "使用我們的畫布功能",
+            "desc": "精通畫布功能以視覺化方式設計和組織您的內容。本教學向您展示如何利用畫布進行創意工作流程。"
+        },
+        "custom_workers": {
+            "title": "建立自訂代理 - 手動設定",
+            "desc": "了解如何透過手動設定來建立自訂 AI 助手代理。探索整合選項，並根據您的特定需求量身打造代理。"
+        }
+    },
+    "Login": {
+        "welcomeBack": "歡迎回來",
+        "signInToAccount": "登入您的帳戶",
+        "continueWithGoogle": "使用 Google 登入",
+        "continueWithMicrosoft": "使用 Microsoft 登入",
+        "termsPart1": "繼續即表示您同意我們的",
+        "termsOfService": "服務條款",
+        "termsPart2": "和",
+        "privacyPolicy": "隱私權政策",
+        "termsPart3": "。"
+    }
+}

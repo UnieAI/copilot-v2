@@ -54,73 +54,85 @@ export default async function SettingsPage() {
         : []
 
     return (
-        <div className="p-6 max-w-3xl mx-auto h-full overflow-y-auto space-y-6">
-            <div>
-                <h1 className="text-2xl font-semibold">設定</h1>
-                <p className="text-sm text-muted-foreground mt-1">管理您的個人資料、API 模型與 MCP 工具</p>
+        <div className="h-full flex flex-col overflow-hidden">
+            {/* Sticky Header */}
+            <div className="sticky top-0 z-10 flex-shrink-0 border-b border-border/40 bg-background/95 backdrop-blur px-6 py-4 md:px-8">
+                <div className="max-w-4xl mx-auto flex items-center justify-between">
+                    <div>
+                        <h1 className="text-xl md:text-2xl font-medium tracking-tight">設定</h1>
+                        <p className="text-sm text-muted-foreground mt-0.5 font-normal">管理您的個人資料、API 模型與 MCP 工具</p>
+                    </div>
+                </div>
             </div>
 
-            {/* Profile */}
-            <section className="rounded-xl border border-border bg-card p-5 space-y-4">
-                <div>
-                    <h2 className="font-semibold">個人資料</h2>
-                    <p className="text-xs text-muted-foreground mt-0.5">更新您的顯示名稱</p>
-                </div>
-                <form action={saveProfile} className="flex gap-3">
-                    <input name="name" defaultValue={dbUser?.name || ""} placeholder="您的名稱"
-                        className="flex-1 h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                    />
-                    <button type="submit" className="h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90">儲存</button>
-                </form>
-                <div className="text-xs text-muted-foreground space-y-0.5 pt-1 border-t border-border">
-                    <p>Email：{dbUser?.email}</p>
-                    <p>角色：{dbUser?.role}</p>
-                    <p>登入方式：{dbUser?.provider || '-'}</p>
-                </div>
-            </section>
-
-            {/* API Models */}
-            <section className="rounded-xl border border-border bg-card p-5 space-y-4">
-                <div>
-                    <h2 className="font-semibold">API 模型設定</h2>
-                    <p className="text-xs text-muted-foreground mt-0.5">設定您的 OpenAI 相容 API，URL 需包含 /v1 後綴</p>
-                </div>
-                <form action={saveModels} className="space-y-3">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div className="space-y-1">
-                            <label className="text-xs font-medium">API URL（含 /v1）</label>
-                            <input name="apiUrl" placeholder="https://api.openai.com/v1" defaultValue={userModelConf?.apiUrl || ""}
-                                className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                                required
+            {/* Scrollable Content */}
+            <div className="flex-1 overflow-y-auto px-6 py-8 md:px-8">
+                <div className="max-w-4xl mx-auto space-y-8 pb-12">
+                    {/* Profile */}
+                    <section className="space-y-4">
+                        <div>
+                            <h2 className="font-semibold">個人資料</h2>
+                            <p className="text-xs text-muted-foreground mt-0.5">更新您的顯示名稱</p>
+                        </div>
+                        <form action={saveProfile} className="flex gap-3">
+                            <input name="name" defaultValue={dbUser?.name || ""} placeholder="您的名稱"
+                                className="flex-1 h-10 rounded-xl border border-input/60 bg-background px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
                             />
+                            <button type="submit" className="h-10 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-all shadow-sm active:scale-95">儲存</button>
+                        </form>
+                        <div className="text-xs text-muted-foreground space-y-0.5 pt-1 border-t border-border">
+                            <p>Email：{dbUser?.email}</p>
+                            <p>角色：{dbUser?.role}</p>
+                            <p>登入方式：{dbUser?.provider || '-'}</p>
                         </div>
-                        <div className="space-y-1">
-                            <label className="text-xs font-medium">API Key</label>
-                            <input name="apiKey" type="password" placeholder="sk-..." defaultValue={userModelConf?.apiKey || ""}
-                                className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                                required
-                            />
-                        </div>
-                    </div>
-                    <button type="submit" className="h-9 px-4 rounded-md border border-input bg-background text-sm font-medium hover:bg-muted transition-colors">
-                        同步模型列表
-                    </button>
-                </form>
+                    </section>
 
-                {modelList.length > 0 && (
-                    <div className="space-y-1.5">
-                        <p className="text-xs font-medium text-muted-foreground">已同步模型 ({modelList.length})</p>
-                        <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
-                            {modelList.map((m: any) => (
-                                <span key={m.id || String(m)} className="text-xs bg-muted border border-border px-2 py-0.5 rounded-full">{m.id || String(m)}</span>
-                            ))}
+                    {/* API Models */}
+                    <section className="space-y-4 pt-6 border-t border-border/40">
+                        <div>
+                            <h2 className="font-semibold">API 模型設定</h2>
+                            <p className="text-xs text-muted-foreground mt-0.5">設定您的 OpenAI 相容 API，URL 需包含 /v1 後綴</p>
                         </div>
-                    </div>
-                )}
-            </section>
+                        <form action={saveModels} className="space-y-3">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium">API URL（含 /v1）</label>
+                                    <input name="apiUrl" placeholder="https://api.openai.com/v1" defaultValue={userModelConf?.apiUrl || ""}
+                                        className="w-full h-10 rounded-xl border border-input/60 bg-background px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
+                                        required
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium ml-1">API Key</label>
+                                    <input name="apiKey" type="password" placeholder="sk-..." defaultValue={userModelConf?.apiKey || ""}
+                                        className="w-full h-10 rounded-xl border border-input/60 bg-background px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
+                                        required
+                                    />
+                                </div>
+                            </div>
+                            <button type="submit" className="h-10 px-5 rounded-xl border border-input/60 bg-background text-sm font-medium hover:bg-muted transition-colors shadow-sm active:scale-95">
+                                同步模型列表
+                            </button>
+                        </form>
 
-            {/* MCP Tools — client component with Dialog */}
-            <SettingsMcpSection initialTools={userMcpTools} />
+                        {modelList.length > 0 && (
+                            <div className="space-y-1.5">
+                                <p className="text-xs font-medium text-muted-foreground">已同步模型 ({modelList.length})</p>
+                                <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+                                    {modelList.map((m: any) => (
+                                        <span key={m.id || String(m)} className="text-xs bg-muted border border-border px-2 py-0.5 rounded-full">{m.id || String(m)}</span>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </section>
+
+                    {/* MCP Tools */}
+                    <div className="pt-6 border-t border-border/40">
+                        <SettingsMcpSection initialTools={userMcpTools} />
+                    </div>
+                </div>
+            </div>
         </div>
     )
 }
