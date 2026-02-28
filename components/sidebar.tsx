@@ -397,8 +397,8 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                     <div className="px-6 pt-4 space-y-4">
                         {/* New Chat Button */}
                         <div className="w-full">
-                            <button
-                                onClick={() => { window.location.href = '/chat' }}
+                            <a
+                                onClick={() => { window.location.href = '/chat' }} // 一定要用 window.location.href = '/chat' 不要用router.push或Link herf
                                 className="w-full flex items-center justify-between h-11 px-4 rounded-[16px] border border-border/40 shadow-sm bg-background hover:bg-muted/50 hover:shadow-md text-sm font-medium transition-all group/new-chat focus:outline-none focus:ring-2 focus:ring-ring"
                             >
                                 <div className="flex items-center gap-2">
@@ -408,7 +408,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                                 <button onClick={(e) => { e.stopPropagation(); createProject() }} className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted opacity-0 group-hover/new-chat:opacity-100 transition-opacity" title="新增資料夾">
                                     <FolderPlus className="h-4 w-4" />
                                 </button>
-                            </button>
+                            </a>
                         </div>
                     </div>
 

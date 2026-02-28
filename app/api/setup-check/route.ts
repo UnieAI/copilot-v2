@@ -23,9 +23,9 @@ export async function GET(req: NextRequest) {
         isAdmin
             ? db.query.adminSettings.findFirst().then(s => {
                 const missing: string[] = []
-                if (!s || (!s.workModelName && !s.workModelUrl)) missing.push("System Model（Work Model）")
-                if (!s || (!s.taskModelName && !s.taskModelUrl)) missing.push("Task Model（MCP Tool Decision）")
-                if (!s || (!s.visionModelName && !s.visionModelUrl)) missing.push("Vision Model")
+                if (!s || (!s.workModelName || !s.workModelUrl)) missing.push("System Model（Work Model）")
+                if (!s || (!s.taskModelName || !s.taskModelUrl)) missing.push("Task Model（MCP Tool Decision）")
+                if (!s || (!s.visionModelName || !s.visionModelUrl)) missing.push("Vision Model")
                 return missing
             })
             : Promise.resolve(null),
