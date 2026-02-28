@@ -264,13 +264,99 @@ export function ChatInterface({
     const [selectedPreviewAttachment, setSelectedPreviewAttachment] = useState<Attachment | null>(null)
 
     const messagesEndRef = useRef<HTMLDivElement>(null)
+    const scrollContainerRef = useRef<HTMLDivElement>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
     const editFileInputRef = useRef<HTMLInputElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+    // Scroll state — mirrors the pattern from step2.tsx
+    const [isAutoScrolling, setIsAutoScrolling] = useState(true)
+    const [showScrollButton, setShowScrollButton] = useState(false)
+
+    // IntersectionObserver: show/hide the scroll button based on messagesEndRef visibility
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+        const chatContainer = scrollContainerRef.current
+        const messagesEnd = messagesEndRef.current
+        if (!chatContainer || !messagesEnd) return
+
+        const checkScrollPosition = (isEndVisible?: boolean) => {
+            const { scrollHeight, scrollTop, clientHeight } = chatContainer
+            const distanceToBottom = scrollHeight - scrollTop - clientHeight
+            const isAtBottom = Math.abs(distanceToBottom) < 1
+
+            const containerRect = chatContainer.getBoundingClientRect()
+            const endRect = messagesEnd.getBoundingClientRect()
+            const computedVisible =
+                typeof isEndVisible !== "undefined"
+                    ? isEndVisible
+                    : endRect.top >= containerRect.top && endRect.bottom <= containerRect.bottom
+
+            setShowScrollButton(computedVisible ? false : !isAtBottom)
+        }
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                entries.forEach((entry) => checkScrollPosition(entry.isIntersecting))
+            },
+            { root: chatContainer, threshold: 0.1 }
+        )
+        observer.observe(messagesEnd)
+
+        const handleScroll = () => checkScrollPosition()
+        chatContainer.addEventListener("scroll", handleScroll)
+
+        const resizeObserver = new ResizeObserver(() => checkScrollPosition())
+        resizeObserver.observe(chatContainer)
+
+        checkScrollPosition()
+
+        return () => {
+            chatContainer.removeEventListener("scroll", handleScroll)
+            resizeObserver.disconnect()
+            observer.disconnect()
+        }
     }, [messages, statusText])
+
+    // rAF loop + wheel listener: the core auto-scroll engine
+    useEffect(() => {
+        if (!isAutoScrolling) return
+
+        const chatContainer = scrollContainerRef.current
+        if (!chatContainer) return
+
+        let animationFrameId: number
+
+        // Use direct scrollTop assignment — calling scrollIntoView({ behavior: "smooth" })
+        // on every frame starts a new animation each frame and causes severe jitter.
+        // rAF at ~60fps is already visually smooth without a CSS animation.
+        const tick = () => {
+            chatContainer.scrollTop = chatContainer.scrollHeight
+            animationFrameId = requestAnimationFrame(tick)
+        }
+
+        const handleWheel = (event: WheelEvent) => {
+            if (chatContainer.contains(event.target as Node)) {
+                setIsAutoScrolling(false)
+            }
+        }
+
+        animationFrameId = requestAnimationFrame(tick)
+        window.addEventListener("wheel", handleWheel, { passive: true })
+
+        return () => {
+            cancelAnimationFrame(animationFrameId)
+            window.removeEventListener("wheel", handleWheel)
+        }
+    }, [isAutoScrolling])
+
+    // Start auto-scroll when generation begins; stop when it ends
+    const prevIsGeneratingRef = useRef(false)
+    useEffect(() => {
+        if (isGenerating && !prevIsGeneratingRef.current) {
+            setIsAutoScrolling(true)
+        }
+        prevIsGeneratingRef.current = isGenerating
+    }, [isGenerating])
 
     useEffect(() => {
         if (availableModels.length > 0 && !selectedModel) {
@@ -694,7 +780,7 @@ export function ChatInterface({
 
     return (
         <div className="flex h-full w-full bg-background overflow-hidden relative">
-            <div className={`flex flex-col h-full bg-background transition-all duration-300 ease-in-out ${selectedPreviewAttachment ? 'w-1/2 min-w-0 border-r border-border' : 'w-full'} `}>
+            <div className={`relative flex flex-col h-full bg-background transition-all duration-300 ease-in-out ${selectedPreviewAttachment ? 'w-1/2 min-w-0 border-r border-border' : 'w-full'} `}>
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 bg-background/80 backdrop-blur sticky top-0 z-10 shrink-0">
 
@@ -777,7 +863,10 @@ export function ChatInterface({
                 )}
 
                 {/* Messages Container */}
-                <div className="flex-1 overflow-y-auto w-full">
+                <div
+                    ref={scrollContainerRef}
+                    className="flex-1 overflow-y-auto w-full relative"
+                >
                     <div className={`mx-auto w-full space-y-8 py-8 ${selectedPreviewAttachment ? 'px-6 max-w-full' : 'px-4 max-w-3xl'}`}>
                         {messages.length === 0 && !isGenerating && (
                             <div className="flex flex-col items-center justify-center h-full min-h-[50vh] gap-4 text-muted-foreground">
@@ -906,6 +995,23 @@ export function ChatInterface({
                         <StatusBadge text={statusText} />
                         <div ref={messagesEndRef} className="h-4" />
                     </div>
+
+                    {/* Scroll to bottom floating button — sticky inside the scroll container */}
+                    {showScrollButton && (
+                        <div className="sticky bottom-4 flex justify-center w-full pointer-events-none z-20">
+                            <button
+                                onClick={() => {
+                                    // One-shot smooth scroll to bottom, then re-enable rAF auto-scroll
+                                    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+                                    setTimeout(() => setIsAutoScrolling(true), 500)
+                                }}
+                                className="pointer-events-auto flex items-center justify-center h-8 w-8 rounded-full bg-background/80 backdrop-blur border border-border shadow-md text-muted-foreground hover:text-foreground hover:bg-background transition-all"
+                                aria-label="捲動到最底部"
+                            >
+                                <ChevronDown className="h-4 w-4" />
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 {/* Input Area */}
