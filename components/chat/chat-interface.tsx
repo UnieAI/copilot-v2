@@ -10,6 +10,8 @@ import {
     Brain, FileText, Bot, User
 } from "lucide-react"
 import { toast } from "sonner"
+import { useTranslations } from "next-intl"
+import { DynamicGreeting } from "@/components/ui/dynamic-greeting"
 
 // ─── Types ─────────────────────────────────────────────────────────────
 type Attachment = {
@@ -213,13 +215,16 @@ function StatusBadge({ text }: { text: string }) {
 export function ChatInterface({
     sessionId: initialSessionId,
     availableModels,
-    initialMessages = []
+    initialMessages = [],
+    initialQuery
 }: {
     sessionId?: string
     availableModels: string[]
     initialMessages?: DBMessage[]
+    initialQuery?: string
 }) {
     const router = useRouter()
+    const t = useTranslations('Home')
     const [sessionId, setSessionId] = useState(initialSessionId)
     const [messages, setMessages] = useState<UIMessage[]>(
         initialMessages.map(m => ({
@@ -249,10 +254,12 @@ export function ChatInterface({
     const fileInputRef = useRef<HTMLInputElement>(null)
     const editFileInputRef = useRef<HTMLInputElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
+    const hasFiredInitialQuery = useRef(false)
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
     }, [messages, statusText])
+
 
     useEffect(() => {
         if (availableModels.length > 0 && !selectedModel) {
@@ -409,6 +416,19 @@ export function ChatInterface({
             setStatusText("")
         }
     }, [isGenerating, messages, sessionId, selectedModel, systemPrompt, router])
+
+    // Handle auto-starting chat from home page query
+    useEffect(() => {
+        if (initialQuery && !hasFiredInitialQuery.current && messages.length === 0 && selectedModel) {
+            hasFiredInitialQuery.current = true;
+            // Clear the query from URL after grabbing it
+            window.history.replaceState({}, '', '/chat');
+            // Auto submit needs to happen after next tick so sendMessage is ready
+            setTimeout(() => {
+                sendMessage(initialQuery, []);
+            }, 0);
+        }
+    }, [initialQuery, messages.length, selectedModel, sendMessage]);
 
     const handleSubmit = (e?: React.FormEvent) => {
         e?.preventDefault()
@@ -634,7 +654,9 @@ export function ChatInterface({
                                 <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
                                     <Brain className="h-8 w-8 text-muted-foreground/50" />
                                 </div>
-                                <p className="text-sm font-medium">Hello, how can I help you today?</p>
+                                <p className="text-sm font-medium flex items-center gap-1">
+                                    <DynamicGreeting className="inline-block" />, {t('subtitle')}
+                                </p>
                             </div>
                         )}
 

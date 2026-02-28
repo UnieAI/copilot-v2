@@ -5,12 +5,14 @@ import { chatSessions, userModels, mcpTools, chatMessages } from "@/lib/db/schem
 import { eq, desc, and } from "drizzle-orm"
 import { ChatInterface } from "@/components/chat/chat-interface"
 
-export default async function ChatPage({ searchParams }: { searchParams: Promise<{ id?: string }> }) {
+export default async function ChatPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
     const session = await auth()
     if (!session?.user?.id) redirect('/login')
 
     const userId = session.user.id as string
-    const { id: sessionId } = await searchParams
+    const params = await searchParams
+    const sessionId = params.id as string | undefined
+    const initialQuery = params.q as string | undefined
 
     const userModelConf = await db.query.userModels.findFirst({
         where: eq(userModels.userId, userId)
@@ -38,6 +40,7 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
             sessionId={sessionId}
             availableModels={availableModels}
             initialMessages={initialMessages}
+            initialQuery={initialQuery as string | undefined}
         />
     )
 }

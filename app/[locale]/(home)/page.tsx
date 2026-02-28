@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { getSession } from 'next-auth/react';
 import { useTranslations } from 'next-intl';
+import { DynamicGreeting } from '@/components/ui/dynamic-greeting';
 
 export default function Home() {
     const router = useRouter();
@@ -38,11 +39,11 @@ export default function Home() {
         if (!inputValue.trim()) return;
 
         if (isLoggedIn) {
-            // If logged in, create a new chat (or go to /chat)
-            router.push('/chat');
+            // If logged in, create a new chat passing the query
+            router.push(`/chat?q=${encodeURIComponent(inputValue.trim())}`);
         } else {
             // If not logged in, redirect to login
-            router.push('/login');
+            router.push(`/login?q=${encodeURIComponent(inputValue.trim())}`);
         }
     };
 
@@ -51,7 +52,7 @@ export default function Home() {
             {/* Simple Header */}
             <header className="absolute top-0 left-0 right-0 z-50 px-6 py-4 flex items-center justify-between">
                 <Link href="/" className="flex items-center gap-2">
-                    <span className="font-bold text-xl tracking-tight text-foreground">Kortix</span>
+                    <span className="font-bold text-xl tracking-tight text-foreground">UnieAI Agent</span>
                 </Link>
                 <div className="flex items-center gap-4">
                     <Link href="/tutorials" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
@@ -95,7 +96,7 @@ export default function Home() {
 
                         <div className="animate-in fade-in-0 slide-in-from-bottom-4 duration-500 fill-mode-both">
                             <h1 className="text-3xl sm:text-4xl md:text-5xl font-medium text-foreground tracking-tight">
-                                {t('greeting')}
+                                <DynamicGreeting />
                             </h1>
                         </div>
 
