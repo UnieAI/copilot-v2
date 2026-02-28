@@ -399,7 +399,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                         <div className="w-full">
                             <a
                                 onClick={() => { window.location.href = '/chat' }} // 一定要用 window.location.href = '/chat' 不要用router.push或Link herf
-                                className="w-full flex items-center justify-between h-11 px-4 rounded-[16px] border border-border/40 shadow-sm bg-background hover:bg-muted/50 hover:shadow-md text-sm font-medium transition-all group/new-chat focus:outline-none focus:ring-2 focus:ring-ring"
+                                className="cursor-pointer w-full flex items-center justify-between h-11 px-4 rounded-[16px] border border-border/40 shadow-sm bg-background hover:bg-muted/50 hover:shadow-md text-sm font-medium transition-all group/new-chat focus:outline-none focus:ring-2 focus:ring-ring"
                             >
                                 <div className="flex items-center gap-2">
                                     <Plus className="h-4 w-4" />
