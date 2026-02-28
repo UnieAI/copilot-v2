@@ -269,56 +269,88 @@ export function ChatInterface({
     const editFileInputRef = useRef<HTMLInputElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-    // Scroll state
-    const [userScrolled, setUserScrolled] = useState(false)
+    // Scroll state — mirrors the pattern from step2.tsx
+    const [isAutoScrolling, setIsAutoScrolling] = useState(false)
     const [showScrollButton, setShowScrollButton] = useState(false)
-    const isProgrammaticScrollRef = useRef(false)
 
-    const checkIsAtBottom = useCallback(() => {
-        const el = scrollContainerRef.current
-        if (!el) return true
-        return el.scrollHeight - el.scrollTop - el.clientHeight < 80
-    }, [])
-
-    const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
-        isProgrammaticScrollRef.current = true
-        messagesEndRef.current?.scrollIntoView({ behavior })
-        setUserScrolled(false)
-        setShowScrollButton(false)
-        // Release the programmatic flag after the scroll animation settles
-        setTimeout(() => { isProgrammaticScrollRef.current = false }, 400)
-    }, [])
-
-    // Detect wheel input: immediately pause auto-scroll when user scrolls up
-    const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
-        if (e.deltaY < 0) {
-            // Scrolling up — user wants to read history
-            setUserScrolled(true)
-        }
-    }, [])
-
-    // Update scroll button visibility on scroll events
-    const handleScroll = useCallback(() => {
-        if (isProgrammaticScrollRef.current) return
-        const atBottom = checkIsAtBottom()
-        setShowScrollButton(!atBottom)
-        if (atBottom) {
-            setUserScrolled(false)
-        }
-    }, [checkIsAtBottom])
-
-    // Auto-scroll when messages change, unless user has scrolled away
+    // IntersectionObserver: show/hide the scroll button based on messagesEndRef visibility
     useEffect(() => {
-        if (!userScrolled) {
-            scrollToBottom("smooth")
-        }
-    }, [messages, statusText]) // eslint-disable-line react-hooks/exhaustive-deps
+        const chatContainer = scrollContainerRef.current
+        const messagesEnd = messagesEndRef.current
+        if (!chatContainer || !messagesEnd) return
 
-    // Reset userScrolled for each new generation so it starts auto-scrolling
+        const checkScrollPosition = (isEndVisible?: boolean) => {
+            const { scrollHeight, scrollTop, clientHeight } = chatContainer
+            const distanceToBottom = scrollHeight - scrollTop - clientHeight
+            const isAtBottom = Math.abs(distanceToBottom) < 1
+
+            const containerRect = chatContainer.getBoundingClientRect()
+            const endRect = messagesEnd.getBoundingClientRect()
+            const computedVisible =
+                typeof isEndVisible !== "undefined"
+                    ? isEndVisible
+                    : endRect.top >= containerRect.top && endRect.bottom <= containerRect.bottom
+
+            setShowScrollButton(computedVisible ? false : !isAtBottom)
+        }
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                entries.forEach((entry) => checkScrollPosition(entry.isIntersecting))
+            },
+            { root: chatContainer, threshold: 0.1 }
+        )
+        observer.observe(messagesEnd)
+
+        const handleScroll = () => checkScrollPosition()
+        chatContainer.addEventListener("scroll", handleScroll)
+
+        const resizeObserver = new ResizeObserver(() => checkScrollPosition())
+        resizeObserver.observe(chatContainer)
+
+        checkScrollPosition()
+
+        return () => {
+            chatContainer.removeEventListener("scroll", handleScroll)
+            resizeObserver.disconnect()
+            observer.disconnect()
+        }
+    }, [messages, statusText])
+
+    // rAF loop + wheel listener: the core auto-scroll engine from step2.tsx
+    useEffect(() => {
+        if (!isAutoScrolling) return
+
+        const chatContainer = scrollContainerRef.current
+        if (!chatContainer) return
+
+        let animationFrameId: number
+
+        const scrollSmoothly = () => {
+            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+            animationFrameId = requestAnimationFrame(scrollSmoothly)
+        }
+
+        const handleWheel = (event: WheelEvent) => {
+            if (chatContainer.contains(event.target as Node)) {
+                setIsAutoScrolling(false)
+            }
+        }
+
+        scrollSmoothly()
+        window.addEventListener("wheel", handleWheel, { passive: true })
+
+        return () => {
+            cancelAnimationFrame(animationFrameId)
+            window.removeEventListener("wheel", handleWheel)
+        }
+    }, [isAutoScrolling])
+
+    // Start auto-scroll when generation begins; stop when it ends
     const prevIsGeneratingRef = useRef(false)
     useEffect(() => {
         if (isGenerating && !prevIsGeneratingRef.current) {
-            setUserScrolled(false)
+            setIsAutoScrolling(true)
         }
         prevIsGeneratingRef.current = isGenerating
     }, [isGenerating])
@@ -830,8 +862,6 @@ export function ChatInterface({
                 {/* Messages Container */}
                 <div
                     ref={scrollContainerRef}
-                    onScroll={handleScroll}
-                    onWheel={handleWheel}
                     className="flex-1 overflow-y-auto w-full relative"
                 >
                     <div className={`mx-auto w-full space-y-8 py-8 ${selectedPreviewAttachment ? 'px-6 max-w-full' : 'px-4 max-w-3xl'}`}>
@@ -967,7 +997,7 @@ export function ChatInterface({
                     {showScrollButton && (
                         <div className="sticky bottom-4 flex justify-center w-full pointer-events-none z-20">
                             <button
-                                onClick={() => scrollToBottom("smooth")}
+                                onClick={() => setIsAutoScrolling(true)}
                                 className="pointer-events-auto flex items-center justify-center h-8 w-8 rounded-full bg-background/80 backdrop-blur border border-border shadow-md text-muted-foreground hover:text-foreground hover:bg-background transition-all"
                                 aria-label="捲動到最底部"
                             >
