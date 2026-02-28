@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     const sessions = await db.query.chatSessions.findMany({
         where: eq(chatSessions.userId, userId),
         orderBy: [desc(chatSessions.updatedAt)],
-        columns: { id: true, title: true, updatedAt: true }
+        columns: { id: true, title: true, updatedAt: true, projectId: true }
     });
 
     return Response.json(sessions);

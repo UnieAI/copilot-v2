@@ -36,8 +36,8 @@ type UIMessage = {
     isStreaming?: boolean
 }
 
-const ACCEPTED_IMAGE_TYPES = "image/png,image/jpeg"
-const ACCEPTED_DOC_TYPES = ".pdf,.doc,.docx,.csv,.txt,.md,.json"
+const ACCEPTED_IMAGE_TYPES = ".jpg,.jpeg,.png"
+const ACCEPTED_DOC_TYPES = ".pdf,.doc,.docx,.csv,.txt,.md"
 
 function fileToBase64(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -703,7 +703,7 @@ export function ChatInterface({
                         {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                     </button>
                 </div>
-                <p className="text-xs text-muted-foreground text-center mt-2">支援 JPG、PNG、PDF、DOC、CSV、TXT、MD、JSON 附件</p>
+                <p className="text-xs text-muted-foreground text-center mt-2">支援 JPG、PNG、PDF、DOC、CSV、TXT、MD 附件</p>
             </div>
         </div>
     )

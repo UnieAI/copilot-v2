@@ -1,6 +1,6 @@
 /**
  * Universal File Parser
- * Supports: PDF, DOC, DOCX, CSV, TXT, MD, JSON
+ * Supports: PDF, DOC, DOCX, CSV, TXT, MD
  * Images (JPG/PNG) are handled separately via the Vision Model
  */
 
@@ -23,7 +23,7 @@ export async function parseFile(name: string, mimeType: string, base64Data: stri
     if (ext === 'csv' || mimeType === 'text/csv') {
         return parseCsv(name, buffer)
     }
-    if (['txt', 'md', 'json'].includes(ext) || mimeType.startsWith('text/')) {
+    if (['txt', 'md'].includes(ext) || mimeType.startsWith('text/')) {
         return parsePlainText(name, buffer)
     }
 
@@ -77,5 +77,5 @@ export function isImageFile(name: string, mimeType: string): boolean {
 
 export function isDocumentFile(name: string, mimeType: string): boolean {
     const ext = name.split('.').pop()?.toLowerCase() || ''
-    return ['pdf', 'doc', 'docx', 'csv', 'txt', 'md', 'json'].includes(ext)
+    return ['pdf', 'doc', 'docx', 'csv', 'txt', 'md'].includes(ext)
 }

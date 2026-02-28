@@ -138,7 +138,23 @@ export const mcpTools = pgTable('mcp_tools', {
 });
 
 // ----------------------------------------------------------------------------
-// 4. Chat Interface
+// 5. Chat Projects / Folders
+// ----------------------------------------------------------------------------
+
+export const chatProjects = pgTable('chat_projects', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('userId')
+        .notNull()
+        .references(() => users.id, { onDelete: 'cascade' }),
+
+    name: text('name').notNull().default('New Folder'),
+
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// ----------------------------------------------------------------------------
+// 6. Chat Interface
 // ----------------------------------------------------------------------------
 
 export const chatSessions = pgTable('chat_sessions', {
@@ -146,6 +162,8 @@ export const chatSessions = pgTable('chat_sessions', {
     userId: uuid('userId')
         .notNull()
         .references(() => users.id, { onDelete: 'cascade' }),
+    projectId: uuid('projectId')
+        .references(() => chatProjects.id, { onDelete: 'set null' }),
 
     title: text('title').notNull().default('New Chat'),
     systemPrompt: text('system_prompt'),
@@ -201,6 +219,7 @@ export type NewUser = InferInsertModel<typeof users>;
 export type AdminSettings = InferSelectModel<typeof adminSettings>;
 export type UserModel = InferSelectModel<typeof userModels>;
 export type McpTool = InferSelectModel<typeof mcpTools>;
+export type ChatProject = InferSelectModel<typeof chatProjects>;
 export type ChatSession = InferSelectModel<typeof chatSessions>;
 export type ChatMessage = InferSelectModel<typeof chatMessages>;
 export type ChatFile = InferSelectModel<typeof chatFiles>;

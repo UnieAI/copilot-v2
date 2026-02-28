@@ -247,6 +247,11 @@ export async function POST(req: NextRequest) {
                         toolCalls: [] as any
                     }).returning({ id: chatMessages.id });
 
+                    // Bump session updatedAt so sidebar order reflects latest activity
+                    await db.update(chatSessions)
+                        .set({ updatedAt: new Date() })
+                        .where(eq(chatSessions.id, currentSessionId));
+
                     // ─── 7. Stream Main Generation ──────────────────────────────────
                     const response = await fetch(`${cleanApiUrl}/v1/chat/completions`, {
                         method: 'POST',
@@ -348,6 +353,13 @@ async function generateChatTitle(
 ) {
     if (!adminConf?.workModelUrl || !adminConf?.workModelKey || !adminConf?.workModelName) return;
 
+    // Only generate a title for brand-new sessions (title === 'New Chat')
+    const existing = await db.query.chatSessions.findFirst({
+        where: eq(chatSessions.id, sessionId),
+        columns: { title: true }
+    });
+    if (existing?.title && existing.title !== 'New Chat') return;
+
     try {
         const workBase = adminConf.workModelUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
         const res = await fetch(`${workBase}/v1/chat/completions`, {
@@ -364,7 +376,6 @@ async function generateChatTitle(
                         content: `根據以下對話，生成一個簡短的標題（不超過20個字，不加引號）：\n\n用戶：${userPrompt}\n\n助手：${assistantResponse.slice(0, 200)}`
                     }
                 ],
-                // max_tokens: 50,
                 temperature: 0.7,
             })
         });
