@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { adminSettings } from "@/lib/db/schema";
-import { describePdfWithVision, isPdf, type PdfVisionProgress } from "@/lib/parsers/pdf-vision";
+import { processPdfPagesWithVLM, isPdf, type PdfVisionProgress } from "@/lib/parsers/pdf-vision";
 import { parseFile } from "@/lib/parsers";
 
 export async function POST(req: NextRequest) {
@@ -37,14 +37,9 @@ export async function POST(req: NextRequest) {
                 let summary: string | null = null;
 
                 try {
-                    summary = await describePdfWithVision({
+                    summary = await processPdfPagesWithVLM({
                         name,
                         base64,
-                        vision: {
-                            url: adminConf.visionModelUrl,
-                            key: adminConf.visionModelKey,
-                            model: adminConf.visionModelName,
-                        },
                         onProgress,
                     });
                 } catch (e: any) {

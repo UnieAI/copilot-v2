@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { adminSettings, userProviders, mcpTools, chatSessions, chatMessages, chatFiles, userGroups, groupProviders, groupTokenUsage, tokenUsage, groupUserQuotas, groupUserModelQuotas, groupModelQuotas } from "@/lib/db/schema";
 import { eq, and, inArray, sql } from "drizzle-orm";
 import { parseFile, isImageFile, isDocumentFile } from "@/lib/parsers";
-import { describePdfWithVision, isPdf } from "@/lib/parsers/pdf-vision";
+import { processPdfPagesWithVLM, isPdf } from "@/lib/parsers/pdf-vision";
 
 /** Strip <think>...</think> blocks (including unclosed ones) and trim. */
 function stripThink(text: string): string {
@@ -186,26 +186,36 @@ export async function POST(req: NextRequest) {
                                     }
 
                                     if (visionConfig) {
-                                        const summary = await describePdfWithVision({
-                                            name,
-                                            base64,
-                                            vision: visionConfig,
-                                            onProgress: (ev) => {
-                                                if (ev.type === 'status') send({ type: 'status', data: ev.message })
-                                                if (ev.type === 'done') send({ type: 'status', data: `PDF ${name} 解析完成` })
-                                                if (ev.type === 'error') send({ type: 'status', data: `PDF ${name} 解析失敗 (${ev.message})` })
-                                            }
-                                        }).catch(async (e) => {
-                                            send({ type: 'status', data: `PDF ${name} 解析失敗，改用文字解析: ${e?.message || ''}` })
-                                            return await fallbackParse()
-                                        })
+                                        try {
+                                            const summary = await processPdfPagesWithVLM({
+                                                name,
+                                                base64,
+                                                onProgress: (ev) => {
+                                                    if (ev.type === 'status') {
+                                                        send({ type: 'status', data: ev.message });
+                                                    } else if (ev.type === 'page_progress') {
+                                                        send({ 
+                                                            type: 'status', 
+                                                            data: `PDF ${name} - 分析第 ${ev.page}/${ev.totalPages} 頁...` 
+                                                        });
+                                                    } else if (ev.type === 'done') {
+                                                        send({ type: 'status', data: `PDF ${name} 解析完成` });
+                                                    } else if (ev.type === 'error') {
+                                                        send({ type: 'status', data: `PDF ${name} 解析失敗 (${ev.message})` });
+                                                    }
+                                                }
+                                            });
 
-                                        if (summary) return `[PDF ${name} 描述]\n${summary}`
-                                        return `[PDF ${name} 解析失敗]`
+                                            if (summary) return `[PDF ${name} 完整分析]\n${summary}`;
+                                            return `[PDF ${name} 解析失敗]`;
+                                        } catch (e: any) {
+                                            send({ type: 'status', data: `PDF ${name} 解析失敗，改用文字解析: ${e?.message || ''}` });
+                                            return await fallbackParse();
+                                        }
                                     }
 
-                                    send({ type: 'status', data: `PDF ${name} 無視覺模型，改用文字解析` })
-                                    return await fallbackParse()
+                                    send({ type: 'status', data: `PDF ${name} 無視覺模型，改用文字解析` });
+                                    return await fallbackParse();
                                 } else if (isImageFile(name, mimeType)) {
                                     if (adminConf?.visionModelUrl && adminConf?.visionModelKey && adminConf?.visionModelName) {
                                         try {
