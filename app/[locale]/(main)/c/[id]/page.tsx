@@ -33,19 +33,27 @@ export default async function ChatSessionPage({ params }: { params: Promise<{ id
         ...(await getGroupModels(userId)),
     ]
 
-    // Load messages
-    const initialMessages = await db.query.chatMessages.findMany({
-        where: and(eq(chatMessages.sessionId, sessionId), eq(chatMessages.userId, userId)),
-        orderBy: (m, { asc }) => [asc(m.createdAt)]
-    })
+    // Fetch the session to ensure it exists and get stored model+provider
+    // Add a retry mechanism since we might hit this page immediately after the API
+    // created the session but before the DB read replica has caught up (preventing a redirect loop).
+    let chatSession
+    for (let i = 0; i < 3; i++) {
+        chatSession = await db.query.chatSessions.findFirst({
+            where: and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)),
+        })
+        if (chatSession) break
+        // Wait 300ms before retrying
+        await new Promise(r => setTimeout(r, 300))
+    }
 
-    if (initialMessages.length === 0) {
+    if (!chatSession) {
         redirect('/chat')
     }
 
-    // Fetch the session to get stored model+provider
-    const chatSession = await db.query.chatSessions.findFirst({
-        where: and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)),
+    // Load messages (may be empty for brand-new sessions)
+    const initialMessages = await db.query.chatMessages.findMany({
+        where: and(eq(chatMessages.sessionId, sessionId), eq(chatMessages.userId, userId)),
+        orderBy: (m, { asc }) => [asc(m.createdAt)]
     })
 
     // Task 5: Determine initial model

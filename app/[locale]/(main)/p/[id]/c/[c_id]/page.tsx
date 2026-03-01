@@ -23,15 +23,24 @@ export default async function ProjectChatPage({
     })
     if (!project) redirect('/chat')
 
-    // Verify the chat belongs to this project and user
-    const chatSession = await db.query.chatSessions.findFirst({
-        where: and(
-            eq(chatSessions.id, chatId),
-            eq(chatSessions.userId, userId),
-            eq(chatSessions.projectId, projectId),
-        ),
-    })
-    if (!chatSession) redirect(`/p/${projectId}`)
+    // Fetch the session to ensure it exists and get stored model+provider
+    let chatSession
+    for (let i = 0; i < 3; i++) {
+        chatSession = await db.query.chatSessions.findFirst({
+            where: and(
+                eq(chatSessions.id, chatId),
+                eq(chatSessions.userId, userId),
+                eq(chatSessions.projectId, projectId)
+            ),
+        })
+        if (chatSession) break
+        // Wait 300ms before retrying
+        await new Promise(r => setTimeout(r, 300))
+    }
+
+    if (!chatSession) {
+        redirect(`/p/${projectId}`)
+    }
 
     // Get all chats in this project
     const projectSessions = await db.query.chatSessions.findMany({

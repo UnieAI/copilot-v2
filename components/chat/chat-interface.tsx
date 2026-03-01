@@ -807,6 +807,31 @@ export function ChatInterface({
         const conversationHistory = historyMessages.map(m => ({ role: m.role, content: m.content }))
         conversationHistory.push({ role: 'user', content })
 
+        const failActiveStream = (errorText?: string) => {
+            const fallback = errorText || '產生回應失敗，請稍後再試。'
+            setMessages(prev => prev.map(m => {
+                if (m.id === aiMsgId) {
+                    return { ...m, isStreaming: false, content: m.content || fallback }
+                }
+                return m
+            }))
+            const activeKey = storeKeyRef.current
+            if (activeKey) {
+                streamStore.update(activeKey, e => {
+                    e.isGenerating = false
+                    e.statusText = ''
+                    e.messages = e.messages.map(m => m.id === aiMsgId ? { ...m, isStreaming: false, content: m.content || fallback } : m)
+                })
+                streamStore.finish(activeKey)
+                window.dispatchEvent(new CustomEvent('chat:active', { detail: null }))
+                storeKeyRef.current = null
+            }
+            setIsGenerating(false)
+            setStatusText('')
+            abortControllerRef.current?.abort()
+            abortControllerRef.current = null
+        }
+
         try {
             // Create AbortController for this stream
             const ac = new AbortController()
@@ -839,9 +864,9 @@ export function ChatInterface({
             })
 
             if (!res.ok || !res.body) {
-                toast.error("請求失敗: " + res.statusText)
-                setIsGenerating(false)
-                setStatusText("")
+                const errMsg = "請求失敗: " + res.statusText
+                toast.error(errMsg)
+                failActiveStream(errMsg)
                 return
             }
 
@@ -851,6 +876,7 @@ export function ChatInterface({
             let userMsgDbId: string | undefined
             const tempUserMsgId = userMsg.id   // capture before closure changes
             let buffer = ""
+            let streamErrored = false
 
             while (true) {
                 const { value, done } = await reader.read()
@@ -890,6 +916,9 @@ export function ChatInterface({
                             })
                         } else if (ev.type === 'error') {
                             toast.error(ev.data)
+                            failActiveStream(ev.data)
+                            streamErrored = true
+                            break
                         } else if (ev.type === 'title_updated') {
                             window.dispatchEvent(new CustomEvent('sidebar:refresh'))
                             if (ev.data?.sessionId && ev.data?.title) {
@@ -917,13 +946,16 @@ export function ChatInterface({
                         }
                     } catch { }
                 }
+                if (streamErrored) break
             }
+            if (streamErrored) return
             // Stream fully closed — clean up store and refresh only if we have a real session id
             const finishedKey = storeKeyRef.current
             if (finishedKey) {
                 streamStore.finish(finishedKey)
                 window.dispatchEvent(new CustomEvent('chat:active', { detail: null }))
                 storeKeyRef.current = null
+                abortControllerRef.current = null
                 if (!finishedKey.startsWith('pending-')) {
                     router.refresh()
                 }
@@ -934,6 +966,7 @@ export function ChatInterface({
                 // User navigated away — clean up silently
                 setIsGenerating(false)
                 setStatusText('')
+                abortControllerRef.current = null
                 if (storeKeyRef.current) {
                     streamStore.abort(storeKeyRef.current)
                     window.dispatchEvent(new CustomEvent('chat:active', { detail: null }))
@@ -942,6 +975,7 @@ export function ChatInterface({
                 return
             }
             toast.error('串流連線失敗: ' + e.message)
+            failActiveStream()
         } finally {
             setIsGenerating(false)
             setStatusText('')
@@ -981,6 +1015,11 @@ export function ChatInterface({
         setIsGenerating(true)
         setStatusText("正在重新生成...")
 
+        const markRegenFailed = (errorText?: string) => {
+            const fallback = errorText || '重新生成失敗，請稍後再試。'
+            setMessages(prev => prev.map(m => m.id === aiMsgId ? { ...m, isStreaming: false, content: m.content || fallback } : m))
+        }
+
         const history = [...prevMessages.map(m => ({ role: m.role, content: m.content })), { role: 'user', content: userMsg.content }]
 
         // Carry over the user message's attachments for context
@@ -1003,7 +1042,14 @@ export function ChatInterface({
                     editMessageId: regenEditId || null,
                 })
             })
-            if (!res.ok || !res.body) { setIsGenerating(false); setStatusText(""); return }
+            if (!res.ok || !res.body) {
+                const errMsg = '重新生成失敗: ' + res.statusText
+                toast.error(errMsg)
+                markRegenFailed(errMsg)
+                setIsGenerating(false)
+                setStatusText("")
+                return
+            }
 
             const reader = res.body.getReader()
             const decoder = new TextDecoder()
@@ -1011,6 +1057,7 @@ export function ChatInterface({
             let aiMsgDbId: string | undefined
             let newUserMsgDbId: string | undefined
             const existingUserMsgId = userMsg.id   // capture before async
+            let streamErrored = false
 
             while (true) {
                 const { value, done } = await reader.read()
@@ -1027,6 +1074,11 @@ export function ChatInterface({
                             setMessages(prev => prev.map(m => m.id === aiMsgId ? { ...m, content: m.content + ev.data } : m))
                         } else if (ev.type === 'title_updated') {
                             window.dispatchEvent(new CustomEvent('sidebar:refresh'))
+                        } else if (ev.type === 'error') {
+                            toast.error(ev.data)
+                            markRegenFailed(ev.data)
+                            streamErrored = true
+                            break
                         } else if (ev.type === 'done') {
                             aiMsgDbId = ev.data?.messageId
                             newUserMsgDbId = ev.data?.userMessageId
@@ -1042,9 +1094,14 @@ export function ChatInterface({
                         }
                     } catch { }
                 }
+                if (streamErrored) break
             }
+            if (streamErrored) return
             if (sessionId) router.refresh()
-        } catch { } finally {
+        } catch (e: any) {
+            toast.error('重新生成失敗: ' + (e?.message || ''))
+            markRegenFailed()
+        } finally {
             setIsGenerating(false)
             setStatusText("")
         }
