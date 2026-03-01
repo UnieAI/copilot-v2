@@ -1,3 +1,6 @@
 [submodule "suna"]
 	path = suna
 	url = https://github.com/kortix-ai/suna.git
+[submodule "submodules/daytona"]
+	path = submodules/daytona
+	url = https://github.com/daytonaio/daytona.git

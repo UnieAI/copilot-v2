@@ -1,23 +1,16 @@
 import { NextRequest } from "next/server";
-import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { groupProviders } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
-
-async function requireAdmin() {
-    const session = await auth();
-    const role = (session?.user as any)?.role as string;
-    if (!session?.user || !["admin", "super"].includes(role)) return null;
-    return session;
-}
+import { requireGroupEditor } from "@/lib/group-permissions";
 
 // POST /api/admin/groups/[id]/providers/[pid]/sync
 export async function POST(
     _req: NextRequest,
     { params }: { params: Promise<{ id: string; pid: string }> }
 ) {
-    if (!(await requireAdmin())) return new Response("Forbidden", { status: 403 });
     const { id: groupId, pid } = await params;
+    if (!(await requireGroupEditor(groupId))) return new Response("Forbidden", { status: 403 });
 
     const provider = await db.query.groupProviders.findFirst({
         where: and(eq(groupProviders.id, pid), eq(groupProviders.groupId, groupId)),

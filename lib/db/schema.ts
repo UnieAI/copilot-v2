@@ -127,6 +127,7 @@ export const userProviders = pgTable('user_providers', {
 export const groups = pgTable('groups', {
     id: uuid('id').primaryKey().defaultRandom(),
     name: text('name').notNull(),
+    creatorId: uuid('creator_id').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -160,6 +161,7 @@ export const userGroups = pgTable(
         groupId: uuid('group_id')
             .notNull()
             .references(() => groups.id, { onDelete: 'cascade' }),
+        role: varchar('role', { length: 20 }).notNull().default('member'), // creator | editor | member
     },
     (t) => ({
         pk: primaryKey({ columns: [t.userId, t.groupId] }),
@@ -254,8 +256,97 @@ export const chatMessages = pgTable('chat_messages', {
     attachments: json('attachments').default('[]'),
     toolCalls: json('tool_calls').default('[]'), // store mcp tool calls if any
 
+        createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// Group token usage tracking (per user per group)
+export const groupTokenUsage = pgTable('group_token_usage', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    groupId: uuid('group_id')
+        .notNull()
+        .references(() => groups.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+        .notNull()
+        .references(() => users.id, { onDelete: 'cascade' }),
+    sessionId: uuid('session_id')
+        .references(() => chatSessions.id, { onDelete: 'set null' }),
+    providerPrefix: varchar('provider_prefix', { length: 20 }),
+    model: text('model'),
+    promptTokens: integer('prompt_tokens').notNull().default(0),
+    completionTokens: integer('completion_tokens').notNull().default(0),
+    totalTokens: integer('total_tokens').notNull().default(0),
     createdAt: timestamp('created_at').defaultNow().notNull(),
 });
+
+// Platform-wide token usage (includes personal + group)
+export const tokenUsage = pgTable('token_usage', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    groupId: uuid('group_id').references(() => groups.id, { onDelete: 'set null' }),
+    userId: uuid('user_id')
+        .notNull()
+        .references(() => users.id, { onDelete: 'cascade' }),
+    sessionId: uuid('session_id')
+        .references(() => chatSessions.id, { onDelete: 'set null' }),
+    providerPrefix: varchar('provider_prefix', { length: 20 }),
+    model: text('model'),
+    promptTokens: integer('prompt_tokens').notNull().default(0),
+    completionTokens: integer('completion_tokens').notNull().default(0),
+    totalTokens: integer('total_tokens').notNull().default(0),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// Group quota per user (total)
+export const groupUserQuotas = pgTable(
+    'group_user_quotas',
+    {
+        groupId: uuid('group_id')
+            .notNull()
+            .references(() => groups.id, { onDelete: 'cascade' }),
+        userId: uuid('user_id')
+            .notNull()
+            .references(() => users.id, { onDelete: 'cascade' }),
+        limitTokens: integer('limit_tokens'), // null => unlimited
+        updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    },
+    (t) => ({
+        pk: primaryKey({ columns: [t.groupId, t.userId] }),
+    })
+);
+
+// Group quota per user per model
+export const groupUserModelQuotas = pgTable(
+    'group_user_model_quotas',
+    {
+        groupId: uuid('group_id')
+            .notNull()
+            .references(() => groups.id, { onDelete: 'cascade' }),
+        userId: uuid('user_id')
+            .notNull()
+            .references(() => users.id, { onDelete: 'cascade' }),
+        model: text('model').notNull(),
+        limitTokens: integer('limit_tokens'), // null => unlimited
+        updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    },
+    (t) => ({
+        pk: primaryKey({ columns: [t.groupId, t.userId, t.model] }),
+    })
+);
+
+// Group quota per model (overall cap)
+export const groupModelQuotas = pgTable(
+    'group_model_quotas',
+    {
+        groupId: uuid('group_id')
+            .notNull()
+            .references(() => groups.id, { onDelete: 'cascade' }),
+        model: text('model').notNull(),
+        limitTokens: integer('limit_tokens'), // null => unlimited
+        updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    },
+    (t) => ({
+        pk: primaryKey({ columns: [t.groupId, t.model] }),
+    })
+);
 
 // ----------------------------------------------------------------------------
 // 5. Chat File Attachments (one row per file per message)
@@ -292,3 +383,8 @@ export type ChatFile = InferSelectModel<typeof chatFiles>;
 export type Group = InferSelectModel<typeof groups>;
 export type GroupProvider = InferSelectModel<typeof groupProviders>;
 export type UserGroup = InferSelectModel<typeof userGroups>;
+export type GroupTokenUsage = InferSelectModel<typeof groupTokenUsage>;
+export type TokenUsage = InferSelectModel<typeof tokenUsage>;
+export type GroupUserQuota = InferSelectModel<typeof groupUserQuotas>;
+export type GroupUserModelQuota = InferSelectModel<typeof groupUserModelQuotas>;
+export type GroupModelQuota = InferSelectModel<typeof groupModelQuotas>;

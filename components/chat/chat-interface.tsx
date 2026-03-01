@@ -578,6 +578,8 @@ export function ChatInterface({
 
     // Scroll state — mirrors the pattern from step2.tsx
     const [isAutoScrolling, setIsAutoScrolling] = useState(true)
+    const isAutoScrollingRef = useRef(isAutoScrolling)
+    useEffect(() => { isAutoScrollingRef.current = isAutoScrolling }, [isAutoScrolling])
     const [showScrollButton, setShowScrollButton] = useState(false)
 
     // IntersectionObserver: show/hide the scroll button based on messagesEndRef visibility
@@ -597,8 +599,12 @@ export function ChatInterface({
                 typeof isEndVisible !== "undefined"
                     ? isEndVisible
                     : endRect.top >= containerRect.top && endRect.bottom <= containerRect.bottom
-
-            setShowScrollButton(computedVisible ? false : !isAtBottom)
+            setShowScrollButton(prev => {
+                if (isAutoScrollingRef.current) return false
+                const next = computedVisible ? false : !isAtBottom
+                if (prev === next) return prev
+                return next
+            })
         }
 
         const observer = new IntersectionObserver(
@@ -622,7 +628,7 @@ export function ChatInterface({
             resizeObserver.disconnect()
             observer.disconnect()
         }
-    }, [messages, statusText])
+    }, [])
 
     // rAF loop + wheel listener: the core auto-scroll engine
     useEffect(() => {

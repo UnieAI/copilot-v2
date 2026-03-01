@@ -1,20 +1,14 @@
 import { NextRequest } from "next/server";
-import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { groups } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-
-async function requireAdmin() {
-    const session = await auth();
-    const role = (session?.user as any)?.role as string;
-    if (!session?.user || !["admin", "super"].includes(role)) return null;
-    return session;
-}
+import { requireGroupCreator, requireGroupEditor } from "@/lib/group-permissions";
 
 // PATCH /api/admin/groups/[id] — rename group
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-    if (!(await requireAdmin())) return new Response("Forbidden", { status: 403 });
     const { id } = await params;
+    if (!(await requireGroupEditor(id))) return new Response("Forbidden", { status: 403 });
+
     const { name } = await req.json();
     if (!name?.trim()) return Response.json({ error: "name is required" }, { status: 400 });
 
@@ -30,8 +24,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
 // DELETE /api/admin/groups/[id] — delete group (cascades providers + memberships)
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-    if (!(await requireAdmin())) return new Response("Forbidden", { status: 403 });
     const { id } = await params;
+    if (!(await requireGroupCreator(id))) return new Response("Forbidden", { status: 403 });
     await db.delete(groups).where(eq(groups.id, id));
     return new Response(null, { status: 204 });
 }

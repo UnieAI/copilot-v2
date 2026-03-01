@@ -1,20 +1,15 @@
 import { NextRequest } from "next/server";
-import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { users, userGroups } from "@/lib/db/schema";
 import { eq, inArray } from "drizzle-orm";
+import { requireGroupEditor, requireGroupMember } from "@/lib/group-permissions";
 
-async function requireAdmin() {
-    const session = await auth();
-    const role = (session?.user as any)?.role as string;
-    if (!session?.user || !["admin", "super"].includes(role)) return null;
-    return session;
-}
+type MemberInput = { userId: string; role: string };
 
 // GET /api/admin/groups/[id]/members — list members with user details
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-    if (!(await requireAdmin())) return new Response("Forbidden", { status: 403 });
     const { id } = await params;
+    if (!(await requireGroupMember(id))) return new Response("Forbidden", { status: 403 });
 
     const memberships = await db.query.userGroups.findMany({
         where: eq(userGroups.groupId, id),
@@ -27,23 +22,46 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         columns: { id: true, name: true, email: true, role: true, image: true },
     });
 
-    return Response.json(memberUsers);
+    const userMap = new Map(memberUsers.map((u) => [u.id, u]));
+    const merged = memberships.map((m) => ({
+        ...(userMap.get(m.userId) || { id: m.userId }),
+        membershipRole: m.role,
+    }));
+
+    return Response.json(merged);
 }
 
-// PUT /api/admin/groups/[id]/members — replace member list { userIds: string[] }
+// PUT /api/admin/groups/[id]/members — replace member list { members: { userId, role }[] }
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-    if (!(await requireAdmin())) return new Response("Forbidden", { status: 403 });
     const { id: groupId } = await params;
-    const { userIds } = await req.json() as { userIds: string[] };
+    if (!(await requireGroupEditor(groupId))) return new Response("Forbidden", { status: 403 });
+
+    const body = await req.json() as { members: MemberInput[] };
+    const members = Array.isArray(body?.members) ? body.members : [];
+
+    if (members.length === 0) {
+        return Response.json({ error: "至少需要一位成員" }, { status: 400 });
+    }
+
+    const normalized = members.map((m) => ({
+        userId: m.userId,
+        role: ["creator", "editor", "member"].includes(m.role) ? m.role : "member",
+    }));
+    const uniqueNormalized = Array.from(new Map(normalized.map((m) => [m.userId, m])).values());
+
+    const hasCreator = uniqueNormalized.some(m => m.role === "creator");
+    if (!hasCreator) return Response.json({ error: "至少需要一位 Creator" }, { status: 400 });
 
     // Replace all memberships in a transaction
     await db.transaction(async (tx) => {
         await tx.delete(userGroups).where(eq(userGroups.groupId, groupId));
-        if (userIds && userIds.length > 0) {
-            await tx.insert(userGroups).values(
-                userIds.map((userId) => ({ userId, groupId }))
-            );
-        }
+        await tx.insert(userGroups).values(
+            uniqueNormalized.map((m) => ({
+                userId: m.userId,
+                groupId,
+                role: m.role || "member",
+            }))
+        );
     });
 
     return new Response(null, { status: 204 });

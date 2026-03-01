@@ -1,20 +1,13 @@
 import { NextRequest } from "next/server";
-import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { groupProviders, userProviders } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
-
-async function requireAdmin() {
-    const session = await auth();
-    const role = (session?.user as any)?.role as string;
-    if (!session?.user || !["admin", "super"].includes(role)) return null;
-    return session;
-}
+import { requireGroupEditor, requireGroupMember } from "@/lib/group-permissions";
 
 // GET /api/admin/groups/[id]/providers
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-    if (!(await requireAdmin())) return new Response("Forbidden", { status: 403 });
     const { id } = await params;
+    if (!(await requireGroupMember(id))) return new Response("Forbidden", { status: 403 });
 
     const providers = await db.query.groupProviders.findMany({
         where: eq(groupProviders.groupId, id),
@@ -26,8 +19,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
 // POST /api/admin/groups/[id]/providers
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-    if (!(await requireAdmin())) return new Response("Forbidden", { status: 403 });
     const { id: groupId } = await params;
+    if (!(await requireGroupEditor(groupId))) return new Response("Forbidden", { status: 403 });
+
     const body = await req.json();
     const { displayName, prefix, apiUrl, apiKey, enable } = body;
 
