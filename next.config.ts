@@ -4,13 +4,14 @@ import createNextIntlPlugin from 'next-intl/plugin';
 const withNextIntl = createNextIntlPlugin('./i18n/request.ts');
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: ['mupdf'],
   experimental: {
     // ppr: true,
     serverActions: {
       allowedOrigins: [
         "https://unieai-chatroom.unieai.com"
       ]
-    }
+    },
   },
   images: {
     remotePatterns: [

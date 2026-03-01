@@ -3,8 +3,8 @@ import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { adminSettings, userProviders, mcpTools, chatSessions, chatMessages, chatFiles, userGroups, groupProviders, groupTokenUsage, tokenUsage, groupUserQuotas, groupUserModelQuotas, groupModelQuotas } from "@/lib/db/schema";
 import { eq, and, inArray, sql } from "drizzle-orm";
-import { parseFile, isImageFile, isDocumentFile } from "@/lib/parsers";
-import { processPdfPagesWithVLM, isPdf } from "@/lib/parsers/pdf-vision";
+import { parseFile, isImageFile, isDocumentFile, stripThinkAndKeepFinal } from "@/lib/parsers";
+import { processPdfPagesEnhanced, isPdf } from "@/lib/parsers/pdf-enhanced";
 
 /** Strip <think>...</think> blocks (including unclosed ones) and trim. */
 function stripThink(text: string): string {
@@ -174,48 +174,75 @@ export async function POST(req: NextRequest) {
                                 const { name, mimeType, base64 } = att;
 
                                 if (isPdf(name, mimeType)) {
-                                    const fallbackParse = async () => {
+                                    // 先呼叫 parseFile，取得圖片陣列
+                                    const parsed = await parseFile(name, mimeType, base64);
+
+                                    if (!parsed.images || parsed.images.length === 0) {
+                                        send({ type: 'status', data: `PDF ${name} 解析失敗` });
                                         try {
-                                            const parsed = await parseFile(name, mimeType, base64);
-                                            return parsed.content
-                                                ? `[PDF ${name} 文本內容]\n${parsed.content}`
-                                                : `[PDF ${name} 解析失敗]`;
+                                            const fallback = await parseFile(name, mimeType, base64); // 這裡會再進 pdf-parse 分支（你可自行加）
+                                            return `[PDF ${name} 文字內容]\n${fallback.content || '無內容'}`;
                                         } catch {
                                             return `[PDF ${name} 解析失敗]`;
                                         }
                                     }
 
-                                    if (visionConfig) {
-                                        try {
-                                            const summary = await processPdfPagesWithVLM({
-                                                name,
-                                                base64,
-                                                onProgress: (ev) => {
-                                                    if (ev.type === 'status') {
-                                                        send({ type: 'status', data: ev.message });
-                                                    } else if (ev.type === 'page_progress') {
-                                                        send({ 
-                                                            type: 'status', 
-                                                            data: `PDF ${name} - 分析第 ${ev.page}/${ev.totalPages} 頁...` 
-                                                        });
-                                                    } else if (ev.type === 'done') {
-                                                        send({ type: 'status', data: `PDF ${name} 解析完成` });
-                                                    } else if (ev.type === 'error') {
-                                                        send({ type: 'status', data: `PDF ${name} 解析失敗 (${ev.message})` });
-                                                    }
-                                                }
-                                            });
-
-                                            if (summary) return `[PDF ${name} 完整分析]\n${summary}`;
-                                            return `[PDF ${name} 解析失敗]`;
-                                        } catch (e: any) {
-                                            send({ type: 'status', data: `PDF ${name} 解析失敗，改用文字解析: ${e?.message || ''}` });
-                                            return await fallbackParse();
-                                        }
+                                    // 取得 VLM 配置（跟單一圖片一樣）
+                                    if (!adminConf?.visionModelUrl || !adminConf?.visionModelKey || !adminConf?.visionModelName) {
+                                        return `[PDF ${name} 無視覺模型，無法分析圖片]`;
                                     }
 
-                                    send({ type: 'status', data: `PDF ${name} 無視覺模型，改用文字解析` });
-                                    return await fallbackParse();
+                                    const visionBase = adminConf.visionModelUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
+
+                                    send({ type: 'status', data: `PDF ${name} 共 ${parsed.images.length} 頁，開始並行 VLM 分析...` });
+
+                                    // 併發呼叫 VLM（模仿單一圖片）
+                                    const pageResults = await Promise.allSettled(
+                                        parsed.images.map(async (img) => {
+                                            const res = await fetch(`${visionBase}/v1/chat/completions`, {
+                                                method: 'POST',
+                                                headers: {
+                                                    'Content-Type': 'application/json',
+                                                    'Authorization': `Bearer ${adminConf.visionModelKey}`
+                                                },
+                                                body: JSON.stringify({
+                                                    model: adminConf.visionModelName,
+                                                    messages: [{
+                                                        role: 'user',
+                                                        content: [
+                                                            { type: 'text', text: '請詳細描述這張圖片的內容，包括文字、圖表、表格等所有可見資訊。' },
+                                                            { type: 'image_url', image_url: { url: `data:${img.mimeType};base64,${img.base64}` } }
+                                                        ]
+                                                    }],
+                                                    max_tokens: 4096,
+                                                })
+                                            });
+
+                                            if (!res.ok) throw new Error(`VLM failed: ${await res.text()}`);
+
+                                            const json = await res.json();
+                                            let rawContent = json.choices?.[0]?.message?.content?.trim() || '（無內容）';
+
+                                            // 過濾思考區塊，只保留最終輸出
+                                            rawContent = stripThinkAndKeepFinal(rawContent);
+
+                                            return rawContent;
+                                        })
+                                    );
+
+                                    // 整理結果，按頁數排序
+                                    const summaries = pageResults.map((result, idx) => {
+                                        if (result.status === 'fulfilled') {
+                                            return result.value;
+                                        }
+                                        return `（第 ${idx + 1} 頁解析失敗）`;
+                                    });
+
+                                    const combined = summaries
+                                        .map((desc, idx) => `第 ${idx + 1} 頁：${desc}`)
+                                        .join('\n');
+
+                                    return `[PDF ${name} 的詳細內容]\n${combined}`;
                                 } else if (isImageFile(name, mimeType)) {
                                     if (adminConf?.visionModelUrl && adminConf?.visionModelKey && adminConf?.visionModelName) {
                                         try {
@@ -239,8 +266,12 @@ export async function POST(req: NextRequest) {
                                             });
                                             if (visionRes.ok) {
                                                 const visionData = await visionRes.json();
-                                                const desc = stripThink(visionData.choices?.[0]?.message?.content || '');
-                                                return `[圖片 ${name} 的描述]\n${desc}`;
+
+                                                let rawContent = visionData.choices?.[0]?.message?.content?.trim() || '（無內容）';
+
+                                                // 過濾思考區塊，只保留最終輸出
+                                                rawContent = stripThinkAndKeepFinal(rawContent);
+                                                return `[圖片 ${name} 的描述]\n${rawContent}`;
                                             }
                                             return `[圖片 ${name} 解析失敗]`;
                                         } catch {
