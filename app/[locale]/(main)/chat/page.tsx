@@ -4,13 +4,17 @@ import { redirect } from "next/navigation"
 import { userProviders, userPreferences, chatMessages } from "@/lib/db/schema"
 import { eq, and } from "drizzle-orm"
 import { ChatInterface } from "@/components/chat/chat-interface"
+import { getGroupModels } from "@/lib/get-group-models"
 
-export default async function ChatPage({ searchParams }: { searchParams: Promise<{ id?: string }> }) {
+export default async function ChatPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
     const session = await auth()
     if (!session?.user?.id) redirect('/login')
 
     const userId = session.user.id as string
-    const { id: sessionId } = await searchParams
+    const params = await searchParams
+    const sessionId = params.id as string | undefined
+    const initialQuery = params.q as string | undefined
+    const freshKey = (params.fresh as string | undefined) || (params.new as string | undefined) || ''
 
     // Fetch enabled providers with their model lists
     const providers = await db.query.userProviders.findMany({
@@ -18,15 +22,19 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
     })
 
     // Build flat model option list: value = "{prefix}-{modelId}"
-    const availableModels = providers.flatMap(p => {
-        const models = Array.isArray(p.modelList) ? (p.modelList as any[]) : []
-        return models.map((m: any) => ({
-            value: `${p.prefix}-${m.id || String(m)}`,
-            label: m.id || String(m),
-            providerName: p.displayName || p.prefix,
-            providerPrefix: p.prefix,
-        }))
-    })
+    const availableModels = [
+        ...providers.flatMap(p => {
+            const models = Array.isArray(p.modelList) ? (p.modelList as any[]) : []
+            return models.map((m: any) => ({
+                value: `${p.prefix}-${m.id || String(m)}`,
+                label: m.id || String(m),
+                providerName: p.displayName || p.prefix,
+                providerPrefix: p.prefix,
+                source: 'user' as const,
+            }))
+        }),
+        ...(await getGroupModels(userId)),
+    ]
 
     // Fetch user preference for previously selected model
     const pref = await db.query.userPreferences.findFirst({
@@ -56,10 +64,12 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
 
     return (
         <ChatInterface
+            key={sessionId || freshKey || 'new'}
             sessionId={sessionId}
             availableModels={availableModels}
             initialSelectedModel={initialSelectedModel}
             initialMessages={initialMessages}
+            initialQuery={initialQuery as string | undefined}
         />
     )
 }

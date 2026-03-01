@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { getSession } from 'next-auth/react';
 import { useTranslations } from 'next-intl';
+import { DynamicGreeting } from '@/components/ui/dynamic-greeting';
 
 export default function Home() {
     const router = useRouter();
@@ -17,6 +18,16 @@ export default function Home() {
     const [isFocused, setIsFocused] = useState(false);
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+    const handleDragOver = (e: React.DragEvent) => {
+        if (e.dataTransfer?.types?.includes('Files')) {
+            e.preventDefault();
+        }
+    };
+    const handleDrop = (e: React.DragEvent) => {
+        if (e.dataTransfer?.types?.includes('Files')) {
+            e.preventDefault();
+        }
+    };
 
     // Check login status on mount
     useEffect(() => {
@@ -38,21 +49,23 @@ export default function Home() {
         if (!inputValue.trim()) return;
 
         if (isLoggedIn) {
-            // If logged in, create a new chat (or go to /chat)
-            router.push('/chat');
+            // If logged in, create a new chat passing the query
+            router.push(`/chat?q=${encodeURIComponent(inputValue.trim())}`);
         } else {
             // If not logged in, redirect to login
-            router.push('/login');
+            router.push(`/login?q=${encodeURIComponent(inputValue.trim())}`);
         }
     };
 
     return (
-        <section id="hero" className="w-full h-full relative overflow-hidden bg-background">
+        <section
+            id="hero"
+            className="w-full h-full relative overflow-hidden bg-background"
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+        >
             {/* Simple Header */}
             <header className="absolute top-0 left-0 right-0 z-50 px-6 py-4 flex items-center justify-between">
-                {/* <Link href="/" className="flex items-center gap-2">
-                    <span className="font-bold text-xl tracking-tight text-foreground">UnieAI</span>
-                </Link> */}
                 <div />
                 <div className="flex items-center gap-4">
                     <Link href="/tutorials" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
@@ -92,11 +105,11 @@ export default function Home() {
 
                 {/* Main content area */}
                 <div className="flex-1 flex flex-col relative z-[1] justify-center mt-12">
-                    <div className="w-full max-w-3xl mx-auto flex flex-col items-center text-center px-4">
+                    <div className="w-full max-w-4xl mx-auto flex flex-col items-center text-center px-4">
 
                         <div className="animate-in fade-in-0 slide-in-from-bottom-4 duration-500 fill-mode-both">
                             <h1 className="text-3xl sm:text-4xl md:text-5xl font-medium text-foreground tracking-tight">
-                                {t('greeting')}
+                                <DynamicGreeting />
                             </h1>
                         </div>
 
@@ -151,12 +164,6 @@ export default function Home() {
                             />
 
                             <div className="flex items-center justify-between p-1 mt-auto">
-                                <div className="flex items-center gap-1 text-muted-foreground">
-                                    <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-full" title="Upload file">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>
-                                    </Button>
-                                </div>
-
                                 <div className="flex items-center gap-2">
                                     <Button
                                         type="submit"

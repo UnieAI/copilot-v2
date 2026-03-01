@@ -1,9 +1,10 @@
 import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { adminSettings, userProviders, mcpTools, chatSessions, chatMessages, chatFiles } from "@/lib/db/schema";
-import { eq, and, inArray } from "drizzle-orm";
-import { parseFile, isImageFile, isDocumentFile } from "@/lib/parsers";
+import { adminSettings, userProviders, mcpTools, chatSessions, chatMessages, chatFiles, userGroups, groupProviders, groupTokenUsage, tokenUsage, groupUserQuotas, groupUserModelQuotas, groupModelQuotas } from "@/lib/db/schema";
+import { eq, and, inArray, sql } from "drizzle-orm";
+import { parseFile, isImageFile, isDocumentFile, stripThinkAndKeepFinal } from "@/lib/parsers";
+import { processPdfPagesEnhanced, isPdf } from "@/lib/parsers/pdf-enhanced";
 
 /** Strip <think>...</think> blocks (including unclosed ones) and trim. */
 function stripThink(text: string): string {
@@ -97,22 +98,68 @@ export async function POST(req: NextRequest) {
                         })
                     ]);
 
-                    // Look up provider by prefix
-                    const userConf = providerPrefix
-                        ? await db.query.userProviders.findFirst({
-                            where: and(eq(userProviders.userId, userId), eq(userProviders.prefix, providerPrefix))
-                        })
-                        : await db.query.userProviders.findFirst({
-                            where: and(eq(userProviders.userId, userId), eq(userProviders.enable, 1))
-                        });
+                    // Determine accessible groups for this user
+                    const memberships = await db.query.userGroups.findMany({
+                        where: eq(userGroups.userId, userId),
+                    });
+                    const memberGroupIds = memberships.map(g => g.groupId);
+                    let providerGroupId: string | null = null;
+                    let providerGroupRole: string | null = null;
 
-                    if (!userConf?.apiUrl || !userConf?.apiKey) {
-                        send({ type: 'error', data: '請先在設定頁面配置 API URL 和 Key。' });
+                    // Look up provider by prefix (personal first, then group)
+                    let providerConf =
+                        providerPrefix
+                            ? await db.query.userProviders.findFirst({
+                                where: and(eq(userProviders.userId, userId), eq(userProviders.prefix, providerPrefix))
+                            })
+                            : await db.query.userProviders.findFirst({
+                                where: and(eq(userProviders.userId, userId), eq(userProviders.enable, 1))
+                            });
+
+                    if (providerConf) providerGroupId = null;
+
+                    if (!providerConf && providerPrefix && memberGroupIds.length > 0) {
+                        providerConf = await db.query.groupProviders.findFirst({
+                            where: and(
+                                eq(groupProviders.prefix, providerPrefix),
+                                inArray(groupProviders.groupId, memberGroupIds),
+                                eq(groupProviders.enable, 1),
+                            ),
+                        });
+                        if (providerConf) {
+                            providerGroupId = (providerConf as any).groupId;
+                            providerGroupRole = memberships.find(m => m.groupId === providerGroupId)?.role || null;
+                        }
+                    }
+
+                    // Fallback: any enabled group provider if none selected and user has membership
+                    if (!providerConf && memberGroupIds.length > 0) {
+                        providerConf = await db.query.groupProviders.findFirst({
+                            where: and(
+                                inArray(groupProviders.groupId, memberGroupIds),
+                                eq(groupProviders.enable, 1),
+                            ),
+                        });
+                        if (providerConf) {
+                            providerGroupId = (providerConf as any).groupId;
+                            providerGroupRole = memberships.find(m => m.groupId === providerGroupId)?.role || null;
+                        }
+                    }
+
+                    if (!providerConf?.apiUrl || !providerConf?.apiKey) {
+                        send({ type: 'error', data: '尚未配置可用的 Provider，若您屬於群組請聯絡管理員。' });
                         controller.close();
                         return;
                     }
 
-                    const cleanApiUrl = userConf.apiUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
+                    const cleanApiUrl = providerConf.apiUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
+                    const visionConfig = (adminConf?.visionModelUrl && adminConf?.visionModelKey && adminConf?.visionModelName)
+                        ? {
+                            url: adminConf.visionModelUrl,
+                            key: adminConf.visionModelKey,
+                            model: adminConf.visionModelName,
+                        }
+                        : null;
 
                     // ─── 3. Build Context from Attachments (all in parallel) ─────────
                     const contextParts: string[] = [];
@@ -126,7 +173,77 @@ export async function POST(req: NextRequest) {
                             attachments.map(async (att: any) => {
                                 const { name, mimeType, base64 } = att;
 
-                                if (isImageFile(name, mimeType)) {
+                                if (isPdf(name, mimeType)) {
+                                    // 先呼叫 parseFile，取得圖片陣列
+                                    const parsed = await parseFile(name, mimeType, base64);
+
+                                    if (!parsed.images || parsed.images.length === 0) {
+                                        send({ type: 'status', data: `PDF ${name} 解析失敗` });
+                                        try {
+                                            const fallback = await parseFile(name, mimeType, base64); // 這裡會再進 pdf-parse 分支（你可自行加）
+                                            return `[PDF ${name} 文字內容]\n${fallback.content || '無內容'}`;
+                                        } catch {
+                                            return `[PDF ${name} 解析失敗]`;
+                                        }
+                                    }
+
+                                    // 取得 VLM 配置（跟單一圖片一樣）
+                                    if (!adminConf?.visionModelUrl || !adminConf?.visionModelKey || !adminConf?.visionModelName) {
+                                        return `[PDF ${name} 無視覺模型，無法分析圖片]`;
+                                    }
+
+                                    const visionBase = adminConf.visionModelUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
+
+                                    send({ type: 'status', data: `PDF ${name} 共 ${parsed.images.length} 頁，開始並行 VLM 分析...` });
+
+                                    // 併發呼叫 VLM（模仿單一圖片）
+                                    const pageResults = await Promise.allSettled(
+                                        parsed.images.map(async (img) => {
+                                            const res = await fetch(`${visionBase}/v1/chat/completions`, {
+                                                method: 'POST',
+                                                headers: {
+                                                    'Content-Type': 'application/json',
+                                                    'Authorization': `Bearer ${adminConf.visionModelKey}`
+                                                },
+                                                body: JSON.stringify({
+                                                    model: adminConf.visionModelName,
+                                                    messages: [{
+                                                        role: 'user',
+                                                        content: [
+                                                            { type: 'text', text: '請詳細描述這張圖片的內容，包括文字、圖表、表格等所有可見資訊。' },
+                                                            { type: 'image_url', image_url: { url: `data:${img.mimeType};base64,${img.base64}` } }
+                                                        ]
+                                                    }],
+                                                    max_tokens: 4096,
+                                                })
+                                            });
+
+                                            if (!res.ok) throw new Error(`VLM failed: ${await res.text()}`);
+
+                                            const json = await res.json();
+                                            let rawContent = json.choices?.[0]?.message?.content?.trim() || '（無內容）';
+
+                                            // 過濾思考區塊，只保留最終輸出
+                                            rawContent = stripThinkAndKeepFinal(rawContent);
+
+                                            return rawContent;
+                                        })
+                                    );
+
+                                    // 整理結果，按頁數排序
+                                    const summaries = pageResults.map((result, idx) => {
+                                        if (result.status === 'fulfilled') {
+                                            return result.value;
+                                        }
+                                        return `（第 ${idx + 1} 頁解析失敗）`;
+                                    });
+
+                                    const combined = summaries
+                                        .map((desc, idx) => `第 ${idx + 1} 頁：${desc}`)
+                                        .join('\n');
+
+                                    return `[PDF ${name} 的詳細內容]\n${combined}`;
+                                } else if (isImageFile(name, mimeType)) {
                                     if (adminConf?.visionModelUrl && adminConf?.visionModelKey && adminConf?.visionModelName) {
                                         try {
                                             const visionBase = adminConf.visionModelUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
@@ -149,8 +266,12 @@ export async function POST(req: NextRequest) {
                                             });
                                             if (visionRes.ok) {
                                                 const visionData = await visionRes.json();
-                                                const desc = stripThink(visionData.choices?.[0]?.message?.content || '');
-                                                return `[圖片 ${name} 的描述]\n${desc}`;
+
+                                                let rawContent = visionData.choices?.[0]?.message?.content?.trim() || '（無內容）';
+
+                                                // 過濾思考區塊，只保留最終輸出
+                                                rawContent = stripThinkAndKeepFinal(rawContent);
+                                                return `[圖片 ${name} 的描述]\n${rawContent}`;
                                             }
                                             return `[圖片 ${name} 解析失敗]`;
                                         } catch {
@@ -247,6 +368,74 @@ export async function POST(req: NextRequest) {
                         finalMessages.push({ role: m.role, content: m.content });
                     }
 
+                    // ─── 6. Quota check (group only) ────────────────────────────────
+                    if (providerGroupId) {
+                        const [userQuota, modelQuota, groupModelQuota] = await Promise.all([
+                            db.query.groupUserQuotas.findFirst({
+                                where: and(eq(groupUserQuotas.groupId, providerGroupId), eq(groupUserQuotas.userId, userId)),
+                            }),
+                            db.query.groupUserModelQuotas.findFirst({
+                                where: and(
+                                    eq(groupUserModelQuotas.groupId, providerGroupId),
+                                    eq(groupUserModelQuotas.userId, userId),
+                                    eq(groupUserModelQuotas.model, realModelName || selectedModel)
+                                ),
+                            }),
+                            db.query.groupModelQuotas.findFirst({
+                                where: and(
+                                    eq(groupModelQuotas.groupId, providerGroupId),
+                                    eq(groupModelQuotas.model, realModelName || selectedModel)
+                                ),
+                            }),
+                        ]);
+
+                        if (userQuota?.limitTokens != null) {
+                            const [used] = await db
+                                .select({ total: sql<number>`coalesce(sum(${tokenUsage.totalTokens}),0)` })
+                                .from(tokenUsage)
+                                .where(and(
+                                    eq(tokenUsage.groupId, providerGroupId),
+                                    eq(tokenUsage.userId, userId)
+                                ));
+                            if ((used?.total || 0) >= userQuota.limitTokens) {
+                                send({ type: 'error', data: '群組使用額度已用完，請聯絡管理員。' });
+                                controller.close();
+                                return;
+                            }
+                        }
+
+                        if (modelQuota?.limitTokens != null) {
+                            const [usedModel] = await db
+                                .select({ total: sql<number>`coalesce(sum(${tokenUsage.totalTokens}),0)` })
+                                .from(tokenUsage)
+                                .where(and(
+                                    eq(tokenUsage.groupId, providerGroupId),
+                                    eq(tokenUsage.userId, userId),
+                                    eq(tokenUsage.model, realModelName || selectedModel)
+                                ));
+                            if ((usedModel?.total || 0) >= modelQuota.limitTokens) {
+                                send({ type: 'error', data: '此模型額度已用完，請聯絡管理員。' });
+                                controller.close();
+                                return;
+                            }
+                        }
+
+                        if (groupModelQuota?.limitTokens != null) {
+                            const [usedGroupModel] = await db
+                                .select({ total: sql<number>`coalesce(sum(${tokenUsage.totalTokens}),0)` })
+                                .from(tokenUsage)
+                                .where(and(
+                                    eq(tokenUsage.groupId, providerGroupId),
+                                    eq(tokenUsage.model, realModelName || selectedModel)
+                                ));
+                            if ((usedGroupModel?.total || 0) >= groupModelQuota.limitTokens) {
+                                send({ type: 'error', data: '群組該模型總額度已用完，請聯絡管理員。' });
+                                controller.close();
+                                return;
+                            }
+                        }
+                    }
+
                     // ─── 6. Save User Message ───────────────────────────────────────
                     const userContent = messages[messages.length - 1]?.content || '';
                     const [savedUserMsg] = await db.insert(chatMessages).values({
@@ -269,18 +458,37 @@ export async function POST(req: NextRequest) {
                         .where(eq(chatSessions.id, currentSessionId));
 
                     // ─── 7. Stream Main Generation ──────────────────────────────────
-                    const response = await fetch(`${cleanApiUrl}/v1/chat/completions`, {
+                    const requestBody = {
+                        model: realModelName || selectedModel,
+                        messages: finalMessages,
+                        stream: true,
+                        stream_options: { include_usage: true },
+                    };
+                    const fallbackBody = {
+                        model: realModelName || selectedModel,
+                        messages: finalMessages,
+                        stream: true,
+                    };
+
+                    let response = await fetch(`${cleanApiUrl}/v1/chat/completions`, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${userConf.apiKey}`
+                            'Authorization': `Bearer ${providerConf.apiKey}`
                         },
-                        body: JSON.stringify({
-                            model: realModelName || selectedModel,
-                            messages: finalMessages,
-                            stream: true
-                        })
+                        body: JSON.stringify(requestBody)
                     });
+
+                    if (!response.ok && response.status === 400) {
+                        response = await fetch(`${cleanApiUrl}/v1/chat/completions`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${providerConf.apiKey}`
+                            },
+                            body: JSON.stringify(fallbackBody)
+                        });
+                    }
 
                     if (!response.ok) {
                         send({ type: 'error', data: `API 錯誤: ${response.status} ${response.statusText}` });
@@ -291,6 +499,7 @@ export async function POST(req: NextRequest) {
                     const reader = response.body?.getReader();
                     const decoder = new TextDecoder();
                     let fullContent = '';
+                    let usageTotals: { promptTokens: number; completionTokens: number; totalTokens: number } | null = null;
 
                     if (reader) {
                         let buffer = '';
@@ -313,6 +522,13 @@ export async function POST(req: NextRequest) {
                                         fullContent += delta;
                                         send({ type: 'chunk', data: delta });
                                     }
+                                    const usage = parsed.usage;
+                                    if (usage) {
+                                        const promptTokens = Number(usage.prompt_tokens ?? usage.promptTokens ?? 0);
+                                        const completionTokens = Number(usage.completion_tokens ?? usage.completionTokens ?? 0);
+                                        const totalTokens = Number(usage.total_tokens ?? usage.totalTokens ?? (promptTokens + completionTokens));
+                                        usageTotals = { promptTokens, completionTokens, totalTokens };
+                                    }
                                 } catch { }
                             }
                         }
@@ -326,6 +542,28 @@ export async function POST(req: NextRequest) {
                         content: fullContent,
                         toolCalls: mcpResults.length > 0 ? mcpResults as any : [] as any
                     }).returning({ id: chatMessages.id });
+
+                    const usagePayload = {
+                        groupId: providerGroupId,
+                        userId,
+                        sessionId: currentSessionId,
+                        providerPrefix: providerPrefix || (providerConf as any)?.prefix || null,
+                        model: realModelName || selectedModel,
+                        promptTokens: usageTotals?.promptTokens || 0,
+                        completionTokens: usageTotals?.completionTokens || 0,
+                        totalTokens: usageTotals?.totalTokens || 0,
+                    };
+
+                    if (providerGroupId && usageTotals) {
+                        try {
+                            await db.insert(groupTokenUsage).values(usagePayload as any);
+                        } catch { }
+                    }
+                    if (usageTotals) {
+                        try {
+                            await db.insert(tokenUsage).values(usagePayload as any);
+                        } catch { }
+                    }
 
                     // ─── 9. Unblock client immediately, generate title in background ──
                     // Send done right away so the client can set isGenerating=false

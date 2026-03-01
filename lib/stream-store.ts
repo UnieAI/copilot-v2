@@ -19,6 +19,7 @@ type Listener = (
     isGenerating: boolean,
     statusText: string
 ) => void
+type StatusListener = (entries: { sessionId: string; statusText: string }[]) => void
 
 type Entry = {
     messages: StreamMessage[]
@@ -29,6 +30,18 @@ type Entry = {
 }
 
 const registry = new Map<string, Entry>()
+const statusListeners = new Set<StatusListener>()
+
+const collectGeneratingStatuses = () => {
+    return Array.from(registry.entries())
+        .filter(([, entry]) => entry.isGenerating)
+        .map(([sessionId, entry]) => ({ sessionId, statusText: entry.statusText }))
+}
+
+const notifyStatusListeners = () => {
+    const payload = collectGeneratingStatuses()
+    statusListeners.forEach(l => l(payload))
+}
 
 export const streamStore = {
     /** Whether a live stream is registered for this session */
@@ -45,6 +58,7 @@ export const streamStore = {
             controller,
             listeners: new Set(),
         })
+        notifyStatusListeners()
     },
 
     /**
@@ -56,6 +70,7 @@ export const streamStore = {
         if (entry && oldKey !== newKey) {
             registry.set(newKey, entry)
             registry.delete(oldKey)
+            notifyStatusListeners()
         }
     },
 
@@ -63,9 +78,14 @@ export const streamStore = {
     update(sessionId: string, fn: (entry: Entry) => void): void {
         const entry = registry.get(sessionId)
         if (!entry) return
+        const prevGenerating = entry.isGenerating
+        const prevStatus = entry.statusText
         fn(entry)
         const msgs = [...entry.messages]
         entry.listeners.forEach(l => l(msgs, entry.isGenerating, entry.statusText))
+        if (entry.isGenerating !== prevGenerating || entry.statusText !== prevStatus) {
+            notifyStatusListeners()
+        }
     },
 
     /**
@@ -88,6 +108,18 @@ export const streamStore = {
         return { messages: [...entry.messages], isGenerating: entry.isGenerating }
     },
 
+    /** Subscribe to all generating sessions (for sidebar badges, etc.) */
+    subscribeGenerating(listener: StatusListener): () => void {
+        statusListeners.add(listener)
+        listener(collectGeneratingStatuses())
+        return () => statusListeners.delete(listener)
+    },
+
+    /** Get the list of currently generating sessions */
+    getGeneratingSessions(): { sessionId: string; statusText: string }[] {
+        return collectGeneratingStatuses()
+    },
+
     /**
      * Mark stream as done and remove from registry.
      * Notifies listeners one last time with isGenerating=false.
@@ -98,6 +130,7 @@ export const streamStore = {
         entry.isGenerating = false
         entry.statusText = ''
         entry.listeners.forEach(l => l([...entry.messages], false, ''))
+        notifyStatusListeners()
         registry.delete(sessionId)
     },
 
@@ -107,6 +140,7 @@ export const streamStore = {
         if (entry) {
             entry.controller.abort()
             registry.delete(sessionId)
+            notifyStatusListeners()
         }
     },
 
@@ -121,5 +155,6 @@ export const streamStore = {
                 registry.delete(id)
             }
         }
+        notifyStatusListeners()
     },
 }

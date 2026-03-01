@@ -2,13 +2,14 @@ import { NextRequest } from "next/server"
 import { auth } from "@/auth"
 import { db } from "@/lib/db"
 import { adminSettings, userProviders } from "@/lib/db/schema"
+import { getGroupModels } from "@/lib/get-group-models"
 import { eq } from "drizzle-orm"
 
 /**
  * GET /api/setup-check
  * Returns which setup issues exist for the current user.
  * - adminIssues: present only for admin/super, lists missing system model fields
- * - providerIssues: present for all, true if no enabled provider has any models
+ * - providerIssue: true only if neither personal nor group providers expose any models
  */
 export async function GET(req: NextRequest) {
     const session = await auth()
@@ -34,18 +35,20 @@ export async function GET(req: NextRequest) {
         db.query.userProviders.findMany({
             where: eq(userProviders.userId, userId),
         }).then(providers => {
-            const enabledWithModels = providers.filter(p => {
-                const hasModels = Array.isArray(p.modelList) && (p.modelList as any[]).length > 0
-                return p.enable === 1 && hasModels
+            return providers.some(p => {
+                const models = Array.isArray(p.modelList) ? (p.modelList as any[]) : []
+                return p.enable === 1 && models.length > 0
             })
-            return enabledWithModels.length === 0
         }),
+
+        // Group providers: models visible to this user's groups
+        getGroupModels(userId).then(models => models.length > 0),
     ])
 
-    const [adminMissing, noProviders] = checks
+    const [adminMissing, userHasProviders, groupHasProviders] = checks
 
     return Response.json({
         adminIssues: adminMissing && adminMissing.length > 0 ? adminMissing : null,
-        providerIssue: noProviders,
+        providerIssue: !userHasProviders && !groupHasProviders,
     })
 }

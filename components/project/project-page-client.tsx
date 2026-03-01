@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useCallback } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, usePathname } from "next/navigation"
 import { MessageSquare, Plus, Trash2, Pencil } from "lucide-react"
 import { toast } from "sonner"
 import { ChatInterface } from "@/components/chat/chat-interface"
@@ -26,6 +26,9 @@ export function ProjectPageClient({
     initialActiveMessages?: DBMessage[]
 }) {
     const router = useRouter()
+    const pathname = usePathname()
+    const segments = pathname?.split('/').filter(Boolean) || []
+    const localePrefix = segments.length && segments[0].length <= 5 ? `/${segments[0]}` : ''
     const [sessions, setSessions] = useState<Session[]>(initialSessions)
     const [activeSessionId, setActiveSessionId] = useState<string | undefined>(initialActiveSessionId)
     const [activeMessages, setActiveMessages] = useState<DBMessage[]>(initialActiveMessages)
@@ -45,11 +48,11 @@ export function ProjectPageClient({
             return [{ id: newId, title: title || 'New Chat', updatedAt: new Date().toISOString() }, ...prev]
         })
         // Update URL to reflect the new chat within project context
-        window.history.pushState({}, '', `/p/${project.id}/c/${newId}`)
+        window.history.pushState({}, '', `${localePrefix}/p/${project.id}/c/${newId}`)
     }, [project.id])
 
     const handleSelectSession = (id: string) => {
-        router.push(`/p/${project.id}/c/${id}`)
+        router.push(`${localePrefix}/p/${project.id}/c/${id}`)
     }
 
     const handleDeleteSession = async (id: string, e: React.MouseEvent) => {
@@ -85,6 +88,13 @@ export function ProjectPageClient({
         setRenamingId(null)
     }
 
+    const handleCreateNew = () => {
+        setActiveSessionId(undefined)
+        setActiveMessages([])
+        const fresh = Date.now()
+        router.push(`${localePrefix}/p/${project.id}?fresh=${fresh}`)
+    }
+
     return (
         <div className="flex h-full w-full overflow-hidden">
             {/* ── Left Panel: Chat List ─────────────────────────── */}
@@ -98,7 +108,8 @@ export function ProjectPageClient({
                 {/* New Chat button */}
                 <div className="px-3 py-3 border-b border-border/40">
                     <button
-                        onClick={() => { window.location.href = `/p/${project.id}` }}
+                        type="button"
+                        onClick={handleCreateNew}
                         className="w-full flex items-center gap-2 h-9 px-3 rounded-xl border border-border/50 text-sm text-muted-foreground hover:text-foreground hover:border-border hover:bg-muted/50 transition-all"
                     >
                         <Plus className="h-3.5 w-3.5" />
@@ -109,7 +120,7 @@ export function ProjectPageClient({
                 {/* Session List */}
                 <div className="flex-1 overflow-y-auto px-3 py-2 space-y-0.5">
                     {sessions.length === 0 ? (
-                        <p className="text-[11px] text-muted-foreground text-center py-6">此資料夾尚無對話</p>
+                        <p className="text-[11px] text-muted-foreground text-center py-6">此專案尚無對話</p>
                     ) : (
                         sessions.map(s => (
                             <div
