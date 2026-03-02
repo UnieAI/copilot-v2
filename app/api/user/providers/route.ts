@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { userProviders } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { userProviders, groupProviders } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 
 // GET /api/user/providers — list all providers for current user
 export async function GET(req: NextRequest) {
@@ -34,18 +34,26 @@ export async function POST(req: NextRequest) {
         return Response.json({ error: "apiUrl and apiKey are required" }, { status: 400 });
     }
 
-    // Check prefix uniqueness for this user
-    const existing = await db.query.userProviders.findFirst({
-        where: and(eq(userProviders.userId, userId), eq(userProviders.prefix, prefix.toUpperCase())),
-    });
-    if (existing) {
+    const upperPrefix = prefix.toUpperCase();
+
+    // Check prefix uniqueness globally (all user providers + all group providers)
+    const [existingUserProvider, existingGroupProvider] = await Promise.all([
+        db.query.userProviders.findFirst({
+            where: eq(userProviders.prefix, upperPrefix),
+        }),
+        db.query.groupProviders.findFirst({
+            where: eq(groupProviders.prefix, upperPrefix),
+        }),
+    ]);
+
+    if (existingUserProvider || existingGroupProvider) {
         return Response.json({ error: "Prefix already in use" }, { status: 409 });
     }
 
     const [newProvider] = await db.insert(userProviders).values({
         userId,
         displayName: displayName || '',
-        prefix: prefix.toUpperCase(),
+        prefix: upperPrefix,
         apiUrl,
         apiKey,
         enable: enable === false ? 0 : 1,
