@@ -58,7 +58,7 @@ export default async function LoginPage() {
                             </form>
 
                             {/* Microsoft/Azure Sign In */}
-                            {/* <form action={async () => {
+                            <form action={async () => {
                                 "use server"
                                 await signIn("azure-ad", { redirectTo: "/chat" })
                             }}>
@@ -71,7 +71,7 @@ export default async function LoginPage() {
                                     </svg>
                                     {t('continueWithMicrosoft')}
                                 </button>
-                            </form> */}
+                            </form>
                         </div>
 
                         <div className="mt-8 text-center text-xs text-muted-foreground leading-relaxed">
