@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ChevronDown, ChevronUp, Plus, RefreshCw, ToggleLeft, ToggleRight, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Eye, Plus, RefreshCw, ToggleLeft, ToggleRight, Trash2, X } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 type GlobalProvider = {
   id: string;
@@ -28,6 +29,15 @@ type QuotaItem = {
   refreshAt?: string;
 };
 
+type QuotaUsageItem = {
+  userId: string;
+  name: string;
+  image: string | null;
+  usedTokens: number;
+  remainingTokens: number | null;
+  refreshAt: string;
+};
+
 const ROLE_LABELS: Record<string, string> = {
   super: '超級管理員',
   admin: '管理員',
@@ -44,11 +54,10 @@ const ROLE_COLORS: Record<string, string> = {
 
 const ROLES: Array<"user" | "admin" | "super"> = ["user", "admin", "super"];
 
-function quotaText(q: QuotaItem) {
-  if (q.limitTokens === null) return "Unlimited";
-  const remaining = Number(q.remainingTokens ?? 0);
-  if (remaining > 0) return `Remaining ${remaining.toLocaleString()} tokens`;
-  return `Exhausted, refresh at ${q.refreshAt ? new Date(q.refreshAt).toLocaleString() : "-"}`;
+function formatTokenStatus(remainingTokens: number | null, refreshAt?: string) {
+  if (remainingTokens === null) return "Unlimited";
+  if (remainingTokens > 0) return `剩餘額度：${remainingTokens.toLocaleString()} tokens`;
+  return `額度恢復日期：${refreshAt ? new Date(refreshAt).toLocaleString() : "-"}`;
 }
 
 export function GlobalProvidersPanel() {
@@ -72,6 +81,10 @@ export function GlobalProvidersPanel() {
   const [savingProviderId, setSavingProviderId] = useState<string | null>(null);
   const [quotaSearch, setQuotaSearch] = useState("");
   const [quotaRoleFilter, setQuotaRoleFilter] = useState<"all" | "user" | "admin" | "super">("all");
+  const [usageDialogOpen, setUsageDialogOpen] = useState(false);
+  const [usageLoading, setUsageLoading] = useState(false);
+  const [usageItems, setUsageItems] = useState<QuotaUsageItem[]>([]);
+  const [usageDialogTitle, setUsageDialogTitle] = useState("");
 
   const existingPrefixes = providers.map((p) => p.prefix.toUpperCase());
 
@@ -297,6 +310,28 @@ export function GlobalProvidersPanel() {
     });
   };
 
+  const openQuotaUsageDialog = async (q: QuotaItem) => {
+    setUsageDialogOpen(true);
+    setUsageLoading(true);
+    setUsageItems([]);
+    setUsageDialogTitle(`${q.role} / ${q.model}`);
+    try {
+      const params = new URLSearchParams({
+        role: q.role,
+        model: q.model,
+      });
+      const res = await fetch(`/api/admin/global-providers/${q.providerId}/quotas/usage?${params.toString()}`);
+      if (!res.ok) {
+        toast.error("載入使用狀態失敗");
+        return;
+      }
+      const data = await res.json();
+      setUsageItems(Array.isArray(data?.items) ? data.items : []);
+    } finally {
+      setUsageLoading(false);
+    }
+  };
+
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between">
@@ -326,9 +361,15 @@ export function GlobalProvidersPanel() {
         <div className="space-y-3">
           {[...providers]
             .sort((a, b) => {
-              const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-              const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-              return aTime - bTime;
+              const aName = (a.displayName || "").trim().toLowerCase();
+              const bName = (b.displayName || "").trim().toLowerCase();
+              const byName = aName.localeCompare(bName);
+              if (byName !== 0) return byName;
+
+              const byPrefix = (a.prefix || "").localeCompare(b.prefix || "");
+              if (byPrefix !== 0) return byPrefix;
+
+              return a.id.localeCompare(b.id);
             })
             .map((p) => {
             const models = Array.isArray(p.modelList) ? p.modelList : [];
@@ -525,7 +566,9 @@ export function GlobalProvidersPanel() {
                               className="rounded-xl border border-border/50 p-3 flex flex-col gap-2.5 text-xs bg-background"
                             >
                               {/* 第一行：角色 + 模型 */}
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0 space-y-2">
+                                  <div className="flex items-center gap-2">
                                 <span
                                   className={`
         inline-flex items-center rounded-full 
@@ -535,11 +578,11 @@ export function GlobalProvidersPanel() {
                                 >
                                   {ROLE_LABELS[q.role] || q.role}
                                 </span>
-                                <span className="font-mono px-2 py-1 rounded bg-muted">{q.model}</span>
-                              </div>
+                                    <span className="font-mono px-2 py-1 rounded bg-muted truncate">{q.model}</span>
+                                  </div>
 
                               {/* 第二行：控制項們 */}
-                              <div className="flex flex-wrap items-center gap-3">
+                                  <div className="flex flex-wrap items-center gap-3">
                                 <label className="flex items-center gap-1.5 whitespace-nowrap">
                                   <input
                                     type="checkbox"
@@ -593,12 +636,18 @@ export function GlobalProvidersPanel() {
                                     className="w-20 h-8 rounded-lg border border-input/60 bg-background px-2 py-1"
                                   />
                                 </div>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => openQuotaUsageDialog(q)}
+                                  className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-border bg-background hover:bg-muted transition-colors shrink-0"
+                                  title="View usage list"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </button>
                               </div>
 
-                              {/* 第三行：提示文字 */}
-                              <div>
-                                <span className="text-muted-foreground">{quotaText(q)}</span>
-                              </div>
                             </div>
                           ))}
                         </div>
@@ -627,6 +676,44 @@ export function GlobalProvidersPanel() {
           })}
         </div>
       )}
+
+      <Dialog open={usageDialogOpen} onOpenChange={setUsageDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Usage Status</DialogTitle>
+            <DialogDescription>{usageDialogTitle}</DialogDescription>
+          </DialogHeader>
+
+          {usageLoading ? (
+            <p className="text-sm text-muted-foreground">Loading...</p>
+          ) : usageItems.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No users matched.</p>
+          ) : (
+            <div className="space-y-2">
+              {usageItems.map((item) => (
+                <div
+                  key={item.userId}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-border/50 p-3"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    {item.image ? (
+                      <img src={item.image} alt={item.name} className="h-8 w-8 rounded-full object-cover shrink-0" />
+                    ) : (
+                      <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-xs text-muted-foreground shrink-0">
+                        {(item.name || "?").slice(0, 1).toUpperCase()}
+                      </div>
+                    )}
+                    <span className="text-sm font-medium truncate">{item.name}</span>
+                  </div>
+                  <span className="text-xs text-muted-foreground text-right">
+                    {formatTokenStatus(item.remainingTokens, item.refreshAt)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {showCreateDialog && (
         <div
