@@ -11,7 +11,7 @@ COPY tsconfig*.json ./
 COPY next.config.* ./
 
 # 安裝所有依賴（包含開發依賴）
-RUN npm ci
+RUN npm i
 
 # 複製所有原始碼
 COPY . .
