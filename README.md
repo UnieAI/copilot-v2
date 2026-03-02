@@ -23,14 +23,14 @@ To run the required PostgreSQL and Redis instances locally:
 
 ```bash
 # PostgreSQL @ Windows
-docker run -d --name unieai-postgres -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=105114 -e POSTGRES_DB=UnieAI_Chatroom_DB -p 5432:5432 -v D:/Docker/Database/unieai-chatroom:/var/lib/postgresql/data --restart unless-stopped postgres:16
+docker run -d --name unieai-postgres -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=105114 -e POSTGRES_DB=UnieAI_Agent_DB -p 5432:5432 -v D:/Docker/Database/unieai-agent:/var/lib/postgresql/data --restart unless-stopped postgres:16
 
 # PostgreSQL @ Mac
 docker run -d \
   --name unieai-postgres \
   -e POSTGRES_USER=admin \
   -e POSTGRES_PASSWORD=105114 \
-  -e POSTGRES_DB=UnieAI_Chatroom_DB \
+  -e POSTGRES_DB=UnieAI_Agent_DB \
   -p 5432:5432 \
   -v unieai-postgres-data:/var/lib/postgresql/data \
   --restart unless-stopped \
