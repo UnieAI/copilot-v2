@@ -103,6 +103,8 @@ function ProviderCard({
 
     const handleToggleEnable = async () => {
         const newEnable = !form.enable
+        const selectedIdSet = new Set(selectedModelIds)
+        const selectedModels = models.filter((model) => selectedIdSet.has(getModelId(model)))
         setForm(prev => ({ ...prev, enable: newEnable }))
         try {
             const res = await fetch(`/api/user/providers/${provider.id}`, {
