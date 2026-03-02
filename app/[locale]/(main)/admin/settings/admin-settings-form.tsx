@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card"; // 假設你有這個
 import { Sparkles, Globe, Eye, Zap, Save, RefreshCw } from "lucide-react";
+import { UnieAIIcon } from "@/components/sidebar/unieai-logo";
 
 type AdminSettings = {
     defaultUserRole?: string | null;
@@ -20,6 +21,9 @@ type AdminSettings = {
     visionModelKey?: string | null;
     visionModelName?: string | null;
 };
+
+const UNIEAI_PROVIDER_URL = process.env.NEXT_PUBLIC_UNIEAI_PROVIDER_URL || "";
+const UNIEAI_PROVIDER_KEY = process.env.NEXT_PUBLIC_UNIEAI_PROVIDER_KEY || "";
 
 export function AdminSettingsForm({ settings }: { settings: AdminSettings | undefined }) {
     const router = useRouter();
@@ -53,6 +57,21 @@ export function AdminSettingsForm({ settings }: { settings: AdminSettings | unde
         } finally {
             setLoadingMap(prev => ({ ...prev, [type]: false }));
         }
+    };
+
+    const applyUnieAIAndFetchModels = async (type: string, urlId: string, keyId: string, setModels: any) => {
+        if (!UNIEAI_PROVIDER_URL || !UNIEAI_PROVIDER_KEY) {
+            toast.error("NEXT_PUBLIC_UNIEAI_PROVIDER_URL 或 NEXT_PUBLIC_UNIEAI_PROVIDER_KEY 未設定");
+            return;
+        }
+
+        const urlInput = document.getElementById(urlId) as HTMLInputElement | null;
+        const keyInput = document.getElementById(keyId) as HTMLInputElement | null;
+        if (!urlInput || !keyInput) return;
+
+        urlInput.value = UNIEAI_PROVIDER_URL;
+        keyInput.value = UNIEAI_PROVIDER_KEY;
+        await fetchModels(type, urlId, keyId, setModels);
     };
 
     const inputClasses = "w-full h-11 rounded-2xl border-none ring-1 ring-border/50 bg-muted/30 px-4 text-sm focus:ring-2 focus:ring-primary/40 focus:bg-background transition-all duration-300 outline-none";
@@ -118,7 +137,17 @@ export function AdminSettingsForm({ settings }: { settings: AdminSettings | unde
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
                             <label className={labelClasses}>API Endpoint</label>
-                            <input id={`${m.id}_url`} name={m.url} placeholder="https://..." defaultValue={(settings as any)?.[m.url] || ""} className={inputClasses} />
+                            <div className="flex items-center gap-2">
+                                <input id={`${m.id}_url`} name={m.url} placeholder="https://..." defaultValue={(settings as any)?.[m.url] || ""} className={`${inputClasses} flex-1`} />
+                                <button
+                                    type="button"
+                                    onClick={() => applyUnieAIAndFetchModels(m.id, `${m.id}_url`, `${m.id}_key`, m.setter)}
+                                    className="h-11 w-11 shrink-0 rounded-full border border-border/50 bg-background hover:bg-muted transition-colors inline-flex items-center justify-center"
+                                    title="Use UnieAI"
+                                >
+                                    <UnieAIIcon className="h-4 w-4" />
+                                </button>
+                            </div>
                         </div>
                         <div>
                             <label className={labelClasses}>API Key</label>

@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { Plus, Trash2, RefreshCw, Pencil, Check, X, Users, Server, ChevronDown, ChevronUp, BarChart3, Shield } from "lucide-react"
 import { Area, AreaChart, CartesianGrid, XAxis } from "recharts"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
+import { UnieAIIcon } from "@/components/sidebar/unieai-logo"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -90,6 +91,9 @@ type GroupModelQuota = {
     remainingTokens?: number | null
     refreshAt?: string
 }
+
+const UNIEAI_PROVIDER_URL = process.env.NEXT_PUBLIC_UNIEAI_PROVIDER_URL || ""
+const UNIEAI_PROVIDER_KEY = process.env.NEXT_PUBLIC_UNIEAI_PROVIDER_KEY || ""
 
 // ─── Helper: masked API key ──────────────────────────────────────────────────
 function maskKey(key: string) {
@@ -241,6 +245,22 @@ function ProviderForm({
     })
     const [saving, setSaving] = useState(false)
 
+    const applyUnieAIGroupDefaults = () => {
+        if (!UNIEAI_PROVIDER_URL) {
+            toast.error("NEXT_PUBLIC_UNIEAI_PROVIDER_URL 未設定")
+            return
+        }
+        if (!UNIEAI_PROVIDER_KEY) {
+            toast.error("NEXT_PUBLIC_UNIEAI_PROVIDER_KEY 未設定")
+            return
+        }
+        setForm(f => ({
+            ...f,
+            apiUrl: UNIEAI_PROVIDER_URL,
+            apiKey: UNIEAI_PROVIDER_KEY,
+        }))
+    }
+
     const save = async () => {
         setSaving(true)
         try {
@@ -294,12 +314,22 @@ function ProviderForm({
             </div>
             <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">API URL</label>
-                <input
-                    className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring"
-                    value={form.apiUrl}
-                    onChange={e => setForm(f => ({ ...f, apiUrl: e.target.value }))}
-                    placeholder="https://api.openai.com"
-                />
+                <div className="flex items-center gap-2">
+                    <input
+                        className="flex-1 rounded-lg border border-input bg-background px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                        value={form.apiUrl}
+                        onChange={e => setForm(f => ({ ...f, apiUrl: e.target.value }))}
+                        placeholder="https://api.openai.com"
+                    />
+                    <button
+                        type="button"
+                        onClick={applyUnieAIGroupDefaults}
+                        className="h-9 w-9 shrink-0 rounded-full border border-input bg-background hover:bg-muted transition-colors inline-flex items-center justify-center"
+                        title="Use UnieAI"
+                    >
+                        <UnieAIIcon className="h-4 w-4" />
+                    </button>
+                </div>
             </div>
             <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">API Key</label>

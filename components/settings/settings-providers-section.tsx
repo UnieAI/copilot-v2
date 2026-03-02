@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { toast } from "sonner"
 import { Plus, Trash2, RefreshCw, ChevronDown, ChevronUp, ToggleLeft, ToggleRight, X } from "lucide-react"
+import { UnieAIIcon } from "@/components/sidebar/unieai-logo"
 
 type ModelItem = {
     id: string
@@ -29,6 +30,8 @@ type ProviderFormState = {
     apiKey: string
     enable: boolean
 }
+
+const UNIEAI_PROVIDER_URL = process.env.NEXT_PUBLIC_UNIEAI_PROVIDER_URL || ""
 
 function ModelBadge({ model, onRemove }: { model: ModelItem; onRemove: () => void }) {
     return (
@@ -83,6 +86,15 @@ function ProviderCard({
     const handlePrefixChange = (val: string) => {
         setForm(prev => ({ ...prev, prefix: val }))
         setPrefixError(validatePrefix(val))
+    }
+
+    const applyUnieAIProviderUrlForEdit = () => {
+        if (!UNIEAI_PROVIDER_URL) {
+            toast.error("NEXT_PUBLIC_UNIEAI_PROVIDER_URL 未設定")
+            return
+        }
+        setForm(prev => ({ ...prev, apiUrl: UNIEAI_PROVIDER_URL }))
+        toast.info("已帶入 UnieAI Base URL，請輸入您的 UnieAI API KEY。")
     }
 
     const handleToggleEnable = async () => {
@@ -277,13 +289,23 @@ function ProviderCard({
                         {/* API URL */}
                         <div className="space-y-1">
                             <label className="text-xs font-medium">API URL</label>
-                            <input
-                                type="url"
-                                value={form.apiUrl}
-                                onChange={e => setForm(prev => ({ ...prev, apiUrl: e.target.value }))}
-                                placeholder="https://api.openai.com/v1"
-                                className="w-full h-9 rounded-xl border border-input/60 bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
-                            />
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="url"
+                                    value={form.apiUrl}
+                                    onChange={e => setForm(prev => ({ ...prev, apiUrl: e.target.value }))}
+                                    placeholder="https://api.openai.com/v1"
+                                    className="flex-1 h-9 rounded-xl border border-input/60 bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={applyUnieAIProviderUrlForEdit}
+                                    className="h-9 w-9 shrink-0 rounded-full border border-input/60 bg-background hover:bg-muted transition-colors inline-flex items-center justify-center"
+                                    title="Use UnieAI"
+                                >
+                                    <UnieAIIcon className="h-4 w-4" />
+                                </button>
+                            </div>
                         </div>
 
                         {/* API Key */}
@@ -399,6 +421,15 @@ function CreateProviderDialog({
         }
     }
 
+    const applyUnieAIProviderUrl = () => {
+        if (!UNIEAI_PROVIDER_URL) {
+            toast.error("NEXT_PUBLIC_UNIEAI_PROVIDER_URL 未設定")
+            return
+        }
+        setForm(prev => ({ ...prev, apiUrl: UNIEAI_PROVIDER_URL }))
+        toast.info("已帶入 UnieAI Base URL，請輸入您的 UnieAI API KEY。")
+    }
+
     // Close on backdrop click
     const handleBackdrop = (e: React.MouseEvent<HTMLDivElement>) => {
         if (e.target === e.currentTarget) onClose()
@@ -463,13 +494,23 @@ function CreateProviderDialog({
                             API URL
                             <span className="ml-1.5 text-xs text-muted-foreground font-normal">（可之後再填）</span>
                         </label>
-                        <input
-                            type="text"
-                            value={form.apiUrl}
-                            onChange={e => setForm(prev => ({ ...prev, apiUrl: e.target.value }))}
-                            placeholder="https://api.openai.com/v1"
-                            className="w-full h-10 rounded-xl border border-input/60 bg-background px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
-                        />
+                        <div className="flex items-center gap-2">
+                            <input
+                                type="text"
+                                value={form.apiUrl}
+                                onChange={e => setForm(prev => ({ ...prev, apiUrl: e.target.value }))}
+                                placeholder="https://api.openai.com/v1"
+                                className="flex-1 h-10 rounded-xl border border-input/60 bg-background px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
+                            />
+                            <button
+                                type="button"
+                                onClick={applyUnieAIProviderUrl}
+                                className="h-10 w-10 shrink-0 rounded-full border border-input/60 bg-background hover:bg-muted transition-colors inline-flex items-center justify-center"
+                                title="Use UnieAI"
+                            >
+                                <UnieAIIcon className="h-4 w-4" />
+                            </button>
+                        </div>
                     </div>
 
                     {/* API Key */}

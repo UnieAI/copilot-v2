@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ChevronDown, ChevronUp, Eye, Plus, RefreshCw, ToggleLeft, ToggleRight, Trash2, X } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { UnieAIIcon } from "@/components/sidebar/unieai-logo";
 
 type GlobalProvider = {
   id: string;
@@ -53,6 +54,8 @@ const ROLE_COLORS: Record<string, string> = {
 };
 
 const ROLES: Array<"user" | "admin" | "super"> = ["user", "admin", "super"];
+const UNIEAI_PROVIDER_URL = process.env.NEXT_PUBLIC_UNIEAI_PROVIDER_URL || "";
+const UNIEAI_PROVIDER_KEY = process.env.NEXT_PUBLIC_UNIEAI_PROVIDER_KEY || "";
 
 function formatTokenStatus(remainingTokens: number | null, refreshAt?: string) {
   if (remainingTokens === null) return "Unlimited";
@@ -148,6 +151,40 @@ export function GlobalProvidersPanel() {
     } finally {
       setCreating(false);
     }
+  };
+
+  const applyUnieAIGlobalDefaults = () => {
+    if (!UNIEAI_PROVIDER_URL) {
+      toast.error("NEXT_PUBLIC_UNIEAI_PROVIDER_URL is not set");
+      return;
+    }
+    if (!UNIEAI_PROVIDER_KEY) {
+      toast.error("NEXT_PUBLIC_UNIEAI_PROVIDER_KEY is not set");
+      return;
+    }
+    setCreateForm((s) => ({
+      ...s,
+      apiUrl: UNIEAI_PROVIDER_URL,
+      apiKey: UNIEAI_PROVIDER_KEY,
+    }));
+  };
+
+  const applyUnieAIToProviderEdit = (providerId: string) => {
+    if (!UNIEAI_PROVIDER_URL) {
+      toast.error("NEXT_PUBLIC_UNIEAI_PROVIDER_URL is not set");
+      return;
+    }
+    if (!UNIEAI_PROVIDER_KEY) {
+      toast.error("NEXT_PUBLIC_UNIEAI_PROVIDER_KEY is not set");
+      return;
+    }
+    setProviders((prev) =>
+      prev.map((item) =>
+        item.id === providerId
+          ? { ...item, apiUrl: UNIEAI_PROVIDER_URL, apiKey: UNIEAI_PROVIDER_KEY }
+          : item
+      )
+    );
   };
 
   const updateProvider = async (id: string, patch: Record<string, unknown>) => {
@@ -266,6 +303,7 @@ export function GlobalProvidersPanel() {
       const ok = await updateProvider(provider.id, {
         displayName: current.displayName,
         apiUrl: current.apiUrl,
+        apiKey: current.apiKey,
         selectedModels: current.selectedModels,
       });
       if (!ok) return;
@@ -473,10 +511,29 @@ export function GlobalProvidersPanel() {
                       </div>
                       <div className="space-y-1 md:col-span-2">
                         <label className="text-xs font-medium">API URL</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            value={p.apiUrl}
+                            onChange={(e) => setProviders((prev) => prev.map((item) => (item.id === p.id ? { ...item, apiUrl: e.target.value } : item)))}
+                            className="flex-1 h-9 rounded-xl border border-input/60 bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => applyUnieAIToProviderEdit(p.id)}
+                            className="h-9 w-9 shrink-0 rounded-full border border-input/60 bg-background hover:bg-muted transition-colors inline-flex items-center justify-center"
+                            title="Use UnieAI"
+                          >
+                            <UnieAIIcon className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="space-y-1 md:col-span-2">
+                        <label className="text-xs font-medium">API Key</label>
                         <input
-                          value={p.apiUrl}
-                          onChange={(e) => setProviders((prev) => prev.map((item) => (item.id === p.id ? { ...item, apiUrl: e.target.value } : item)))}
+                          value={p.apiKey}
+                          onChange={(e) => setProviders((prev) => prev.map((item) => (item.id === p.id ? { ...item, apiKey: e.target.value } : item)))}
                           className="w-full h-9 rounded-xl border border-input/60 bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
+                          type="password"
                         />
                       </div>
                     </div>
@@ -767,12 +824,22 @@ export function GlobalProvidersPanel() {
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">API URL</label>
-                <input
-                  placeholder="https://api.openai.com/v1"
-                  value={createForm.apiUrl}
-                  onChange={(e) => setCreateForm((s) => ({ ...s, apiUrl: e.target.value }))}
-                  className="w-full h-10 rounded-xl border border-input/60 bg-background px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    placeholder="https://api.openai.com/v1"
+                    value={createForm.apiUrl}
+                    onChange={(e) => setCreateForm((s) => ({ ...s, apiUrl: e.target.value }))}
+                    className="flex-1 h-10 rounded-xl border border-input/60 bg-background px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={applyUnieAIGlobalDefaults}
+                    className="h-10 w-10 shrink-0 rounded-full border border-input/60 bg-background hover:bg-muted transition-colors inline-flex items-center justify-center"
+                    title="Use UnieAI"
+                  >
+                    <UnieAIIcon className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">API Key</label>
