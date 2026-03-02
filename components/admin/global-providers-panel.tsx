@@ -494,7 +494,7 @@ export function GlobalProvidersPanel() {
                   <div className="px-4 pb-4 space-y-4 border-t border-border/40 pt-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <div className="space-y-1">
-                        <label className="text-xs font-medium">Display Name</label>
+                        <label className="text-xs font-medium">顯示名稱</label>
                         <input
                           value={p.displayName}
                           onChange={(e) => setProviders((prev) => prev.map((item) => (item.id === p.id ? { ...item, displayName: e.target.value } : item)))}
@@ -502,7 +502,7 @@ export function GlobalProvidersPanel() {
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-xs font-medium">Prefix</label>
+                        <label className="text-xs font-medium">Prefix（4碼英數字，唯一識別）</label>
                         <input
                           value={p.prefix}
                           disabled
@@ -540,7 +540,7 @@ export function GlobalProvidersPanel() {
 
                     <div className="space-y-2 pt-2 border-t border-border/40">
                       <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs text-muted-foreground">Selectable models (shown in /chat)</p>
+                        <p className="text-xs text-muted-foreground">選擇模型（已選 {selected.length}/{models.length} 個）</p>
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
@@ -551,7 +551,7 @@ export function GlobalProvidersPanel() {
                             className="h-7 px-2.5 rounded-lg border border-border bg-background hover:bg-muted text-xs"
                             disabled={models.length === 0}
                           >
-                            Select All
+                            全選
                           </button>
                           <button
                             type="button"
@@ -559,7 +559,7 @@ export function GlobalProvidersPanel() {
                             className="h-7 px-2.5 rounded-lg border border-border bg-background hover:bg-muted text-xs"
                             disabled={selected.length === 0}
                           >
-                            Clear All
+                            清除選擇
                           </button>
                         </div>
                       </div>
@@ -587,8 +587,8 @@ export function GlobalProvidersPanel() {
 
                     <div className="border-t border-border/40 pt-3 space-y-2">
                       <div className="flex items-center justify-between">
-                        <p className="text-sm font-medium">Role Model Quotas</p>
-                        {loadingQuotaProviderId === p.id && <span className="text-xs text-muted-foreground">Loading quotas...</span>}
+                        <p className="text-sm font-medium">用量設置</p>
+                        {loadingQuotaProviderId === p.id && <span className="text-xs text-muted-foreground">載入用量中...</span>}
                       </div>
 
                       {quotaProviderId === p.id && providerQuotaItems.length > 0 && (
@@ -654,7 +654,7 @@ export function GlobalProvidersPanel() {
                                       )
                                     }
                                   />
-                                  Unlimited
+                                  無上限
                                 </label>
 
                                 <input
@@ -676,7 +676,7 @@ export function GlobalProvidersPanel() {
                                 />
 
                                 <div className="flex items-center gap-1.5">
-                                  <span className="text-muted-foreground">Refresh(Hours)</span>
+                                  <span className="text-muted-foreground">刷新(小時)</span>
                                   <input
                                     type="number"
                                     min={1}
