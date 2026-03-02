@@ -5,6 +5,7 @@ import { userProviders, userPreferences, chatMessages } from "@/lib/db/schema"
 import { eq, and } from "drizzle-orm"
 import { ChatInterface } from "@/components/chat/chat-interface"
 import { getGroupModels } from "@/lib/get-group-models"
+import { getGlobalModels } from "@/lib/get-global-models"
 
 export default async function ChatPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
     const session = await auth()
@@ -34,6 +35,7 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
             }))
         }),
         ...(await getGroupModels(userId)),
+        ...(await getGlobalModels()),
     ]
 
     // Fetch user preference for previously selected model

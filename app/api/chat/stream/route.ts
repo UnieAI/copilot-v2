@@ -1,10 +1,11 @@
 import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { adminSettings, userProviders, mcpTools, chatSessions, chatMessages, chatFiles, userGroups, groupProviders, groupTokenUsage, tokenUsage, groupUserQuotas, groupUserModelQuotas, groupModelQuotas } from "@/lib/db/schema";
-import { eq, and, inArray, sql } from "drizzle-orm";
+import { adminSettings, userProviders, mcpTools, chatSessions, chatMessages, chatFiles, userGroups, groupProviders, groupTokenUsage, tokenUsage, groupUserQuotas, groupUserModelQuotas, groupModelQuotas, globalProviders, globalProviderRoleModelQuotas, users } from "@/lib/db/schema";
+import { eq, and, inArray, sql, gte } from "drizzle-orm";
 import { parseFile, isImageFile, isDocumentFile, stripThinkAndKeepFinal } from "@/lib/parsers";
 import { processPdfPagesEnhanced, isPdf } from "@/lib/parsers/pdf-enhanced";
+import { getQuotaWindow } from "@/lib/quota-window";
 
 /** Strip <think>...</think> blocks (including unclosed ones) and trim. */
 function stripThink(text: string): string {
@@ -104,19 +105,23 @@ export async function POST(req: NextRequest) {
                     });
                     const memberGroupIds = memberships.map(g => g.groupId);
                     let providerGroupId: string | null = null;
-                    let providerGroupRole: string | null = null;
+                    let providerScope: "user" | "group" | "global" | null = null;
+                    let providerGlobalId: string | null = null;
+                    const currentUserRole = ((session.user as any).role || "user") as string;
 
-                    // Look up provider by prefix (personal first, then group)
-                    let providerConf =
+                    // Look up provider by prefix (personal first, then group, then global)
+                    let providerConf: any =
                         providerPrefix
                             ? await db.query.userProviders.findFirst({
-                                where: and(eq(userProviders.userId, userId), eq(userProviders.prefix, providerPrefix))
+                                where: and(eq(userProviders.userId, userId), eq(userProviders.prefix, providerPrefix), eq(userProviders.enable, 1))
                             })
                             : await db.query.userProviders.findFirst({
                                 where: and(eq(userProviders.userId, userId), eq(userProviders.enable, 1))
                             });
 
-                    if (providerConf) providerGroupId = null;
+                    if (providerConf) {
+                        providerScope = "user";
+                    }
 
                     if (!providerConf && providerPrefix && memberGroupIds.length > 0) {
                         providerConf = await db.query.groupProviders.findFirst({
@@ -128,7 +133,7 @@ export async function POST(req: NextRequest) {
                         });
                         if (providerConf) {
                             providerGroupId = (providerConf as any).groupId;
-                            providerGroupRole = memberships.find(m => m.groupId === providerGroupId)?.role || null;
+                            providerScope = "group";
                         }
                     }
 
@@ -142,7 +147,29 @@ export async function POST(req: NextRequest) {
                         });
                         if (providerConf) {
                             providerGroupId = (providerConf as any).groupId;
-                            providerGroupRole = memberships.find(m => m.groupId === providerGroupId)?.role || null;
+                            providerScope = "group";
+                        }
+                    }
+
+                    // Prefix-selected global provider
+                    if (!providerConf && providerPrefix) {
+                        providerConf = await db.query.globalProviders.findFirst({
+                            where: and(eq(globalProviders.prefix, providerPrefix), eq(globalProviders.enable, 1)),
+                        });
+                        if (providerConf) {
+                            providerGlobalId = (providerConf as any).id;
+                            providerScope = "global";
+                        }
+                    }
+
+                    // Fallback: any enabled global provider
+                    if (!providerConf) {
+                        providerConf = await db.query.globalProviders.findFirst({
+                            where: eq(globalProviders.enable, 1),
+                        });
+                        if (providerConf) {
+                            providerGlobalId = (providerConf as any).id;
+                            providerScope = "global";
                         }
                     }
 
@@ -369,7 +396,7 @@ export async function POST(req: NextRequest) {
                     }
 
                     // ─── 6. Quota check (group only) ────────────────────────────────
-                    if (providerGroupId) {
+                    if (providerScope === "group" && providerGroupId) {
                         const [userQuota, modelQuota, groupModelQuota] = await Promise.all([
                             db.query.groupUserQuotas.findFirst({
                                 where: and(eq(groupUserQuotas.groupId, providerGroupId), eq(groupUserQuotas.userId, userId)),
@@ -390,12 +417,14 @@ export async function POST(req: NextRequest) {
                         ]);
 
                         if (userQuota?.limitTokens != null) {
+                            const window = getQuotaWindow(new Date(), userQuota.refillIntervalHours);
                             const [used] = await db
                                 .select({ total: sql<number>`coalesce(sum(${tokenUsage.totalTokens}),0)` })
                                 .from(tokenUsage)
                                 .where(and(
                                     eq(tokenUsage.groupId, providerGroupId),
-                                    eq(tokenUsage.userId, userId)
+                                    eq(tokenUsage.userId, userId),
+                                    gte(tokenUsage.createdAt, window.start)
                                 ));
                             if ((used?.total || 0) >= userQuota.limitTokens) {
                                 send({ type: 'error', data: '群組使用額度已用完，請聯絡管理員。' });
@@ -405,13 +434,15 @@ export async function POST(req: NextRequest) {
                         }
 
                         if (modelQuota?.limitTokens != null) {
+                            const window = getQuotaWindow(new Date(), modelQuota.refillIntervalHours);
                             const [usedModel] = await db
                                 .select({ total: sql<number>`coalesce(sum(${tokenUsage.totalTokens}),0)` })
                                 .from(tokenUsage)
                                 .where(and(
                                     eq(tokenUsage.groupId, providerGroupId),
                                     eq(tokenUsage.userId, userId),
-                                    eq(tokenUsage.model, realModelName || selectedModel)
+                                    eq(tokenUsage.model, realModelName || selectedModel),
+                                    gte(tokenUsage.createdAt, window.start)
                                 ));
                             if ((usedModel?.total || 0) >= modelQuota.limitTokens) {
                                 send({ type: 'error', data: '此模型額度已用完，請聯絡管理員。' });
@@ -421,15 +452,48 @@ export async function POST(req: NextRequest) {
                         }
 
                         if (groupModelQuota?.limitTokens != null) {
+                            const window = getQuotaWindow(new Date(), groupModelQuota.refillIntervalHours);
                             const [usedGroupModel] = await db
                                 .select({ total: sql<number>`coalesce(sum(${tokenUsage.totalTokens}),0)` })
                                 .from(tokenUsage)
                                 .where(and(
                                     eq(tokenUsage.groupId, providerGroupId),
-                                    eq(tokenUsage.model, realModelName || selectedModel)
+                                    eq(tokenUsage.model, realModelName || selectedModel),
+                                    gte(tokenUsage.createdAt, window.start)
                                 ));
                             if ((usedGroupModel?.total || 0) >= groupModelQuota.limitTokens) {
                                 send({ type: 'error', data: '群組該模型總額度已用完，請聯絡管理員。' });
+                                controller.close();
+                                return;
+                            }
+                        }
+                    }
+
+                    if (providerScope === "global" && providerGlobalId) {
+                        const roleQuotas = await db.query.globalProviderRoleModelQuotas.findMany({
+                            where: and(
+                                eq(globalProviderRoleModelQuotas.providerId, providerGlobalId),
+                                eq(globalProviderRoleModelQuotas.role, currentUserRole),
+                                eq(globalProviderRoleModelQuotas.model, realModelName || selectedModel)
+                            ),
+                        });
+
+                        for (const quota of roleQuotas) {
+                            if (quota.limitTokens == null) continue;
+                            const window = getQuotaWindow(new Date(), quota.refillIntervalHours);
+                            const [used] = await db
+                                .select({ total: sql<number>`coalesce(sum(${tokenUsage.totalTokens}),0)` })
+                                .from(tokenUsage)
+                                .leftJoin(users, eq(tokenUsage.userId, users.id))
+                                .where(and(
+                                    eq(tokenUsage.providerPrefix, providerPrefix || (providerConf as any)?.prefix || ""),
+                                    eq(tokenUsage.model, realModelName || selectedModel),
+                                    eq(users.role, currentUserRole),
+                                    gte(tokenUsage.createdAt, window.start)
+                                ));
+
+                            if ((used?.total || 0) >= quota.limitTokens) {
+                                send({ type: 'error', data: `Global Provider ${currentUserRole} 額度已用完，請等待刷新。` });
                                 controller.close();
                                 return;
                             }

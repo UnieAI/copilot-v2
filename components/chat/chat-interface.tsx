@@ -452,7 +452,7 @@ type AvailableModel = {
     label: string      // modelId only
     providerName: string
     providerPrefix: string
-    source?: 'user' | 'group'
+    source?: 'user' | 'group' | 'global'
     groupId?: string
     groupName?: string
 }
@@ -1243,7 +1243,16 @@ export function ChatInterface({
             : gModels
         return { gName, filtered, total: gModels.length }
     }).filter(({ filtered, gName }) => filtered.length > 0 || matchesSearch(gName))
-    const hasAnyMatch = filteredUserModels.length > 0 || groupEntries.length > 0
+    const globalModels = availableModels.filter(m => m.source === 'global')
+    const filteredGlobalModels = searchTerm
+        ? globalModels.filter(m =>
+            matchesSearch(m.label) ||
+            matchesSearch(m.providerName) ||
+            matchesSearch('global providers')
+        )
+        : globalModels
+
+    const hasAnyMatch = filteredUserModels.length > 0 || filteredGlobalModels.length > 0 || groupEntries.length > 0
 
     return (
         <div
@@ -1355,7 +1364,57 @@ export function ChatInterface({
                                 )}
 
                                 {/* 分隔線：更淡的處理 */}
-                                {filteredUserModels.length > 0 && groupEntries.length > 0 && (
+                                {filteredUserModels.length > 0 && (filteredGlobalModels.length > 0 || groupEntries.length > 0) && (
+                                    <DropdownMenuSeparator className="my-2 bg-border/30 mx-2" />
+                                )}
+
+                                {/* Global Providers */}
+                                {filteredGlobalModels.length > 0 && (
+                                    <DropdownMenuGroup>
+                                        <div className="px-3 py-2 text-[11px] font-bold text-muted-foreground/50 uppercase tracking-[0.1em]">
+                                            GLOBAL PROVIDERS
+                                        </div>
+                                        <DropdownMenuSub>
+                                            <DropdownMenuSubTrigger className="
+                                    rounded-xl py-2.5 px-3 
+                                    hover:bg-muted/50 focus:bg-muted/50 
+                                    data-[state=open]:bg-muted/50
+                                    transition-colors cursor-pointer
+                                ">
+                                                <div className="flex flex-col gap-0.5 text-left">
+                                                    <span className="text-[13px] font-medium">All Global Models</span>
+                                                    <span className="text-[10px] text-muted-foreground/60">{filteredGlobalModels.length} Models</span>
+                                                </div>
+                                            </DropdownMenuSubTrigger>
+                                            <DropdownMenuPortal>
+                                                <DropdownMenuSubContent
+                                                    sideOffset={8}
+                                                    className="
+                                            w-64 p-2 rounded-[20px] 
+                                            bg-background/90 backdrop-blur-xl 
+                                            shadow-xl border-border/40
+                                        "
+                                                >
+                                                    <div className="max-h-[300px] overflow-y-auto space-y-0.5">
+                                                        {filteredGlobalModels.map(m => (
+                                                            <ModelItem
+                                                                key={m.value}
+                                                                model={m}
+                                                                isSelected={selectedModel === m.value}
+                                                                onSelect={(val) => {
+                                                                    handleModelChange(val);
+                                                                    setModelPickerOpen(false);
+                                                                }}
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                </DropdownMenuSubContent>
+                                            </DropdownMenuPortal>
+                                        </DropdownMenuSub>
+                                    </DropdownMenuGroup>
+                                )}
+
+                                {filteredGlobalModels.length > 0 && groupEntries.length > 0 && (
                                     <DropdownMenuSeparator className="my-2 bg-border/30 mx-2" />
                                 )}
 

@@ -2,6 +2,7 @@ import { db } from "@/lib/db"
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
 import { AdminSettingsForm } from "./admin-settings-form"
+import { GlobalProvidersPanel } from "@/components/admin/global-providers-panel"
 
 export default async function AdminSettingsPage() {
     const session = await auth()
@@ -29,6 +30,9 @@ export default async function AdminSettingsPage() {
             <div className="flex-1 overflow-y-auto custom-scrollbar">
                 <div className="max-w-5xl mx-auto px-6 py-10 md:px-12">
                     <AdminSettingsForm settings={settings} />
+                    <div className="mt-12 pb-20">
+                        <GlobalProvidersPanel />
+                    </div>
                 </div>
             </div>
         </div>

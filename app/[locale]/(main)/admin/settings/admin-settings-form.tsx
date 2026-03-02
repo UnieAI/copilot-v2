@@ -72,7 +72,7 @@ export function AdminSettingsForm({ settings }: { settings: AdminSettings | unde
             } finally {
                 setIsSaving(false);
             }
-        }} className="space-y-10 pb-20">
+        }} className="space-y-10">
 
             {/* 註冊行為設定 */}
             <section className={sectionClasses}>

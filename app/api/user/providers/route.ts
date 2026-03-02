@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { userProviders, groupProviders } from "@/lib/db/schema";
+import { userProviders, groupProviders, globalProviders } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
 // GET /api/user/providers — list all providers for current user
@@ -37,16 +37,19 @@ export async function POST(req: NextRequest) {
     const upperPrefix = prefix.toUpperCase();
 
     // Check prefix uniqueness globally (all user providers + all group providers)
-    const [existingUserProvider, existingGroupProvider] = await Promise.all([
+    const [existingUserProvider, existingGroupProvider, existingGlobalProvider] = await Promise.all([
         db.query.userProviders.findFirst({
             where: eq(userProviders.prefix, upperPrefix),
         }),
         db.query.groupProviders.findFirst({
             where: eq(groupProviders.prefix, upperPrefix),
         }),
+        db.query.globalProviders.findFirst({
+            where: eq(globalProviders.prefix, upperPrefix),
+        }),
     ]);
 
-    if (existingUserProvider || existingGroupProvider) {
+    if (existingUserProvider || existingGroupProvider || existingGlobalProvider) {
         return Response.json({ error: "Prefix already in use" }, { status: 409 });
     }
 
