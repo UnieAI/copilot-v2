@@ -28,6 +28,7 @@ export default async function SettingsPage() {
       initialUser={{
         name: dbUser?.name || "",
         email: dbUser?.email || "",
+        image: dbUser?.image || "",
         // role: dbUser?.role,        // 如果之後要顯示可以取消註解
       }}
       initialProviders={userProviderList.map((p) => ({

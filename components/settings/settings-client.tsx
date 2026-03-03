@@ -10,6 +10,7 @@ interface Props {
   initialUser: {
     name: string
     email: string
+    image?: string
     // role?: string
   }
   initialProviders: any[] // 根據你的實際型別調整
@@ -68,7 +69,7 @@ export default function SettingsClient({
                   <h2 className="font-semibold">個人資料</h2>
                   <p className="text-xs text-muted-foreground mt-0.5">更新您的顯示名稱</p>
                 </div>
-                <ProfileForm initialName={initialUser.name} />
+                <ProfileForm initialName={initialUser.name} initialImage={initialUser.image} />
                 <div className="text-xs text-muted-foreground space-y-0.5 pt-1 border-t border-border">
                   <p>Email：{initialUser.email}</p>
                   {/* <p>角色：{initialUser.role || "—"}</p> */}
