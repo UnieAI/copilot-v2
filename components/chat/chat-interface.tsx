@@ -60,6 +60,7 @@ type UIMessage = {
 
 const ACCEPTED_IMAGE_TYPES = ".jpg,.jpeg,.png"
 const ACCEPTED_DOC_TYPES = ".pdf,.doc,.docx,.csv,.txt,.md,.json,.js,.jsx,.ts,.tsx,.html,.css,.py"
+const SYSTEM_PROMPT_STORAGE_KEY = "chat:systemPrompt"
 
 function fileToBase64(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -180,17 +181,61 @@ const MarkdownComponents: any = {
     th: ({ children }: any) => <th className="px-4 py-3 font-semibold text-foreground/80">{children}</th>,
     td: ({ children }: any) => <td className="px-4 py-3 border-b border-border/20 last:border-0">{children}</td>,
 
-    // 連結：帶有底線動畫
-    a: ({ href, children }: any) => (
-        <a
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-primary font-medium underline underline-offset-4 hover:text-primary/80 transition-colors"
-        >
-            {children}
-        </a>
-    ),
+    // 連結
+    a: ({ href, children }: any) => {
+        // 判斷是否為 YouTube 連結
+        const isYouTube = href && (
+            href.includes('youtube.com/watch') ||
+            href.includes('youtu.be/')
+        );
+
+        if (isYouTube) {
+            // 從各種常見 YouTube URL 格式提取 video ID
+            let videoId = '';
+
+            // 標準格式：https://www.youtube.com/watch?v=VIDEO_ID
+            const url = new URL(href);
+            if (url.hostname.includes('youtube.com')) {
+                videoId = url.searchParams.get('v') || '';
+            }
+            // 短網址：https://youtu.be/VIDEO_ID
+            else if (url.hostname === 'youtu.be') {
+                videoId = url.pathname.slice(1);
+            }
+
+            if (videoId) {
+                // 保留 ?si=... 或其他參數（可選）
+                const embedUrl = `https://www.youtube.com/embed/${videoId}${url.search ? url.search : ''}`;
+
+                return (
+                    <div className="my-4 aspect-video w-full max-w-3xl mx-auto rounded-xl overflow-hidden border border-border shadow-sm">
+                        <iframe
+                            width="100%"
+                            height="100%"
+                            src={embedUrl}
+                            title="YouTube video player"
+                            frameBorder="0"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                            referrerPolicy="strict-origin-when-cross-origin"
+                            allowFullScreen
+                        ></iframe>
+                    </div>
+                );
+            }
+        }
+
+        // 不是 YouTube 就照原樣渲染一般連結
+        return (
+            <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary font-medium underline underline-offset-4 hover:text-primary/80 transition-colors"
+            >
+                {children}
+            </a>
+        );
+    },
 
     // 行內程式碼：淡色背景與圓角
     code: ({ node, inline, className, children, ...props }: any) => {
@@ -676,6 +721,23 @@ export function ChatInterface({
             setSelectedModel(availableModels[0].value)
         }
     }, [availableModels])
+
+    // Keep prompt input when route changes from /chat -> /c/[id] in the same tab.
+    useEffect(() => {
+        if (typeof window === "undefined") return
+        const saved = window.sessionStorage.getItem(SYSTEM_PROMPT_STORAGE_KEY)
+        if (saved !== null) setSystemPrompt(saved)
+    }, [])
+
+    useEffect(() => {
+        if (typeof window === "undefined") return
+        const value = systemPrompt.trim()
+        if (!value) {
+            window.sessionStorage.removeItem(SYSTEM_PROMPT_STORAGE_KEY)
+            return
+        }
+        window.sessionStorage.setItem(SYSTEM_PROMPT_STORAGE_KEY, systemPrompt)
+    }, [systemPrompt])
 
     // ── Mount: reconnect to live stream if it exists ──
     useEffect(() => {
