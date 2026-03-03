@@ -104,15 +104,17 @@ function SetupWarningDialog({
 
 interface SetupCheckerProps {
   userRole: string
+  onBlockingChange?: (blocked: boolean) => void
 }
 
 type DialogState = { open: boolean; items: string[] }
 
-export function SetupChecker({ userRole }: SetupCheckerProps) {
+export function SetupChecker({ userRole, onBlockingChange }: SetupCheckerProps) {
   const pathname = usePathname()
   const [adminDialog, setAdminDialog] = useState<DialogState>({ open: false, items: [] })
   const [providerDialog, setProviderDialog] = useState<DialogState>({ open: false, items: [] })
   const [userSystemDialogOpen, setUserSystemDialogOpen] = useState(false)
+  const [hasBlockingIssue, setHasBlockingIssue] = useState(false)
   const dismissedRef = useRef<Set<string>>(new Set())
   const dismissedKey = useCallback((kind: "admin-issues" | "user-system-model" | "provider-issue") => {
     return `${kind}:${pathname}`
@@ -122,6 +124,12 @@ export function SetupChecker({ userRole }: SetupCheckerProps) {
     try {
       const res = await fetch("/api/setup-check")
       const data = await res.json()
+      const nextHasBlockingIssue =
+        Boolean(data.adminIssues?.length) ||
+        (userRole === "user" && Boolean(data.systemModelIssue)) ||
+        Boolean(data.providerIssue)
+
+      setHasBlockingIssue(nextHasBlockingIssue)
 
       setAdminDialog({ open: false, items: [] })
       setProviderDialog({ open: false, items: [] })
@@ -142,12 +150,17 @@ export function SetupChecker({ userRole }: SetupCheckerProps) {
       }
     } catch {
       // Ignore setup check failure and avoid blocking the UI.
+      setHasBlockingIssue(false)
     }
   }, [dismissedKey, userRole])
 
   useEffect(() => {
     checkSetup()
   }, [pathname, checkSetup])
+
+  useEffect(() => {
+    onBlockingChange?.(hasBlockingIssue)
+  }, [hasBlockingIssue, onBlockingChange])
 
   return (
     <>

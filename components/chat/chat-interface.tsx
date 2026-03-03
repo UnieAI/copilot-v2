@@ -541,6 +541,7 @@ export function ChatInterface({
     const [systemPrompt, setSystemPrompt] = useState("")
     const [showSystemPrompt, setShowSystemPrompt] = useState(false)
     const [isGenerating, setIsGenerating] = useState(false)
+    const [isSetupBlocked, setIsSetupBlocked] = useState(false)
     const [statusText, setStatusText] = useState("")
     const [attachments, setAttachments] = useState<Attachment[]>([])
     const [editingId, setEditingId] = useState<string | null>(null)
@@ -1068,6 +1069,7 @@ export function ChatInterface({
 
     const handleSubmit = (e?: React.FormEvent) => {
         e?.preventDefault()
+        if (isSetupBlocked || isGenerating) return
         sendMessage(input, attachments)
     }
 
@@ -1753,7 +1755,7 @@ export function ChatInterface({
                             onChange={e => setInput(e.target.value)}
                             onKeyDown={handleKeyDown}
                             placeholder="輸入訊息或拖曳檔案/圖片至此處... (Shift+Enter 換行)"
-                            disabled={isGenerating}
+                            disabled={isGenerating || isSetupBlocked}
                             rows={1}
                             className={`w-full resize-none bg-transparent px-5 py-4 text-[15px] leading-relaxed focus:outline-none placeholder:text-muted-foreground disabled:opacity-50 min-h-[56px] max-h-[30vh] overflow-y-auto scrollbar-hide ${attachments.length > 0 ? 'pt-3' : ''}`}
                         />
@@ -1765,7 +1767,7 @@ export function ChatInterface({
                                     accept={`${ACCEPTED_IMAGE_TYPES},${ACCEPTED_DOC_TYPES}`}
                                     onChange={e => { handleFileSelect(e.target.files); e.target.value = '' }}
                                 />
-                                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isGenerating}
+                                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isGenerating || isSetupBlocked}
                                     className="p-2 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
                                     title="附加圖片或文件"
                                 >
@@ -1774,7 +1776,7 @@ export function ChatInterface({
                             </div>
 
                             <button type="button" onClick={() => handleSubmit()}
-                                disabled={(!input.trim() && attachments.length === 0) || isGenerating}
+                                disabled={(!input.trim() && attachments.length === 0) || isGenerating || isSetupBlocked}
                                 className={`flex items-center justify-center p-2.5 rounded-full transition-all duration-200 
                                     ${(!input.trim() && attachments.length === 0)
                                         ? 'bg-muted/80 text-muted-foreground'
@@ -1797,7 +1799,7 @@ export function ChatInterface({
                 />
             )}
 
-            <SetupChecker userRole={userRole} />
+            <SetupChecker userRole={userRole} onBlockingChange={setIsSetupBlocked} />
         </div>
     )
 }
