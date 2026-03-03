@@ -5,12 +5,14 @@ import { useRouter, usePathname } from "next/navigation"
 import { MessageSquare, Plus, Trash2, Pencil } from "lucide-react"
 import { toast } from "sonner"
 import { ChatInterface } from "@/components/chat/chat-interface"
+import { Session } from "next-auth"
 
-type Session = { id: string; title: string; updatedAt: string }
+type SessionType = { id: string; title: string; updatedAt: string }
 type AvailableModel = { value: string; label: string; providerName: string; providerPrefix: string }
 type DBMessage = { id: string; role: 'user' | 'assistant' | 'system'; content: string; createdAt?: string; attachments?: any[] }
 
 export function ProjectPageClient({
+    session,
     project,
     initialSessions,
     availableModels,
@@ -18,8 +20,9 @@ export function ProjectPageClient({
     initialActiveSessionId,
     initialActiveMessages = [],
 }: {
+    session: Session
     project: { id: string; name: string }
-    initialSessions: Session[]
+    initialSessions: SessionType[]
     availableModels: AvailableModel[]
     initialSelectedModel: string
     initialActiveSessionId?: string
@@ -29,7 +32,7 @@ export function ProjectPageClient({
     const pathname = usePathname()
     const segments = pathname?.split('/').filter(Boolean) || []
     const localePrefix = segments.length && segments[0].length <= 5 ? `/${segments[0]}` : ''
-    const [sessions, setSessions] = useState<Session[]>(initialSessions)
+    const [sessions, setSessions] = useState<SessionType[]>(initialSessions)
     const [activeSessionId, setActiveSessionId] = useState<string | undefined>(initialActiveSessionId)
     const [activeMessages, setActiveMessages] = useState<DBMessage[]>(initialActiveMessages)
     const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -69,7 +72,7 @@ export function ProjectPageClient({
         }
     }
 
-    const handleStartRename = (s: Session, e: React.MouseEvent) => {
+    const handleStartRename = (s: SessionType, e: React.MouseEvent) => {
         e.stopPropagation()
         setRenamingId(s.id)
         setRenameValue(s.title)
@@ -117,7 +120,7 @@ export function ProjectPageClient({
                     </button>
                 </div>
 
-                {/* Session List */}
+                {/* SessionType List */}
                 <div className="flex-1 overflow-y-auto px-3 py-2 space-y-0.5">
                     {sessions.length === 0 ? (
                         <p className="text-[11px] text-muted-foreground text-center py-6">此專案尚無對話</p>
@@ -177,6 +180,7 @@ export function ProjectPageClient({
             {/* ── Right Panel: Chat Interface ────────────────────── */}
             <div className="flex-1 min-w-0 overflow-hidden">
                 <ChatInterface
+                    session={session}
                     key={activeSessionId ?? 'new'}
                     sessionId={activeSessionId}
                     availableModels={availableModels}

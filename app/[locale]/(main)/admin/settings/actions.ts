@@ -3,6 +3,7 @@
 import { db } from "@/lib/db"
 import { adminSettings } from "@/lib/db/schema"
 import { auth } from "@/auth"
+import { eq } from "drizzle-orm"
 
 export const adminConfigActions = async (formData: FormData) => {
     const session = await auth()
@@ -10,34 +11,53 @@ export const adminConfigActions = async (formData: FormData) => {
         throw new Error("Unauthorized")
     }
 
-    const defaultUserRole = formData.get('defaultUserRole') as string || 'pending'
-    const pendingMessage = formData.get('pendingMessage') as string || 'Your account is pending administrator approval.'
-    const fileAttachmentSessionOnly = formData.get('fileAttachmentSessionOnly') === 'true'
-    const workModelUrl = formData.get('workModelUrl') as string
-    const workModelKey = formData.get('workModelKey') as string
-    const workModelName = formData.get('workModelName') as string
-
-    const taskModelUrl = formData.get('taskModelUrl') as string
-    const taskModelKey = formData.get('taskModelKey') as string
-    const taskModelName = formData.get('taskModelName') as string
-
-    const visionModelUrl = formData.get('visionModelUrl') as string
-    const visionModelKey = formData.get('visionModelKey') as string
-    const visionModelName = formData.get('visionModelName') as string
-
-    // Update Singleton Settings
     const existing = await db.query.adminSettings.findFirst()
+    const payload: Partial<typeof adminSettings.$inferInsert> = {}
 
-    const payload = {
-        defaultUserRole, pendingMessage, fileAttachmentSessionOnly,
-        workModelUrl, workModelKey, workModelName,
-        taskModelUrl, taskModelKey, taskModelName,
-        visionModelUrl, visionModelKey, visionModelName,
-        updatedAt: new Date()
+    type StringFieldKey =
+        | "workModelUrl"
+        | "workModelKey"
+        | "workModelName"
+        | "taskModelUrl"
+        | "taskModelKey"
+        | "taskModelName"
+        | "visionModelUrl"
+        | "visionModelKey"
+        | "visionModelName"
+
+    const assignString = (key: StringFieldKey) => {
+        if (!formData.has(key)) return
+        payload[key] = (formData.get(key) as string) ?? ""
     }
 
+    if (formData.has("defaultUserRole")) {
+        payload.defaultUserRole = ((formData.get("defaultUserRole") as string) || "pending").trim()
+    }
+    if (formData.has("pendingMessage")) {
+        payload.pendingMessage =
+            ((formData.get("pendingMessage") as string) || "Your account is pending administrator approval.").trim()
+    }
+    if (formData.has("fileAttachmentSessionOnly")) {
+        payload.fileAttachmentSessionOnly = formData.get("fileAttachmentSessionOnly") === "true"
+    }
+
+    assignString("workModelUrl")
+    assignString("workModelKey")
+    assignString("workModelName")
+    assignString("taskModelUrl")
+    assignString("taskModelKey")
+    assignString("taskModelName")
+    assignString("visionModelUrl")
+    assignString("visionModelKey")
+    assignString("visionModelName")
+
+    if (Object.keys(payload).length === 0) {
+        return { success: true }
+    }
+    payload.updatedAt = new Date()
+
     if (existing) {
-        await db.update(adminSettings).set(payload)
+        await db.update(adminSettings).set(payload).where(eq(adminSettings.id, existing.id))
     } else {
         await db.insert(adminSettings).values(payload)
     }

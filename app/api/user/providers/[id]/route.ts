@@ -12,7 +12,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const userId = session.user.id as string;
     const { id } = await params;
     const body = await req.json();
-    const { displayName, prefix, apiUrl, apiKey, enable, modelList } = body;
+    const { displayName, prefix, apiUrl, apiKey, enable, modelList, selectedModels } = body;
 
     // Validate prefix if provided
     if (prefix !== undefined && !/^[a-zA-Z0-9]{4}$/.test(prefix)) {
@@ -46,6 +46,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (apiKey !== undefined) updateData.apiKey = apiKey;
     if (enable !== undefined) updateData.enable = enable ? 1 : 0;
     if (modelList !== undefined) updateData.modelList = modelList;
+    if (selectedModels !== undefined) updateData.selectedModels = selectedModels;
 
     const [updated] = await db.update(userProviders)
         .set(updateData)

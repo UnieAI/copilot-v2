@@ -1,7 +1,7 @@
 import { db } from "@/lib/db"
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
-import { users } from "@/lib/db/schema"
+import { userPhotos, users } from "@/lib/db/schema"
 import { eq } from "drizzle-orm"
 import { revalidatePath } from "next/cache"
 import { DeleteUserButton } from "@/components/admin/delete-user-button"
@@ -27,7 +27,19 @@ export default async function AdminUsersPage() {
     if (!session?.user || !['admin', 'super'].includes(myRole)) redirect("/")
 
     const myId = session.user!.id as string
-    const allUsers = await db.query.users.findMany({ orderBy: (u, { asc }) => [asc(u.createdAt)] })
+    const allUsers = await db
+        .select({
+            id: users.id,
+            name: users.name,
+            email: users.email,
+            role: users.role,
+            provider: users.provider,
+            createdAt: users.createdAt,
+            image: userPhotos.image,
+        })
+        .from(users)
+        .leftJoin(userPhotos, eq(userPhotos.userId, users.id))
+        .orderBy(users.createdAt)
 
     // ─── Server Actions ────────────────────────────────────────────────────────
 

@@ -61,7 +61,10 @@ export default async function ProjectChatPage({
     })
     const availableModels = [
         ...providers.flatMap(p => {
-            const models = Array.isArray(p.modelList) ? (p.modelList as any[]) : []
+            const selectedIds = Array.isArray((p as any).selectedModels) ? ((p as any).selectedModels as string[]) : []
+            if (selectedIds.length === 0) return []
+            const allModels = Array.isArray(p.modelList) ? (p.modelList as any[]) : []
+            const models = allModels.filter((m: any) => selectedIds.includes(m.id || String(m)))
             return models.map((m: any) => ({
                 value: `${p.prefix}-${m.id || String(m)}`,
                 label: m.id || String(m),
@@ -95,6 +98,7 @@ export default async function ProjectChatPage({
 
     return (
         <ProjectPageClient
+            session={session}
             project={{ id: project.id, name: project.name }}
             initialSessions={projectSessions.map(s => ({
                 id: s.id,

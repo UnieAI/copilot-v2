@@ -198,6 +198,16 @@ export async function POST(req: NextRequest) {
                         return;
                     }
 
+                    const requestedModel = realModelName || selectedModel;
+                    const selectedModels = Array.isArray((providerConf as any)?.selectedModels)
+                        ? ((providerConf as any).selectedModels as string[])
+                        : null;
+                    if (selectedModels && (selectedModels.length === 0 || !selectedModels.includes(requestedModel))) {
+                        send({ type: 'error', data: 'Selected model is not enabled for this provider.' });
+                        controller.close();
+                        return;
+                    }
+
                     const cleanApiUrl = providerConf.apiUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
                     const visionConfig = (adminConf?.visionModelUrl && adminConf?.visionModelKey && adminConf?.visionModelName)
                         ? {
@@ -626,6 +636,7 @@ export async function POST(req: NextRequest) {
                     const reader = response.body?.getReader();
                     const decoder = new TextDecoder();
                     let fullContent = '';
+                    let isInReasoningBlock = false;
                     let usageTotals: { promptTokens: number; completionTokens: number; totalTokens: number } | null = null;
 
                     if (reader) {
@@ -644,10 +655,30 @@ export async function POST(req: NextRequest) {
                                 if (dataStr === '[DONE]') continue;
                                 try {
                                     const parsed = JSON.parse(dataStr);
-                                    const delta = parsed.choices?.[0]?.delta?.content || '';
-                                    if (delta) {
-                                        fullContent += delta;
-                                        send({ type: 'chunk', data: delta });
+                                    const reasoningDelta =
+                                        parsed.choices?.[0]?.delta?.reasoning_content ||
+                                        parsed.choices?.[0]?.delta?.reasoning ||
+                                        '';
+                                    const contentDelta = parsed.choices?.[0]?.delta?.content || '';
+
+                                    if (reasoningDelta) {
+                                        if (!isInReasoningBlock) {
+                                            isInReasoningBlock = true;
+                                            fullContent += '<think>';
+                                            send({ type: 'chunk', data: '<think>' });
+                                        }
+                                        fullContent += reasoningDelta;
+                                        send({ type: 'chunk', data: reasoningDelta });
+                                    }
+
+                                    if (contentDelta) {
+                                        if (isInReasoningBlock) {
+                                            isInReasoningBlock = false;
+                                            fullContent += '</think>';
+                                            send({ type: 'chunk', data: '</think>' });
+                                        }
+                                        fullContent += contentDelta;
+                                        send({ type: 'chunk', data: contentDelta });
                                     }
                                     const usage = parsed.usage;
                                     if (usage) {
@@ -658,6 +689,12 @@ export async function POST(req: NextRequest) {
                                     }
                                 } catch { }
                             }
+                        }
+
+                        if (isInReasoningBlock) {
+                            isInReasoningBlock = false;
+                            fullContent += '</think>';
+                            send({ type: 'chunk', data: '</think>' });
                         }
                     }
 

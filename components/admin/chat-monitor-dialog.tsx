@@ -56,32 +56,75 @@ function ThinkBlock({ content }: { content: string }) {
 
 function MessageContent({ content }: { content: string }) {
   const parts = useMemo(() => {
-    const res: { type: "text" | "think"; content: string }[] = []
-    const thinkRegex = /<think>([\s\S]*?)<\/think>/g
-    let lastIndex = 0
-    let match: RegExpExecArray | null
+    const res: { type: 'text' | 'think'; content: string; unfinished?: boolean }[] = [];
+    let buffer = content;
+    let inThink = false;
+    let thinkStartIndex = -1;
 
-    while ((match = thinkRegex.exec(content)) !== null) {
-      if (match.index > lastIndex) {
-        res.push({ type: "text", content: content.slice(lastIndex, match.index) })
-      }
-      res.push({ type: "think", content: match[1] })
-      lastIndex = match.index + match[0].length
+    // 先找第一個 <think> 或 </think>
+    const firstThinkOpen = buffer.indexOf('<think>');
+    const firstThinkClose = buffer.indexOf('</think>');
+
+    if (firstThinkOpen === -1 && firstThinkClose === -1) {
+      // 完全沒有 think 標籤 → 全當 text
+      res.push({ type: 'text', content: buffer });
+      return res;
     }
 
-    const remaining = content.slice(lastIndex)
-    const openThinkIndex = remaining.indexOf("<think>")
-    if (openThinkIndex !== -1) {
-      if (openThinkIndex > 0) {
-        res.push({ type: "text", content: remaining.slice(0, openThinkIndex) })
+    // 情況1：有 <think> 開頭 → 走原本邏輯（已能處理）
+    if (firstThinkOpen !== -1 && (firstThinkOpen < firstThinkClose || firstThinkClose === -1)) {
+      // 使用原本的 regex 方式處理多個成對的 <think>...</think>
+      const thinkRegex = /<think>([\s\S]*?)<\/think>/g;
+      let lastIndex = 0;
+      let match;
+
+      while ((match = thinkRegex.exec(buffer)) !== null) {
+        if (match.index > lastIndex) {
+          res.push({ type: 'text', content: buffer.slice(lastIndex, match.index) });
+        }
+        res.push({ type: 'think', content: match[1] });
+        lastIndex = match.index + match[0].length;
       }
-      res.push({ type: "think", content: remaining.slice(openThinkIndex + 7) })
-    } else if (remaining) {
-      res.push({ type: "text", content: remaining })
+
+      const remaining = buffer.slice(lastIndex);
+      const openThinkIndex = remaining.indexOf('<think>');
+
+      if (openThinkIndex !== -1) {
+        if (openThinkIndex > 0) {
+          res.push({ type: 'text', content: remaining.slice(0, openThinkIndex) });
+        }
+        res.push({
+          type: 'think',
+          content: remaining.slice(openThinkIndex + 7),
+          unfinished: true,
+        });
+      } else if (remaining) {
+        res.push({ type: 'text', content: remaining });
+      }
+
+      return res;
     }
 
-    return res
-  }, [content])
+    // 情況2：沒有 <think> 但有 </think> → 把 </think> 之前全部當 think
+    if (firstThinkOpen === -1 && firstThinkClose !== -1) {
+      const thinkContent = buffer.slice(0, firstThinkClose);
+      const afterThink = buffer.slice(firstThinkClose + 8); // 跳過 </think>
+
+      if (thinkContent.trim()) {
+        res.push({ type: 'think', content: thinkContent });
+      }
+
+      if (afterThink.trim()) {
+        res.push({ type: 'text', content: afterThink });
+      }
+
+      return res;
+    }
+
+    // 其他混合情況（理論上已被上面兩個分支涵蓋，但保留防呆）
+    res.push({ type: 'text', content: buffer });
+    return res;
+  }, [content]);
 
   return (
     <div className="flex flex-col gap-3">

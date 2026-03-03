@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { users, userGroups } from "@/lib/db/schema";
+import { userGroups, userPhotos, users } from "@/lib/db/schema";
 import { eq, inArray } from "drizzle-orm";
 import { requireGroupEditor, requireGroupMember } from "@/lib/group-permissions";
 
@@ -17,10 +17,17 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
     if (memberships.length === 0) return Response.json([]);
 
-    const memberUsers = await db.query.users.findMany({
-        where: inArray(users.id, memberships.map((m) => m.userId)),
-        columns: { id: true, name: true, email: true, role: true, image: true },
-    });
+    const memberUsers = await db
+        .select({
+            id: users.id,
+            name: users.name,
+            email: users.email,
+            role: users.role,
+            image: userPhotos.image,
+        })
+        .from(users)
+        .leftJoin(userPhotos, eq(userPhotos.userId, users.id))
+        .where(inArray(users.id, memberships.map((m) => m.userId)));
 
     const userMap = new Map(memberUsers.map((u) => [u.id, u]));
     const merged = memberships.map((m) => ({

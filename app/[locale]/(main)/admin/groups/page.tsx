@@ -1,7 +1,8 @@
 import { db } from "@/lib/db"
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
-import { users } from "@/lib/db/schema"
+import { userPhotos, users } from "@/lib/db/schema"
+import { eq } from "drizzle-orm"
 import { GroupsPanel } from "@/components/admin/groups-panel"
 
 export default async function AdminGroupsPage() {
@@ -9,10 +10,17 @@ export default async function AdminGroupsPage() {
     const myRole = (session?.user as any)?.role as string
     if (!session?.user || !["admin", "super"].includes(myRole)) redirect("/")
 
-    const allUsers = await db.query.users.findMany({
-        columns: { id: true, name: true, email: true, role: true, image: true },
-        orderBy: (u, { asc }) => [asc(u.createdAt)],
-    })
+    const allUsers = await db
+        .select({
+            id: users.id,
+            name: users.name,
+            email: users.email,
+            role: users.role,
+            image: userPhotos.image,
+        })
+        .from(users)
+        .leftJoin(userPhotos, eq(userPhotos.userId, users.id))
+        .orderBy(users.createdAt)
 
     return (
         <div className="h-full flex flex-col overflow-hidden">

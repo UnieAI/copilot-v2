@@ -32,6 +32,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
+import { SetupChecker } from "../setup-checker"
+import { Session } from "next-auth"
 
 // ─── Types ─────────────────────────────────────────────────────────────
 type Attachment = {
@@ -277,32 +279,72 @@ function MessageContent({ content, isStreaming }: { content: string; isStreaming
     // 使用 useMemo 解析內容，確保只有內容變動時才重新計算 parts
     const parts = useMemo(() => {
         const res: { type: 'text' | 'think'; content: string; unfinished?: boolean }[] = [];
-        const thinkRegex = /<think>([\s\S]*?)<\/think>/g;
-        let lastIndex = 0;
-        let match;
+        let buffer = content;
+        let inThink = false;
+        let thinkStartIndex = -1;
 
-        while ((match = thinkRegex.exec(content)) !== null) {
-            if (match.index > lastIndex) {
-                res.push({ type: 'text', content: content.slice(lastIndex, match.index) });
+        // 先找第一個 <think> 或 </think>
+        const firstThinkOpen = buffer.indexOf('<think>');
+        const firstThinkClose = buffer.indexOf('</think>');
+
+        if (firstThinkOpen === -1 && firstThinkClose === -1) {
+            // 完全沒有 think 標籤 → 全當 text
+            res.push({ type: 'text', content: buffer });
+            return res;
+        }
+
+        // 情況1：有 <think> 開頭 → 走原本邏輯（已能處理）
+        if (firstThinkOpen !== -1 && (firstThinkOpen < firstThinkClose || firstThinkClose === -1)) {
+            // 使用原本的 regex 方式處理多個成對的 <think>...</think>
+            const thinkRegex = /<think>([\s\S]*?)<\/think>/g;
+            let lastIndex = 0;
+            let match;
+
+            while ((match = thinkRegex.exec(buffer)) !== null) {
+                if (match.index > lastIndex) {
+                    res.push({ type: 'text', content: buffer.slice(lastIndex, match.index) });
+                }
+                res.push({ type: 'think', content: match[1] });
+                lastIndex = match.index + match[0].length;
             }
-            res.push({ type: 'think', content: match[1] });
-            lastIndex = match.index + match[0].length;
+
+            const remaining = buffer.slice(lastIndex);
+            const openThinkIndex = remaining.indexOf('<think>');
+
+            if (openThinkIndex !== -1) {
+                if (openThinkIndex > 0) {
+                    res.push({ type: 'text', content: remaining.slice(0, openThinkIndex) });
+                }
+                res.push({
+                    type: 'think',
+                    content: remaining.slice(openThinkIndex + 7),
+                    unfinished: true,
+                });
+            } else if (remaining) {
+                res.push({ type: 'text', content: remaining });
+            }
+
+            return res;
         }
 
-        const remaining = content.slice(lastIndex);
-        const openThinkIndex = remaining.indexOf('<think>');
+        // 情況2：沒有 <think> 但有 </think> → 把 </think> 之前全部當 think
+        if (firstThinkOpen === -1 && firstThinkClose !== -1) {
+            const thinkContent = buffer.slice(0, firstThinkClose);
+            const afterThink = buffer.slice(firstThinkClose + 8); // 跳過 </think>
 
-        if (openThinkIndex !== -1) {
-            if (openThinkIndex > 0) res.push({ type: 'text', content: remaining.slice(0, openThinkIndex) });
-            res.push({
-                type: 'think',
-                content: remaining.slice(openThinkIndex + 7),
-                unfinished: true
-            });
-        } else if (remaining) {
-            res.push({ type: 'text', content: remaining });
+            if (thinkContent.trim()) {
+                res.push({ type: 'think', content: thinkContent });
+            }
+
+            if (afterThink.trim()) {
+                res.push({ type: 'text', content: afterThink });
+            }
+
+            return res;
         }
 
+        // 其他混合情況（理論上已被上面兩個分支涵蓋，但保留防呆）
+        res.push({ type: 'text', content: buffer });
         return res;
     }, [content]);
 
@@ -455,67 +497,9 @@ type AvailableModel = {
     groupName?: string
 }
 
-// ─── Group Model Section (2nd-level collapsible) ──────────────────────────
-function GroupModelSection({
-    groupName,
-    models,
-    selectedModel,
-    hasSelected,
-    onSelect,
-    showSeparator,
-}: {
-    groupName: string
-    models: AvailableModel[]
-    selectedModel: string
-    hasSelected: boolean
-    onSelect: (value: string) => void
-    showSeparator: boolean
-}) {
-    const [expanded, setExpanded] = useState(hasSelected) // auto-expand if a model from this group is selected
-
-    return (
-        <>
-            {showSeparator && <div className="my-1 border-t border-border/40" />}
-            {/* Group header row */}
-            <button
-                onClick={() => setExpanded(v => !v)}
-                className={`w-full flex items-center justify-between px-3 py-2 text-sm font-medium transition-colors hover:bg-muted/60
-                    ${hasSelected ? 'text-primary' : 'text-foreground/80'}`}
-            >
-                <span className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold tracking-wider text-muted-foreground uppercase">群組</span>
-                    <span>{groupName}</span>
-                    {hasSelected && <span className="text-[10px] text-primary">✓ 使用中</span>}
-                </span>
-                <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`} />
-            </button>
-
-            {/* Expanded model list */}
-            {expanded && (
-                <div className="bg-muted/20">
-                    {models.map(m => (
-                        <button
-                            key={m.value}
-                            onClick={() => onSelect(m.value)}
-                            className={`w-full text-left pl-7 pr-4 py-2 text-sm transition-colors flex items-center justify-between
-                                ${selectedModel === m.value ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted text-foreground/80 hover:text-foreground'}
-                            `}
-                        >
-                            <div className="flex flex-col items-start">
-                                <span className="truncate max-w-[160px]">{m.label}</span>
-                                <span className="text-[10px] text-muted-foreground">{m.providerName}</span>
-                            </div>
-                            {selectedModel === m.value && <Check className="h-3.5 w-3.5 shrink-0" />}
-                        </button>
-                    ))}
-                </div>
-            )}
-        </>
-    )
-}
-
 // ─── Main Chat Interface ─────────────────────────────────────────────────
 export function ChatInterface({
+    session,
     sessionId: initialSessionId,
     availableModels,
     initialSelectedModel,
@@ -524,6 +508,7 @@ export function ChatInterface({
     projectId,
     onSessionCreated,
 }: {
+    session: Session
     sessionId?: string
     availableModels: AvailableModel[]
     initialSelectedModel?: string
@@ -534,6 +519,7 @@ export function ChatInterface({
 }) {
     const router = useRouter()
     const pathname = usePathname()
+    const userRole = (session.user as any).role as string ?? "user"
     const segments = pathname?.split('/').filter(Boolean) || []
     const localePrefix = segments.length && segments[0].length <= 5 ? `/${segments[0]}` : ''
     const t = useTranslations('Home')
@@ -555,6 +541,7 @@ export function ChatInterface({
     const [systemPrompt, setSystemPrompt] = useState("")
     const [showSystemPrompt, setShowSystemPrompt] = useState(false)
     const [isGenerating, setIsGenerating] = useState(false)
+    const [isSetupBlocked, setIsSetupBlocked] = useState(false)
     const [statusText, setStatusText] = useState("")
     const [attachments, setAttachments] = useState<Attachment[]>([])
     const [editingId, setEditingId] = useState<string | null>(null)
@@ -768,6 +755,70 @@ export function ChatInterface({
         if (isEdit) setEditAttachments(prev => [...prev, ...newAtts])
         else setAttachments(prev => [...prev, ...newAtts])
     }
+
+    const handlePaste = useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+        e.preventDefault(); // 重要：先阻止預設的貼上文字行為
+
+        const items = e.clipboardData?.items;
+        if (!items) return;
+
+        // 優先找 image 類型的資料
+        for (const item of items) {
+            if (item.kind === 'file' && item.type.startsWith('image/')) {
+                const file = item.getAsFile();
+                if (!file) continue;
+
+                // 這裡可以再過濾只接受 jpg/png/jpeg/gif 等
+                if (!file.type.match(/^(image\/(png|jpeg|jpg|gif|webp))$/)) {
+                    toast.error("目前僅支援 PNG / JPEG / GIF / WebP 格式的貼上圖片");
+                    continue;
+                }
+
+                try {
+                    const base64 = await fileToBase64(file);
+                    const previewUrl = URL.createObjectURL(file);
+
+                    const newAttachment: Attachment = {
+                        name: `pasted-${Date.now()}.${file.type.split('/')[1] || 'png'}`,
+                        mimeType: file.type,
+                        base64,
+                        previewUrl,
+                    };
+
+                    setAttachments(prev => [...prev, newAttachment]);
+                    toast.success("已貼上圖片作為附件");
+
+                } catch (err) {
+                    console.error("貼上圖片失敗", err);
+                    toast.error("無法處理貼上的圖片");
+                }
+
+                return; // 找到一張圖就處理，結束迴圈
+            }
+        }
+
+        // 如果沒有圖片，就允許正常文字貼上
+        const text = e.clipboardData.getData('text/plain');
+        if (text) {
+            // 你可以選擇直接插入文字，或是呼叫 document.execCommand('insertText')
+            // 但因為你用的是 controlled textarea，最簡單的方式是手動插入
+            const start = textareaRef.current?.selectionStart ?? 0;
+            const end = textareaRef.current?.selectionEnd ?? 0;
+            const current = input;
+
+            const newValue = current.slice(0, start) + text + current.slice(end);
+            setInput(newValue);
+
+            // 移動游標到貼上後的位置
+            setTimeout(() => {
+                if (textareaRef.current) {
+                    textareaRef.current.selectionStart = start + text.length;
+                    textareaRef.current.selectionEnd = start + text.length;
+                }
+            }, 0);
+        }
+
+    }, [input, setAttachments]);
 
     // UUID regex — only real UUIDs are safe to use as editMessageId
     const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -1018,6 +1069,7 @@ export function ChatInterface({
 
     const handleSubmit = (e?: React.FormEvent) => {
         e?.preventDefault()
+        if (isSetupBlocked || isGenerating) return
         sendMessage(input, attachments)
     }
 
@@ -1699,10 +1751,11 @@ export function ChatInterface({
                         <textarea
                             ref={textareaRef}
                             value={input}
+                            onPaste={handlePaste}
                             onChange={e => setInput(e.target.value)}
                             onKeyDown={handleKeyDown}
                             placeholder="輸入訊息或拖曳檔案/圖片至此處... (Shift+Enter 換行)"
-                            disabled={isGenerating}
+                            disabled={isGenerating || isSetupBlocked}
                             rows={1}
                             className={`w-full resize-none bg-transparent px-5 py-4 text-[15px] leading-relaxed focus:outline-none placeholder:text-muted-foreground disabled:opacity-50 min-h-[56px] max-h-[30vh] overflow-y-auto scrollbar-hide ${attachments.length > 0 ? 'pt-3' : ''}`}
                         />
@@ -1714,7 +1767,7 @@ export function ChatInterface({
                                     accept={`${ACCEPTED_IMAGE_TYPES},${ACCEPTED_DOC_TYPES}`}
                                     onChange={e => { handleFileSelect(e.target.files); e.target.value = '' }}
                                 />
-                                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isGenerating}
+                                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isGenerating || isSetupBlocked}
                                     className="p-2 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
                                     title="附加圖片或文件"
                                 >
@@ -1723,7 +1776,7 @@ export function ChatInterface({
                             </div>
 
                             <button type="button" onClick={() => handleSubmit()}
-                                disabled={(!input.trim() && attachments.length === 0) || isGenerating}
+                                disabled={(!input.trim() && attachments.length === 0) || isGenerating || isSetupBlocked}
                                 className={`flex items-center justify-center p-2.5 rounded-full transition-all duration-200 
                                     ${(!input.trim() && attachments.length === 0)
                                         ? 'bg-muted/80 text-muted-foreground'
@@ -1745,6 +1798,8 @@ export function ChatInterface({
                     onClose={() => setSelectedPreviewAttachment(null)}
                 />
             )}
+
+            <SetupChecker userRole={userRole} onBlockingChange={setIsSetupBlocked} />
         </div>
     )
 }

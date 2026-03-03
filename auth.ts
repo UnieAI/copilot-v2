@@ -1,30 +1,39 @@
-// auth.ts 或 app/api/auth/[...nextauth]/route.ts
-import NextAuth, { DefaultSession, type NextAuthConfig } from "next-auth";
+// app/api/auth/[...nextauth]/route.ts
+import NextAuth, { type NextAuthConfig } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import AzureADProvider from "next-auth/providers/azure-ad";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { db } from "@/lib/db";
-import { users, accounts, sessions, verificationTokens, adminSettings } from "@/lib/db/schema";
+import { users, accounts, sessions, verificationTokens, userPhotos } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
-// ────────────────────────────────────────────────
-// 型別擴展（放在同一個檔案或 src/types/next-auth.d.ts 都可以）
-declare module "next-auth" {
-  interface User {
-    role?: string;
-  }
+import { type DefaultSession } from 'next-auth';
+import type { DefaultJWT } from 'next-auth/jwt';
 
-  interface Session {
+// ────────────────────────────────────────────────
+declare module "next-auth" {
+  interface Session extends DefaultSession {
     user: {
       id: string;
+      name: string | null;
+      email: string;
       role?: string;
-    } & DefaultSession["user"];
+    } & DefaultSession["user"];   // 保留 DefaultSession 的 expires 等，但 user 自己定義
+  }
+
+  interface User {
+    id?: string;
+    name?: string | null;
+    email?: string | null;
+    role?: string;
   }
 }
 
 declare module "next-auth/jwt" {
-  interface JWT {
+  interface JWT extends DefaultJWT {
     id?: string;
+    name?: string | null;
+    email?: string;
     role?: string;
   }
 }
@@ -48,11 +57,6 @@ export const authConfig = {
     AzureADProvider({
       clientId: process.env.AZURE_AD_CLIENT_ID!,
       clientSecret: process.env.AZURE_AD_CLIENT_SECRET!,
-      // 如果需要綁定特定 Tenant，請使用 issuer（推薦做法）
-      // issuer: `https://login.microsoftonline.com/${process.env.AZURE_AD_TENANT_ID}/v2.0`,
-      
-      // 如果是多租戶或 common 端點，就完全不設 issuer
-      // tenantId 已於 v5 多數版本移除，不建議使用
       allowDangerousEmailAccountLinking: true,
     }),
   ],
@@ -66,15 +70,18 @@ export const authConfig = {
     async signIn({ user, account, profile }) {
       if (!user.email) return true;
 
+      const providerImage =
+        (typeof user.image === "string" && user.image.trim()) ||
+        (typeof (profile as any)?.picture === "string" && (profile as any).picture.trim()) ||
+        null;
+
       const existingUser = await db.query.users.findFirst({
         where: eq(users.email, user.email),
       });
 
-      // 新使用者才決定角色
       if (!existingUser) {
         let newRole = "pending";
 
-        // 第一個使用者 → super admin
         const anyUserExists = await db.query.users.findFirst();
         if (!anyUserExists) {
           newRole = "super";
@@ -85,46 +92,54 @@ export const authConfig = {
           }
         }
 
-        // 暫存 role 到 user 物件，之後 jwt callback 會拿到
         user.role = newRole;
+      } else {
+        const existingPhoto = await db.query.userPhotos.findFirst({
+          where: eq(userPhotos.userId, existingUser.id),
+          columns: { id: true },
+        });
+        if (!existingPhoto) {
+          await db.insert(userPhotos).values({
+            userId: existingUser.id,
+            image: providerImage || existingUser.image || null,
+          });
+        }
       }
 
       return true;
     },
 
     async jwt({ token, user, trigger, session }) {
-      // 初次登入：把 user 裡的資料帶進 token
       if (user) {
         token.id = user.id;
-        if (user.role) {
-          token.role = user.role;
-        }
+        token.name = user.name;
+        token.email = user.email as string;
+        token.role = user.role;
       }
 
-      // 每次 JWT 更新時，從資料庫重新抓取最新 role（反映管理員即時變更）
       if (token.id) {
         const dbUser = await db.query.users.findFirst({
           where: eq(users.id, token.id as string),
+          columns: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+          },
         });
         if (dbUser) {
           token.role = dbUser.role ?? token.role;
-          // 如果你也想保持 name 最新，也可以這裡更新：
-          // token.name = dbUser.name ?? token.name;
+          token.name = dbUser.name ?? token.name;
+          token.email = dbUser.email ?? token.email;
         }
       }
 
-      // 處理 useSession().update() 觸發的更新
       if (trigger === "update" && session?.user) {
-        token = { ...token, ...session.user };
-
-        // 可選：同步最新 name
-        if (token.id) {
-          const freshUser = await db.query.users.findFirst({
-            where: eq(users.id, token.id as string),
-          });
-          if (freshUser?.name) {
-            token.name = freshUser.name;
-          }
+        if (session.user.role !== undefined) {
+          token.role = session.user.role;
+        }
+        if (session.user.name !== undefined) {
+          token.name = session.user.name;
         }
       }
 
@@ -132,14 +147,27 @@ export const authConfig = {
     },
 
     async session({ session, token }) {
-      if (session.user && token?.id) {
+      if (session.user) {
         session.user.id = token.id as string;
+        session.user.name = token.name ?? null;
+        session.user.email = token.email as string;
         session.user.role = token.role as string | undefined;
-        if (token.name) {
-          session.user.name = token.name as string | null;
-        }
+        delete session.user.image;
       }
+
       return session;
+    },
+  },
+  events: {
+    async createUser({ user }) {
+      if (!user.id) return;
+      await db
+        .insert(userPhotos)
+        .values({
+          userId: user.id,
+          image: (typeof user.image === "string" && user.image.trim()) ? user.image : null,
+        })
+        .onConflictDoNothing();
     },
   },
 } satisfies NextAuthConfig;

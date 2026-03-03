@@ -8,8 +8,6 @@ export default async function MainLayout({ children }: { children: React.ReactNo
     const session = await auth()
     if (!session?.user) redirect('/login')
 
-    const userRole = (session.user as any).role as string ?? "user"
-
     return (
         <div className="flex h-screen w-screen overflow-hidden bg-muted/20 dark:bg-background/95">
             <SidebarProvider defaultOpen={true}>
@@ -20,7 +18,6 @@ export default async function MainLayout({ children }: { children: React.ReactNo
                     </div>
                 </main>
             </SidebarProvider>
-            <SetupChecker userRole={userRole} />
         </div>
     )
 }
