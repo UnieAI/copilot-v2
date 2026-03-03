@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { groupTokenUsage, tokenUsage, users } from "@/lib/db/schema";
+import { groupTokenUsage, tokenUsage, userPhotos, users } from "@/lib/db/schema";
 import { requireGroupEditor } from "@/lib/group-permissions";
 import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 
@@ -89,10 +89,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     perModel.forEach(u => allUserIds.add(u.userId));
     const userIds = [...allUserIds].filter(Boolean);
     const userList = userIds.length > 0
-        ? await db.query.users.findMany({
-            where: inArray(users.id, userIds),
-            columns: { id: true, name: true, email: true, image: true },
-        })
+        ? await db
+            .select({
+                id: users.id,
+                name: users.name,
+                email: users.email,
+                image: userPhotos.image,
+            })
+            .from(users)
+            .leftJoin(userPhotos, eq(userPhotos.userId, users.id))
+            .where(inArray(users.id, userIds))
         : [];
     const userMap = new Map(userList.map((u) => [u.id, u]));
 

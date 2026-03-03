@@ -32,6 +32,18 @@ export const users = pgTable('user', {
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+export const userPhotos = pgTable('user_photos', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+        .notNull()
+        .unique()
+        .references(() => users.id, { onDelete: 'cascade' }),
+    image: text('image'),
+
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 export const accounts = pgTable(
     'account',
     {
@@ -412,6 +424,7 @@ export const chatFiles = pgTable('chat_files', {
 
 export type User = InferSelectModel<typeof users>;
 export type NewUser = InferInsertModel<typeof users>;
+export type UserPhoto = InferSelectModel<typeof userPhotos>;
 export type AdminSettings = InferSelectModel<typeof adminSettings>;
 export type UserProvider = InferSelectModel<typeof userProviders>;
 export type UserPreference = InferSelectModel<typeof userPreferences>;
