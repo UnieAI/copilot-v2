@@ -98,6 +98,7 @@ export default async function ProjectChatPage({
 
     return (
         <ProjectPageClient
+            session={session}
             project={{ id: project.id, name: project.name }}
             initialSessions={projectSessions.map(s => ({
                 id: s.id,

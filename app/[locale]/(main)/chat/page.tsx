@@ -69,6 +69,7 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
 
     return (
         <ChatInterface
+            session={session}
             key={sessionId || freshKey || 'new'}
             sessionId={sessionId}
             availableModels={availableModels}

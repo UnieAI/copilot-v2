@@ -32,6 +32,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
+import { SetupChecker } from "../setup-checker"
+import { Session } from "next-auth"
 
 // ─── Types ─────────────────────────────────────────────────────────────
 type Attachment = {
@@ -497,6 +499,7 @@ type AvailableModel = {
 
 // ─── Main Chat Interface ─────────────────────────────────────────────────
 export function ChatInterface({
+    session,
     sessionId: initialSessionId,
     availableModels,
     initialSelectedModel,
@@ -505,6 +508,7 @@ export function ChatInterface({
     projectId,
     onSessionCreated,
 }: {
+    session: Session
     sessionId?: string
     availableModels: AvailableModel[]
     initialSelectedModel?: string
@@ -515,6 +519,7 @@ export function ChatInterface({
 }) {
     const router = useRouter()
     const pathname = usePathname()
+    const userRole = (session.user as any).role as string ?? "user"
     const segments = pathname?.split('/').filter(Boolean) || []
     const localePrefix = segments.length && segments[0].length <= 5 ? `/${segments[0]}` : ''
     const t = useTranslations('Home')
@@ -1791,6 +1796,8 @@ export function ChatInterface({
                     onClose={() => setSelectedPreviewAttachment(null)}
                 />
             )}
+
+            <SetupChecker userRole={userRole} />
         </div>
     )
 }

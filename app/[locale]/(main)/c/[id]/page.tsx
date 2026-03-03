@@ -112,6 +112,7 @@ export default async function ChatSessionPage({ params }: { params: Promise<{ id
 
     return (
         <ChatInterface
+            session={session}
             sessionId={sessionId}
             availableModels={availableModels}
             initialSelectedModel={initialSelectedModel}

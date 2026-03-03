@@ -62,6 +62,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
 
     return (
         <ProjectPageClient
+            session={session}
             project={{ id: project.id, name: project.name }}
             initialSessions={projectSessions.map(s => ({
                 id: s.id,
