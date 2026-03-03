@@ -825,8 +825,8 @@ export function ChatInterface({
         setInput("")
         setAttachments([])
 
-        const conversationHistory = historyMessages.map(m => ({ role: m.role, content: m.content }))
-        conversationHistory.push({ role: 'user', content })
+        const conversationHistory = historyMessages.map(m => ({ id: m.dbId, role: m.role, content: m.content }))
+        conversationHistory.push({ id: undefined, role: 'user' as const, content })
 
         const failActiveStream = (errorText?: string) => {
             const fallback = errorText || '產生回應失敗，請稍後再試。'
@@ -1041,7 +1041,7 @@ export function ChatInterface({
             setMessages(prev => prev.map(m => m.id === aiMsgId ? { ...m, isStreaming: false, content: m.content || fallback } : m))
         }
 
-        const history = [...prevMessages.map(m => ({ role: m.role, content: m.content })), { role: 'user', content: userMsg.content }]
+        const history = [...prevMessages.map(m => ({ id: m.dbId, role: m.role, content: m.content })), { role: 'user', content: userMsg.content }]
 
         // Carry over the user message's attachments for context
         const userAtts = (userMsg.attachments || []).map(a => ({

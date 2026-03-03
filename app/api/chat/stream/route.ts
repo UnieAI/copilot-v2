@@ -209,13 +209,14 @@ export async function POST(req: NextRequest) {
 
                     // ─── 3. Build Context from Attachments (all in parallel) ─────────
                     const contextParts: string[] = [];
+                    let parsedParts: (string | null)[] = [];
 
                     if (attachments && attachments.length > 0) {
                         // Announce parsing start with a single status event
                         send({ type: 'status', data: `正在解析 ${attachments.length} 個附件...` });
 
                         // Parse ALL attachments concurrently, then collect results in order
-                        const parsedParts = await Promise.all(
+                        parsedParts = await Promise.all(
                             attachments.map(async (att: any) => {
                                 const { name, mimeType, base64 } = att;
 
@@ -410,8 +411,38 @@ export async function POST(req: NextRequest) {
                     }
 
                     // Conversation history
-                    for (const m of messages) {
-                        finalMessages.push({ role: m.role, content: m.content });
+                    // If fileAttachmentSessionOnly is false (default), embed chatFiles parsed content
+                    const fileAttachmentSessionOnly = adminConf?.fileAttachmentSessionOnly ?? false;
+
+                    if (!fileAttachmentSessionOnly) {
+                        // Collect DB IDs from history messages
+                        const historyMessageIds = (messages as any[])
+                            .map((m: any) => m.id as string)
+                            .filter((id: string) => id && UUID_RE.test(id));
+
+                        const filesByMessageId = new Map<string, string[]>();
+                        if (historyMessageIds.length > 0) {
+                            const files = await db.query.chatFiles.findMany({
+                                where: inArray(chatFiles.messageId, historyMessageIds),
+                                columns: { messageId: true, parsedContent: true },
+                            });
+                            for (const f of files) {
+                                if (!f.parsedContent) continue;
+                                const arr = filesByMessageId.get(f.messageId) ?? [];
+                                arr.push(f.parsedContent);
+                                filesByMessageId.set(f.messageId, arr);
+                            }
+                        }
+
+                        for (const m of messages) {
+                            const parts = filesByMessageId.get((m as any).id) ?? [];
+                            const embed = parts.length > 0 ? `\n\n[附件解析內容]\n${parts.join('\n\n')}` : '';
+                            finalMessages.push({ role: m.role, content: m.content + embed });
+                        }
+                    } else {
+                        for (const m of messages) {
+                            finalMessages.push({ role: m.role, content: m.content });
+                        }
                     }
 
                     // ─── 6. Quota check (group only) ────────────────────────────────
@@ -539,6 +570,19 @@ export async function POST(req: NextRequest) {
                     await db.update(chatSessions)
                         .set({ updatedAt: new Date() })
                         .where(eq(chatSessions.id, currentSessionId));
+
+                    // ─── 6b. Save parsed file content to chatFiles (if setting allows) ──
+                    if (!adminConf?.fileAttachmentSessionOnly && savedUserMsg?.id && parsedParts.some(p => p)) {
+                        const fileInserts = (attachments as any[] || []).map((att: any, idx: number) => ({
+                            messageId: savedUserMsg.id,
+                            name: att.name,
+                            mimeType: att.mimeType,
+                            parsedContent: parsedParts[idx] ?? null,
+                        })).filter((f: any) => f.parsedContent);
+                        if (fileInserts.length > 0) {
+                            try { await db.insert(chatFiles).values(fileInserts); } catch { }
+                        }
+                    }
 
                     // ─── 7. Stream Main Generation ──────────────────────────────────
                     const requestBody = {

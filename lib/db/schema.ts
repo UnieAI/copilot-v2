@@ -84,6 +84,8 @@ export const adminSettings = pgTable('admin_settings', {
     defaultUserRole: varchar('default_user_role', { length: 50 }).notNull().default('pending'),
     pendingMessage: text('pending_message').notNull().default('Your account is pending administrator approval.'),
 
+    fileAttachmentSessionOnly: boolean('file_attachment_session_only').notNull().default(false),
+
     workModelUrl: text('work_model_url'),
     workModelKey: text('work_model_key'),
     workModelName: text('work_model_name'),
@@ -290,7 +292,7 @@ export const chatMessages = pgTable('chat_messages', {
     attachments: json('attachments').default('[]'),
     toolCalls: json('tool_calls').default('[]'), // store mcp tool calls if any
 
-        createdAt: timestamp('created_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
 // Group token usage tracking (per user per group)

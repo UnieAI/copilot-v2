@@ -4,13 +4,14 @@ import { useState } from "react";
 import { adminConfigActions } from "./actions";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
-import { Card } from "@/components/ui/card"; // 假設你有這個
-import { Sparkles, Globe, Eye, Zap, Save, RefreshCw } from "lucide-react";
+import { Sparkles, Globe, Eye, Zap, Save, RefreshCw, Paperclip } from "lucide-react";
 import { UnieAIIcon } from "@/components/sidebar/unieai-logo";
+import { Switch } from "@/components/ui/switch";
 
 type AdminSettings = {
     defaultUserRole?: string | null;
     pendingMessage?: string | null;
+    fileAttachmentSessionOnly?: boolean | null;
     workModelUrl?: string | null;
     workModelKey?: string | null;
     workModelName?: string | null;
@@ -31,6 +32,7 @@ export function AdminSettingsForm({ settings }: { settings: AdminSettings | unde
     const [workModels, setWorkModels] = useState<string[]>([]);
     const [taskModels, setTaskModels] = useState<string[]>([]);
     const [visionModels, setVisionModels] = useState<string[]>([]);
+    const [fileAttachmentSessionOnly, setFileAttachmentSessionOnly] = useState<boolean>(settings?.fileAttachmentSessionOnly ?? false);
 
     const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
 
@@ -114,6 +116,30 @@ export function AdminSettingsForm({ settings }: { settings: AdminSettings | unde
                         <label className={labelClasses}>待審核頁面文字</label>
                         <textarea name="pendingMessage" defaultValue={settings?.pendingMessage ?? ""} className="w-full rounded-2xl border-none ring-1 ring-border/50 bg-muted/30 p-4 text-sm focus:ring-2 focus:ring-primary/40 focus:bg-background transition-all outline-none" rows={3} />
                     </div>
+                </div>
+            </section>
+
+            {/* 對話附加檔案設定 */}
+            <section className={sectionClasses}>
+                <div className="flex items-center gap-3 mb-2">
+                    <div className="p-2 rounded-xl bg-primary/10 text-primary">
+                        <Paperclip className="h-5 w-5" />
+                    </div>
+                    <h2 className="text-xl font-semibold">對話附加檔案設定</h2>
+                </div>
+
+                <div className="flex items-center justify-between p-4 rounded-2xl bg-muted/20">
+                    <div>
+                        <p className="text-sm font-semibold text-foreground">附加檔案僅適用於當次對話</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                            啟用後，每次對話的附件解析結果不會保留至後續對話；關閉後（預設），解析內容會自動嵌入後續的對話歷史中。
+                        </p>
+                    </div>
+                    <Switch
+                        checked={fileAttachmentSessionOnly}
+                        onCheckedChange={setFileAttachmentSessionOnly}
+                    />
+                    <input type="hidden" name="fileAttachmentSessionOnly" value={fileAttachmentSessionOnly ? "true" : "false"} />
                 </div>
             </section>
 
