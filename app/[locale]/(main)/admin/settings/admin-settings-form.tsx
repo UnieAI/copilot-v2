@@ -131,9 +131,10 @@ export function AdminSettingsForm({ settings }: { settings: AdminSettings | unde
                 <div className="flex items-center justify-between p-4 rounded-2xl bg-muted/20">
                     <div>
                         <p className="text-sm font-semibold text-foreground">附加檔案僅適用於當次對話</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                            啟用後，每次對話的附件解析結果不會保留至後續對話；關閉後（預設），解析內容會自動嵌入後續的對話歷史中。
-                        </p>
+                        <div className="text-xs text-muted-foreground mt-0.5 space-y-1">
+                            <p>啟用後，每次對話的附件解析結果不會保留至後續對話；</p>
+                            <p>關閉後（預設），解析內容會自動嵌入後續的對話歷史中。</p>
+                        </div>
                     </div>
                     <Switch
                         checked={fileAttachmentSessionOnly}
