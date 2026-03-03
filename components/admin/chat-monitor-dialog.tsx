@@ -10,6 +10,7 @@ import rehypeKatex from "rehype-katex"
 import "katex/dist/katex.min.css"
 import { MarkdownCode } from "@/components/chat/markdown-code"
 import { cn } from "@/lib/utils"
+import { MarkdownComponents } from "../chat/chat-interface"
 
 type ChatSessionItem = {
   id: string
@@ -30,55 +31,6 @@ type ChatMessageItem = {
   content: string
   attachments?: AttachmentItem[]
   createdAt: string
-}
-
-const MarkdownComponents: any = {
-  h1: ({ children }: any) => <h1 className="text-xl font-bold mt-6 mb-2 text-foreground">{children}</h1>,
-  h2: ({ children }: any) => <h2 className="text-lg font-semibold mt-5 mb-2 text-foreground/90">{children}</h2>,
-  h3: ({ children }: any) => <h3 className="text-base font-semibold mt-4 mb-1 text-foreground/80">{children}</h3>,
-  p: ({ children }: any) => <p className="leading-7 mb-4 last:mb-0 text-foreground/90">{children}</p>,
-  ul: ({ children }: any) => <ul className="list-disc pl-6 mb-4 space-y-2 text-foreground/90">{children}</ul>,
-  ol: ({ children }: any) => <ol className="list-decimal pl-6 mb-4 space-y-2 text-foreground/90">{children}</ol>,
-  li: ({ children }: any) => <li className="leading-7">{children}</li>,
-  blockquote: ({ children }: any) => (
-    <blockquote className="border-l-4 border-primary/30 pl-4 py-1 my-4 italic bg-primary/5 rounded-r-lg text-muted-foreground">
-      {children}
-    </blockquote>
-  ),
-  table: ({ children }: any) => (
-    <div className="my-6 overflow-x-auto rounded-xl border border-border/40 shadow-sm">
-      <table className="w-full border-collapse text-sm text-left">{children}</table>
-    </div>
-  ),
-  thead: ({ children }: any) => <thead className="bg-muted/50 border-b border-border/40">{children}</thead>,
-  th: ({ children }: any) => <th className="px-4 py-3 font-semibold text-foreground/80">{children}</th>,
-  td: ({ children }: any) => <td className="px-4 py-3 border-b border-border/20 last:border-0">{children}</td>,
-  a: ({ href, children }: any) => (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="text-primary font-medium underline underline-offset-4 hover:text-primary/80 transition-colors"
-    >
-      {children}
-    </a>
-  ),
-  code: ({ className, children, ...props }: any) => {
-    const content = String(children).replace(/\n$/, "")
-    const hasNewline = content.includes("\n")
-    const language = className?.replace(/language-/, "")
-    if (!hasNewline && !language) {
-      return (
-        <code
-          className="mx-1 rounded-md px-1.5 py-0.5 bg-muted/80 dark:bg-white/10 text-primary dark:text-primary-foreground font-mono text-[0.85em] font-bold border border-border/40 break-all"
-          {...props}
-        >
-          {content}
-        </code>
-      )
-    }
-    return <MarkdownCode className={className} language={language} codeText={content} {...props} />
-  },
 }
 
 function ThinkBlock({ content }: { content: string }) {

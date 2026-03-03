@@ -145,10 +145,8 @@ function ThinkBlock({ content, isStreaming }: { content: string; isStreaming?: b
     )
 }
 
-
-
 // ─── Gemini Style Markdown Components ────────────────────────────────
-const MarkdownComponents: any = {
+export const MarkdownComponents: any = {
     // 標題：稍微加粗，帶有層次感
     h1: ({ children }: any) => <h1 className="text-xl font-bold mt-6 mb-2 text-foreground">{children}</h1>,
     h2: ({ children }: any) => <h2 className="text-lg font-semibold mt-5 mb-2 text-foreground/90">{children}</h2>,
@@ -274,52 +272,7 @@ const MarkdownComponents: any = {
         );
     }
 };
-// Render content with <think>...</think> blocks collapsed
-// function MessageContent({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
-//     const parts: { type: 'text' | 'think'; content: string; unfinished?: boolean }[] = []
-//     const thinkRegex = /<think>([\s\S]*?)<\/think>/g
-//     let lastIndex = 0
-//     let match
 
-//     while ((match = thinkRegex.exec(content)) !== null) {
-//         if (match.index > lastIndex) {
-//             parts.push({ type: 'text', content: content.slice(lastIndex, match.index) })
-//         }
-//         parts.push({ type: 'think', content: match[1] })
-//         lastIndex = match.index + match[0].length
-//     }
-
-//     // Handle unclosed <think> tag (still streaming)
-//     const remaining = content.slice(lastIndex)
-//     const openThink = remaining.indexOf('<think>')
-//     if (openThink !== -1) {
-//         if (openThink > 0) parts.push({ type: 'text', content: remaining.slice(0, openThink) })
-//         parts.push({ type: 'think', content: remaining.slice(openThink + 7) + (isStreaming ? '▋' : ''), unfinished: !!isStreaming })
-//     } else if (remaining) {
-//         parts.push({ type: 'text', content: remaining })
-//     }
-
-//     if (parts.length === 0 && isStreaming) {
-//         parts.push({ type: 'text', content: '▋' })
-//     }
-
-//     return (
-//         <div>
-//             {parts.map((p, i) =>
-//                 p.type === 'think'
-//                     ? <ThinkBlock key={i} content={p.content} isStreaming={p.unfinished} />
-//                     : <div key={i} className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1.5 prose-pre:text-xs">
-//                         <ReactMarkdown
-//                             remarkPlugins={[remarkGfm]}
-//                             components={{ code: MarkdownCode }}
-//                         >
-//                             {p.content}
-//                         </ReactMarkdown>
-//                     </div>
-//             )}
-//         </div>
-//     )
-// }
 function MessageContent({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
     // 使用 useMemo 解析內容，確保只有內容變動時才重新計算 parts
     const parts = useMemo(() => {
