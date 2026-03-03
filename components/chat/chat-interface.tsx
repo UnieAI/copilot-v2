@@ -495,65 +495,6 @@ type AvailableModel = {
     groupName?: string
 }
 
-// ─── Group Model Section (2nd-level collapsible) ──────────────────────────
-function GroupModelSection({
-    groupName,
-    models,
-    selectedModel,
-    hasSelected,
-    onSelect,
-    showSeparator,
-}: {
-    groupName: string
-    models: AvailableModel[]
-    selectedModel: string
-    hasSelected: boolean
-    onSelect: (value: string) => void
-    showSeparator: boolean
-}) {
-    const [expanded, setExpanded] = useState(hasSelected) // auto-expand if a model from this group is selected
-
-    return (
-        <>
-            {showSeparator && <div className="my-1 border-t border-border/40" />}
-            {/* Group header row */}
-            <button
-                onClick={() => setExpanded(v => !v)}
-                className={`w-full flex items-center justify-between px-3 py-2 text-sm font-medium transition-colors hover:bg-muted/60
-                    ${hasSelected ? 'text-primary' : 'text-foreground/80'}`}
-            >
-                <span className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold tracking-wider text-muted-foreground uppercase">群組</span>
-                    <span>{groupName}</span>
-                    {hasSelected && <span className="text-[10px] text-primary">✓ 使用中</span>}
-                </span>
-                <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`} />
-            </button>
-
-            {/* Expanded model list */}
-            {expanded && (
-                <div className="bg-muted/20">
-                    {models.map(m => (
-                        <button
-                            key={m.value}
-                            onClick={() => onSelect(m.value)}
-                            className={`w-full text-left pl-7 pr-4 py-2 text-sm transition-colors flex items-center justify-between
-                                ${selectedModel === m.value ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted text-foreground/80 hover:text-foreground'}
-                            `}
-                        >
-                            <div className="flex flex-col items-start">
-                                <span className="truncate max-w-[160px]">{m.label}</span>
-                                <span className="text-[10px] text-muted-foreground">{m.providerName}</span>
-                            </div>
-                            {selectedModel === m.value && <Check className="h-3.5 w-3.5 shrink-0" />}
-                        </button>
-                    ))}
-                </div>
-            )}
-        </>
-    )
-}
-
 // ─── Main Chat Interface ─────────────────────────────────────────────────
 export function ChatInterface({
     sessionId: initialSessionId,
@@ -808,6 +749,70 @@ export function ChatInterface({
         if (isEdit) setEditAttachments(prev => [...prev, ...newAtts])
         else setAttachments(prev => [...prev, ...newAtts])
     }
+
+    const handlePaste = useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+        e.preventDefault(); // 重要：先阻止預設的貼上文字行為
+
+        const items = e.clipboardData?.items;
+        if (!items) return;
+
+        // 優先找 image 類型的資料
+        for (const item of items) {
+            if (item.kind === 'file' && item.type.startsWith('image/')) {
+                const file = item.getAsFile();
+                if (!file) continue;
+
+                // 這裡可以再過濾只接受 jpg/png/jpeg/gif 等
+                if (!file.type.match(/^(image\/(png|jpeg|jpg|gif|webp))$/)) {
+                    toast.error("目前僅支援 PNG / JPEG / GIF / WebP 格式的貼上圖片");
+                    continue;
+                }
+
+                try {
+                    const base64 = await fileToBase64(file);
+                    const previewUrl = URL.createObjectURL(file);
+
+                    const newAttachment: Attachment = {
+                        name: `pasted-${Date.now()}.${file.type.split('/')[1] || 'png'}`,
+                        mimeType: file.type,
+                        base64,
+                        previewUrl,
+                    };
+
+                    setAttachments(prev => [...prev, newAttachment]);
+                    toast.success("已貼上圖片作為附件");
+
+                } catch (err) {
+                    console.error("貼上圖片失敗", err);
+                    toast.error("無法處理貼上的圖片");
+                }
+
+                return; // 找到一張圖就處理，結束迴圈
+            }
+        }
+
+        // 如果沒有圖片，就允許正常文字貼上
+        const text = e.clipboardData.getData('text/plain');
+        if (text) {
+            // 你可以選擇直接插入文字，或是呼叫 document.execCommand('insertText')
+            // 但因為你用的是 controlled textarea，最簡單的方式是手動插入
+            const start = textareaRef.current?.selectionStart ?? 0;
+            const end = textareaRef.current?.selectionEnd ?? 0;
+            const current = input;
+
+            const newValue = current.slice(0, start) + text + current.slice(end);
+            setInput(newValue);
+
+            // 移動游標到貼上後的位置
+            setTimeout(() => {
+                if (textareaRef.current) {
+                    textareaRef.current.selectionStart = start + text.length;
+                    textareaRef.current.selectionEnd = start + text.length;
+                }
+            }, 0);
+        }
+
+    }, [input, setAttachments]);
 
     // UUID regex — only real UUIDs are safe to use as editMessageId
     const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -1739,6 +1744,7 @@ export function ChatInterface({
                         <textarea
                             ref={textareaRef}
                             value={input}
+                            onPaste={handlePaste}
                             onChange={e => setInput(e.target.value)}
                             onKeyDown={handleKeyDown}
                             placeholder="輸入訊息或拖曳檔案/圖片至此處... (Shift+Enter 換行)"

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
+import { usePathname } from "next/navigation"
 import { Settings, AlertTriangle, X } from "lucide-react"
 
 // ── Shared Warning Dialog ───────────────────────────────────────────────────
@@ -81,38 +82,36 @@ interface SetupCheckerProps {
 type DialogState = { open: boolean; items: string[] }
 
 export function SetupChecker({ userRole }: SetupCheckerProps) {
+    const pathname = usePathname()
     const [adminDialog, setAdminDialog] = useState<DialogState>({ open: false, items: [] })
     const [providerDialog, setProviderDialog] = useState<DialogState>({ open: false, items: [] })
 
-    const showProviderDialogIfNeeded = useCallback(async () => {
+    const checkSetup = useCallback(async () => {
         try {
             const res = await fetch("/api/setup-check")
             const data = await res.json()
-            if (data.providerIssue) {
+
+            // 清空之前的 dialog 狀態（避免舊資料殘留）
+            setAdminDialog({ open: false, items: [] })
+            setProviderDialog({ open: false, items: [] })
+
+            if (data.adminIssues?.length) {
+                setAdminDialog({ open: true, items: data.adminIssues })
+            } else if (data.providerIssue) {
                 setProviderDialog({
                     open: true,
                     items: ["尚無啟用中且含有模型的 Provider，請至設定頁面新增並同步模型後啟用。"],
                 })
             }
-        } catch { }
+        } catch {
+            // 可選擇靜默處理，或記錄錯誤
+        }
     }, [])
 
     useEffect(() => {
-        fetch("/api/setup-check")
-            .then(r => r.json())
-            .then(data => {
-                if (data.adminIssues?.length) {
-                    setAdminDialog({ open: true, items: data.adminIssues })
-                    // Provider dialog shown after admin dialog is closed
-                } else if (data.providerIssue) {
-                    setProviderDialog({
-                        open: true,
-                        items: ["尚無啟用中且含有模型的 Provider，請至設定頁面新增並同步模型後啟用。"],
-                    })
-                }
-            })
-            .catch(() => { })
-    }, [])
+        // 每次 pathname 改變都重新檢查
+        checkSetup()
+    }, [pathname, checkSetup])
 
     return (
         <>
@@ -124,7 +123,7 @@ export function SetupChecker({ userRole }: SetupCheckerProps) {
                     actionPath="/admin/settings"
                     onClose={() => {
                         setAdminDialog({ open: false, items: [] })
-                        showProviderDialogIfNeeded()
+                        checkSetup()
                     }}
                 />
             )}
