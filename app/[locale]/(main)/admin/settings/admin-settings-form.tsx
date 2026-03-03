@@ -4,12 +4,14 @@ import { useState } from "react";
 import { adminConfigActions } from "./actions";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
-import { Card } from "@/components/ui/card"; // 假設你有這個
-import { Sparkles, Globe, Eye, Zap, Save, RefreshCw } from "lucide-react";
+import { Sparkles, Globe, Eye, Zap, Save, RefreshCw, Paperclip } from "lucide-react";
+import { UnieAIIcon } from "@/components/sidebar/unieai-logo";
+import { Switch } from "@/components/ui/switch";
 
 type AdminSettings = {
     defaultUserRole?: string | null;
     pendingMessage?: string | null;
+    fileAttachmentSessionOnly?: boolean | null;
     workModelUrl?: string | null;
     workModelKey?: string | null;
     workModelName?: string | null;
@@ -21,12 +23,16 @@ type AdminSettings = {
     visionModelName?: string | null;
 };
 
+const UNIEAI_PROVIDER_URL = process.env.NEXT_PUBLIC_UNIEAI_PROVIDER_URL || "";
+const UNIEAI_PROVIDER_KEY = process.env.NEXT_PUBLIC_UNIEAI_PROVIDER_KEY || "";
+
 export function AdminSettingsForm({ settings }: { settings: AdminSettings | undefined }) {
     const router = useRouter();
     const [isSaving, setIsSaving] = useState(false);
     const [workModels, setWorkModels] = useState<string[]>([]);
     const [taskModels, setTaskModels] = useState<string[]>([]);
     const [visionModels, setVisionModels] = useState<string[]>([]);
+    const [fileAttachmentSessionOnly, setFileAttachmentSessionOnly] = useState<boolean>(settings?.fileAttachmentSessionOnly ?? false);
 
     const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
 
@@ -55,6 +61,21 @@ export function AdminSettingsForm({ settings }: { settings: AdminSettings | unde
         }
     };
 
+    const applyUnieAIAndFetchModels = async (type: string, urlId: string, keyId: string, setModels: any) => {
+        if (!UNIEAI_PROVIDER_URL || !UNIEAI_PROVIDER_KEY) {
+            toast.error("NEXT_PUBLIC_UNIEAI_PROVIDER_URL 或 NEXT_PUBLIC_UNIEAI_PROVIDER_KEY 未設定");
+            return;
+        }
+
+        const urlInput = document.getElementById(urlId) as HTMLInputElement | null;
+        const keyInput = document.getElementById(keyId) as HTMLInputElement | null;
+        if (!urlInput || !keyInput) return;
+
+        urlInput.value = UNIEAI_PROVIDER_URL;
+        keyInput.value = UNIEAI_PROVIDER_KEY;
+        await fetchModels(type, urlId, keyId, setModels);
+    };
+
     const inputClasses = "w-full h-11 rounded-2xl border-none ring-1 ring-border/50 bg-muted/30 px-4 text-sm focus:ring-2 focus:ring-primary/40 focus:bg-background transition-all duration-300 outline-none";
     const labelClasses = "block text-[13px] font-bold text-foreground/70 mb-2 ml-1 tracking-wide";
     const sectionClasses = "p-6 md:p-8 rounded-[32px] border border-border/30 bg-background/40 shadow-sm space-y-6";
@@ -72,7 +93,7 @@ export function AdminSettingsForm({ settings }: { settings: AdminSettings | unde
             } finally {
                 setIsSaving(false);
             }
-        }} className="space-y-10 pb-20">
+        }} className="space-y-10">
 
             {/* 註冊行為設定 */}
             <section className={sectionClasses}>
@@ -98,6 +119,31 @@ export function AdminSettingsForm({ settings }: { settings: AdminSettings | unde
                 </div>
             </section>
 
+            {/* 對話附加檔案設定 */}
+            <section className={sectionClasses}>
+                <div className="flex items-center gap-3 mb-2">
+                    <div className="p-2 rounded-xl bg-primary/10 text-primary">
+                        <Paperclip className="h-5 w-5" />
+                    </div>
+                    <h2 className="text-xl font-semibold">對話附加檔案設定</h2>
+                </div>
+
+                <div className="flex items-center justify-between p-4 rounded-2xl bg-muted/20">
+                    <div>
+                        <p className="text-sm font-semibold text-foreground">附加檔案僅適用於當次對話</p>
+                        <div className="text-xs text-muted-foreground mt-0.5 space-y-1">
+                            <p>啟用後，每次對話的附件解析結果不會保留至後續對話；</p>
+                            <p>關閉後（預設），解析內容會自動嵌入後續的對話歷史中。</p>
+                        </div>
+                    </div>
+                    <Switch
+                        checked={fileAttachmentSessionOnly}
+                        onCheckedChange={setFileAttachmentSessionOnly}
+                    />
+                    <input type="hidden" name="fileAttachmentSessionOnly" value={fileAttachmentSessionOnly ? "true" : "false"} />
+                </div>
+            </section>
+
             {/* 模型區塊範本組件 */}
             {[
                 { id: 'work', title: 'Work Model', icon: <Sparkles />, desc: '負責標題生成與內容摘要', url: 'workModelUrl', key: 'workModelKey', name: 'workModelName', models: workModels, setter: setWorkModels },
@@ -118,7 +164,17 @@ export function AdminSettingsForm({ settings }: { settings: AdminSettings | unde
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
                             <label className={labelClasses}>API Endpoint</label>
-                            <input id={`${m.id}_url`} name={m.url} placeholder="https://..." defaultValue={(settings as any)?.[m.url] || ""} className={inputClasses} />
+                            <div className="flex items-center gap-2">
+                                <input id={`${m.id}_url`} name={m.url} placeholder="https://..." defaultValue={(settings as any)?.[m.url] || ""} className={`${inputClasses} flex-1`} />
+                                <button
+                                    type="button"
+                                    onClick={() => applyUnieAIAndFetchModels(m.id, `${m.id}_url`, `${m.id}_key`, m.setter)}
+                                    className="h-11 w-11 shrink-0 rounded-full border border-border/50 bg-background hover:bg-muted transition-colors inline-flex items-center justify-center"
+                                    title="Use UnieAI"
+                                >
+                                    <UnieAIIcon className="h-4 w-4" />
+                                </button>
+                            </div>
                         </div>
                         <div>
                             <label className={labelClasses}>API Key</label>

@@ -84,6 +84,8 @@ export const adminSettings = pgTable('admin_settings', {
     defaultUserRole: varchar('default_user_role', { length: 50 }).notNull().default('pending'),
     pendingMessage: text('pending_message').notNull().default('Your account is pending administrator approval.'),
 
+    fileAttachmentSessionOnly: boolean('file_attachment_session_only').notNull().default(false),
+
     workModelUrl: text('work_model_url'),
     workModelKey: text('work_model_key'),
     workModelName: text('work_model_name'),
@@ -152,6 +154,40 @@ export const groupProviders = pgTable('group_providers', {
 });
 
 // Many-to-many: users ↔ groups
+// Global Providers (platform-level shared providers)
+export const globalProviders = pgTable('global_providers', {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    enable: integer('enable').notNull().default(1),
+    displayName: text('display_name').notNull().default(''),
+    prefix: varchar('prefix', { length: 4 }).notNull(),
+
+    apiUrl: text('api_url').notNull(),
+    apiKey: text('api_key').notNull(),
+    modelList: json('model_list').notNull().default('[]'),
+    selectedModels: json('selected_models').notNull().default('[]'),
+
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Global provider quota per role per model
+export const globalProviderRoleModelQuotas = pgTable(
+    'global_provider_role_model_quotas',
+    {
+        providerId: uuid('provider_id')
+            .notNull()
+            .references(() => globalProviders.id, { onDelete: 'cascade' }),
+        role: varchar('role', { length: 20 }).notNull(), // user | admin | super
+        model: text('model').notNull(),
+        limitTokens: integer('limit_tokens'), // null => unlimited
+        refillIntervalHours: integer('refill_interval_hours').notNull().default(12),
+        updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    },
+    (t) => ({
+        pk: primaryKey({ columns: [t.providerId, t.role, t.model] }),
+    })
+);
+
 export const userGroups = pgTable(
     'user_groups',
     {
@@ -256,7 +292,7 @@ export const chatMessages = pgTable('chat_messages', {
     attachments: json('attachments').default('[]'),
     toolCalls: json('tool_calls').default('[]'), // store mcp tool calls if any
 
-        createdAt: timestamp('created_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
 // Group token usage tracking (per user per group)
@@ -306,6 +342,7 @@ export const groupUserQuotas = pgTable(
             .notNull()
             .references(() => users.id, { onDelete: 'cascade' }),
         limitTokens: integer('limit_tokens'), // null => unlimited
+        refillIntervalHours: integer('refill_interval_hours').notNull().default(12),
         updatedAt: timestamp('updated_at').defaultNow().notNull(),
     },
     (t) => ({
@@ -325,6 +362,7 @@ export const groupUserModelQuotas = pgTable(
             .references(() => users.id, { onDelete: 'cascade' }),
         model: text('model').notNull(),
         limitTokens: integer('limit_tokens'), // null => unlimited
+        refillIntervalHours: integer('refill_interval_hours').notNull().default(12),
         updatedAt: timestamp('updated_at').defaultNow().notNull(),
     },
     (t) => ({
@@ -341,6 +379,7 @@ export const groupModelQuotas = pgTable(
             .references(() => groups.id, { onDelete: 'cascade' }),
         model: text('model').notNull(),
         limitTokens: integer('limit_tokens'), // null => unlimited
+        refillIntervalHours: integer('refill_interval_hours').notNull().default(12),
         updatedAt: timestamp('updated_at').defaultNow().notNull(),
     },
     (t) => ({
@@ -382,6 +421,8 @@ export type ChatMessage = InferSelectModel<typeof chatMessages>;
 export type ChatFile = InferSelectModel<typeof chatFiles>;
 export type Group = InferSelectModel<typeof groups>;
 export type GroupProvider = InferSelectModel<typeof groupProviders>;
+export type GlobalProvider = InferSelectModel<typeof globalProviders>;
+export type GlobalProviderRoleModelQuota = InferSelectModel<typeof globalProviderRoleModelQuotas>;
 export type UserGroup = InferSelectModel<typeof userGroups>;
 export type GroupTokenUsage = InferSelectModel<typeof groupTokenUsage>;
 export type TokenUsage = InferSelectModel<typeof tokenUsage>;

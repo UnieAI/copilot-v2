@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { Plus, Trash2, RefreshCw, Pencil, Check, X, Users, Server, ChevronDown, ChevronUp, BarChart3, Shield } from "lucide-react"
 import { Area, AreaChart, CartesianGrid, XAxis } from "recharts"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
+import { UnieAIIcon } from "@/components/sidebar/unieai-logo"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -65,13 +66,47 @@ type UsageByModelRow = {
     totalTokens: number
 }
 
-type UserQuota = { userId: string, limitTokens: number | null }
-type ModelQuota = { userId: string, model: string, limitTokens: number | null }
+type UserQuota = {
+    userId: string
+    limitTokens: number | null
+    refillIntervalHours: number
+    usedTokens?: number
+    remainingTokens?: number | null
+    refreshAt?: string
+}
+type ModelQuota = {
+    userId: string
+    model: string
+    limitTokens: number | null
+    refillIntervalHours: number
+    usedTokens?: number
+    remainingTokens?: number | null
+    refreshAt?: string
+}
+type GroupModelQuota = {
+    model: string
+    limitTokens: number | null
+    refillIntervalHours: number
+    usedTokens?: number
+    remainingTokens?: number | null
+    refreshAt?: string
+}
+
+const UNIEAI_PROVIDER_URL = process.env.NEXT_PUBLIC_UNIEAI_PROVIDER_URL || ""
+const UNIEAI_PROVIDER_KEY = process.env.NEXT_PUBLIC_UNIEAI_PROVIDER_KEY || ""
 
 // ─── Helper: masked API key ──────────────────────────────────────────────────
 function maskKey(key: string) {
     if (!key || key.length < 6) return "••••••"
     return key.slice(0, 4) + "•".repeat(Math.min(key.length - 6, 12)) + key.slice(-2)
+}
+
+function quotaHintText(q: { limitTokens: number | null; remainingTokens?: number | null; refreshAt?: string }) {
+    if (q.limitTokens === null) return "無上限";
+    if (q.remainingTokens === undefined) return `上限 ${q.limitTokens.toLocaleString()} tokens`;
+    const remaining = Number(q.remainingTokens ?? 0);
+    if (remaining > 0) return `剩餘 ${remaining.toLocaleString()} tokens`;
+    return `已用盡，刷新時間 ${q.refreshAt ? new Date(q.refreshAt).toLocaleString() : "-"}`;
 }
 
 // ─── Model Selector Checklist ────────────────────────────────────────────────
@@ -210,6 +245,22 @@ function ProviderForm({
     })
     const [saving, setSaving] = useState(false)
 
+    const applyUnieAIGroupDefaults = () => {
+        if (!UNIEAI_PROVIDER_URL) {
+            toast.error("NEXT_PUBLIC_UNIEAI_PROVIDER_URL 未設定")
+            return
+        }
+        if (!UNIEAI_PROVIDER_KEY) {
+            toast.error("NEXT_PUBLIC_UNIEAI_PROVIDER_KEY 未設定")
+            return
+        }
+        setForm(f => ({
+            ...f,
+            apiUrl: UNIEAI_PROVIDER_URL,
+            apiKey: UNIEAI_PROVIDER_KEY,
+        }))
+    }
+
     const save = async () => {
         setSaving(true)
         try {
@@ -263,12 +314,22 @@ function ProviderForm({
             </div>
             <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">API URL</label>
-                <input
-                    className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring"
-                    value={form.apiUrl}
-                    onChange={e => setForm(f => ({ ...f, apiUrl: e.target.value }))}
-                    placeholder="https://api.openai.com"
-                />
+                <div className="flex items-center gap-2">
+                    <input
+                        className="flex-1 rounded-lg border border-input bg-background px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                        value={form.apiUrl}
+                        onChange={e => setForm(f => ({ ...f, apiUrl: e.target.value }))}
+                        placeholder="https://api.openai.com"
+                    />
+                    <button
+                        type="button"
+                        onClick={applyUnieAIGroupDefaults}
+                        className="h-9 w-9 shrink-0 rounded-full border border-input bg-background hover:bg-muted transition-colors inline-flex items-center justify-center"
+                        title="Use UnieAI"
+                    >
+                        <UnieAIIcon className="h-4 w-4" />
+                    </button>
+                </div>
             </div>
             <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">API Key</label>
@@ -446,16 +507,16 @@ function GroupDetail({
     onGroupUpdated: () => void
     viewerRole: string
 }) {
-    const [tab, setTab] = useState<"members" | "providers" | "usage">("members")
+    const [tab, setTab] = useState<"members" | "providers" | "usage" | "quota">("members")
     const [memberRoles, setMemberRoles] = useState<Map<string, GroupRole>>(new Map())
     const [providers, setProviders] = useState<GroupProvider[]>([])
     const [usage, setUsage] = useState<UsageRow[]>([])
     const [usageSeries, setUsageSeries] = useState<UsagePoint[]>([])
     const [usageByModel, setUsageByModel] = useState<UsageByModelRow[]>([])
     const [usageLoading, setUsageLoading] = useState(false)
-    const [userQuotas, setUserQuotas] = useState<Map<string, number | null>>(new Map())
+    const [userQuotas, setUserQuotas] = useState<Map<string, UserQuota>>(new Map())
     const [modelQuotas, setModelQuotas] = useState<ModelQuota[]>([])
-    const [groupModelQuotas, setGroupModelQuotas] = useState<{ model: string, limitTokens: number | null }[]>([])
+    const [groupModelQuotas, setGroupModelQuotas] = useState<GroupModelQuota[]>([])
     const [savingQuotas, setSavingQuotas] = useState(false)
     const [loading, setLoading] = useState(false)
     const [addingProvider, setAddingProvider] = useState(false)
@@ -471,6 +532,7 @@ function GroupDetail({
     const [newQuotaModel, setNewQuotaModel] = useState<string>("")
     const [newQuotaLimit, setNewQuotaLimit] = useState<string>("")
     const [newQuotaUnlimited, setNewQuotaUnlimited] = useState<boolean>(false)
+    const [newQuotaRefill, setNewQuotaRefill] = useState<string>("12")
     const [memberSearch, setMemberSearch] = useState("")
 
     const isAdminViewer = ["admin", "super"].includes(viewerRole)
@@ -550,19 +612,34 @@ function GroupDetail({
             return
         }
         const data = await res.json()
-        const userMap = new Map<string, number | null>()
+        const userMap = new Map<string, UserQuota>()
         if (Array.isArray(data.userQuotas)) {
-            data.userQuotas.forEach((q: any) => userMap.set(q.userId, q.limitTokens === null ? null : Number(q.limitTokens)))
+            data.userQuotas.forEach((q: any) => userMap.set(q.userId, {
+                userId: q.userId,
+                limitTokens: q.limitTokens === null ? null : Number(q.limitTokens),
+                refillIntervalHours: Number(q.refillIntervalHours ?? 12),
+                usedTokens: Number(q.usedTokens ?? 0),
+                remainingTokens: q.remainingTokens === null ? null : Number(q.remainingTokens ?? 0),
+                refreshAt: q.refreshAt,
+            }))
         }
         setUserQuotas(userMap)
         setModelQuotas(Array.isArray(data.modelQuotas) ? data.modelQuotas.map((q: any) => ({
             userId: q.userId,
             model: q.model,
             limitTokens: q.limitTokens === null ? null : Number(q.limitTokens),
+            refillIntervalHours: Number(q.refillIntervalHours ?? 12),
+            usedTokens: Number(q.usedTokens ?? 0),
+            remainingTokens: q.remainingTokens === null ? null : Number(q.remainingTokens ?? 0),
+            refreshAt: q.refreshAt,
         })) : [])
         setGroupModelQuotas(Array.isArray(data.groupModelQuotas) ? data.groupModelQuotas.map((q: any) => ({
             model: q.model,
             limitTokens: q.limitTokens === null ? null : Number(q.limitTokens),
+            refillIntervalHours: Number(q.refillIntervalHours ?? 12),
+            usedTokens: Number(q.usedTokens ?? 0),
+            remainingTokens: q.remainingTokens === null ? null : Number(q.remainingTokens ?? 0),
+            refreshAt: q.refreshAt,
         })) : [])
     }, [group.id, canEdit])
 
@@ -674,7 +751,31 @@ function GroupDetail({
     const setUserQuotaValue = (userId: string, value: number | null) => {
         setUserQuotas(prev => {
             const next = new Map(prev)
-            next.set(userId, value)
+            const current = next.get(userId)
+            next.set(userId, {
+                userId,
+                limitTokens: value,
+                refillIntervalHours: current?.refillIntervalHours ?? 12,
+                usedTokens: current?.usedTokens ?? 0,
+                remainingTokens: current?.remainingTokens ?? null,
+                refreshAt: current?.refreshAt,
+            })
+            return next
+        })
+    }
+
+    const setUserQuotaInterval = (userId: string, interval: number) => {
+        setUserQuotas(prev => {
+            const next = new Map(prev)
+            const current = next.get(userId)
+            next.set(userId, {
+                userId,
+                limitTokens: current?.limitTokens ?? null,
+                refillIntervalHours: Math.max(1, Number.isFinite(interval) ? Math.floor(interval) : 12),
+                usedTokens: current?.usedTokens ?? 0,
+                remainingTokens: current?.remainingTokens ?? null,
+                refreshAt: current?.refreshAt,
+            })
             return next
         })
     }
@@ -683,11 +784,11 @@ function GroupDetail({
         setModelQuotas(prev => prev.filter((_, i) => i !== idx))
     }
 
-    const addModelQuota = (userId: string, model: string, limitTokens: number | null) => {
+    const addModelQuota = (userId: string, model: string, limitTokens: number | null, refillIntervalHours = 12) => {
         if (!userId || !model) return
         setModelQuotas(prev => {
             const filtered = prev.filter(q => !(q.userId === userId && q.model === model))
-            return [...filtered, { userId, model, limitTokens }]
+            return [...filtered, { userId, model, limitTokens, refillIntervalHours }]
         })
     }
 
@@ -698,16 +799,19 @@ function GroupDetail({
             const body = {
                 userQuotas: Array.from(userQuotas.entries()).map(([userId, limitTokens]) => ({
                     userId,
-                    limitTokens: limitTokens === null || Number.isNaN(Number(limitTokens)) ? null : Number(limitTokens),
+                    limitTokens: limitTokens.limitTokens === null || Number.isNaN(Number(limitTokens.limitTokens)) ? null : Number(limitTokens.limitTokens),
+                    refillIntervalHours: Math.max(1, Number(limitTokens.refillIntervalHours || 12)),
                 })),
                 modelQuotas: modelQuotas.map(q => ({
                     userId: q.userId,
                     model: q.model,
                     limitTokens: q.limitTokens === null || Number.isNaN(Number(q.limitTokens)) ? null : Number(q.limitTokens),
+                    refillIntervalHours: Math.max(1, Number(q.refillIntervalHours || 12)),
                 })),
                 groupModelQuotas: groupModelQuotas.map(q => ({
                     model: q.model,
                     limitTokens: q.limitTokens === null || Number.isNaN(Number(q.limitTokens)) ? null : Number(q.limitTokens),
+                    refillIntervalHours: Math.max(1, Number(q.refillIntervalHours || 12)),
                 })),
             }
             const res = await fetch(`/api/admin/groups/${group.id}/quotas`, {
@@ -999,63 +1103,6 @@ function GroupDetail({
                                 </ChartContainer>
                             )}
 
-                            {canEdit && (
-                                <div className="rounded-xl border border-border/60 p-4 space-y-3">
-                                    <div className="flex items-center justify-between">
-                                        <h4 className="text-sm font-semibold">用戶總額度</h4>
-                                        <button
-                                            onClick={saveQuotas}
-                                            disabled={savingQuotas}
-                                            className="text-xs px-3 py-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                                        >
-                                            {savingQuotas ? "儲存中..." : "儲存額度"}
-                                        </button>
-                                    </div>
-                                    <div className="space-y-2">
-                                        {allUsers.filter(u => selectedIds.has(u.id)).map(u => {
-                                            const limit = userQuotas.get(u.id)
-                                            return (
-                                                <div key={u.id} className="flex flex-wrap items-center gap-3">
-                                                    <div className="flex items-center gap-2 min-w-[180px]">
-                                                        {u.image ? (
-                                                            <img src={u.image} className="h-7 w-7 rounded-full object-cover" alt="" />
-                                                        ) : (
-                                                            <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center text-xs font-medium">
-                                                                {u.name?.[0]?.toUpperCase() || u.email?.[0]?.toUpperCase() || "?"}
-                                                            </div>
-                                                        )}
-                                                        <div className="flex flex-col min-w-0">
-                                                            <span className="text-sm font-medium truncate">{u.name || u.email || "未知用戶"}</span>
-                                                            {u.email && <span className="text-xs text-muted-foreground truncate">{u.email}</span>}
-                                                        </div>
-                                                    </div>
-                                                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={limit === null}
-                                                            onChange={e => setUserQuotaValue(u.id, e.target.checked ? null : (limit || 0))}
-                                                        />
-                                                        無上限
-                                                    </label>
-                                                    <input
-                                                        type="number"
-                                                        min={0}
-                                                        value={limit === null || Number.isNaN(limit) ? "" : limit}
-                                                        onChange={e => setUserQuotaValue(u.id, e.target.value === "" ? null : Number(e.target.value))}
-                                                        disabled={limit === null}
-                                                        className="w-32 rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                                                        placeholder="Token 上限"
-                                                    />
-                                                </div>
-                                            )
-                                        })}
-                                        {allUsers.filter(u => selectedIds.has(u.id)).length === 0 && (
-                                            <p className="text-xs text-muted-foreground">尚無成員，無法設定額度。</p>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-
                             {usage.length > 0 && (
                                 <div className="rounded-xl border border-border/60 overflow-hidden">
                                     <div className="grid grid-cols-4 gap-2 bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground">
@@ -1123,102 +1170,6 @@ function GroupDetail({
                                     </div>
                                 </div>
                             )}
-
-                            {canEdit && (
-                                <div className="rounded-xl border border-border/60 p-4 space-y-3">
-                                    <h4 className="text-sm font-semibold">模型額度（依用戶）</h4>
-                                    <div className="flex flex-wrap gap-2 items-end">
-                                        <div className="flex flex-col gap-1">
-                                            <span className="text-xs text-muted-foreground">用戶</span>
-                                            <select
-                                                value={newQuotaUser}
-                                                onChange={e => setNewQuotaUser(e.target.value)}
-                                                className="rounded-md border border-border bg-background px-2 py-1 text-sm"
-                                            >
-                                                <option value="">選擇用戶</option>
-                                                {allUsers.filter(u => selectedIds.has(u.id)).map(u => (
-                                                    <option key={u.id} value={u.id}>{u.name || u.email}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        <div className="flex flex-col gap-1">
-                                            <span className="text-xs text-muted-foreground">模型</span>
-                                            <select
-                                                value={newQuotaModel}
-                                                onChange={e => setNewQuotaModel(e.target.value)}
-                                                className="rounded-md border border-border bg-background px-2 py-1 text-sm"
-                                            >
-                                                <option value="">選擇模型</option>
-                                                {availableModels.map(m => (
-                                                    <option key={m} value={m}>{m}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <label className="flex items-center gap-1 text-xs text-muted-foreground">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={newQuotaUnlimited}
-                                                    onChange={e => setNewQuotaUnlimited(e.target.checked)}
-                                                />
-                                                無上限
-                                            </label>
-                                            <input
-                                                type="number"
-                                                min={0}
-                                                value={newQuotaUnlimited ? "" : newQuotaLimit}
-                                                onChange={e => setNewQuotaLimit(e.target.value)}
-                                                disabled={newQuotaUnlimited}
-                                                className="w-32 rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                                                placeholder="Token 上限"
-                                            />
-                                        </div>
-                                        <button
-                                            onClick={() => {
-                                                const limit = newQuotaUnlimited || newQuotaLimit === "" ? null : Number(newQuotaLimit)
-                                                addModelQuota(newQuotaUser, newQuotaModel, limit)
-                                                setNewQuotaLimit("")
-                                                setNewQuotaUnlimited(false)
-                                            }}
-                                            className="px-3 py-1.5 rounded-md border border-border text-xs hover:bg-muted transition-colors"
-                                            disabled={!newQuotaUser || !newQuotaModel}
-                                        >
-                                            新增/更新
-                                        </button>
-                                    </div>
-                                    {modelQuotas.length > 0 ? (
-                                        <div className="divide-y divide-border/60">
-                                            {modelQuotas.map((q, idx) => {
-                                                const user = allUsers.find(u => u.id === q.userId)
-                                                return (
-                                                    <div key={`${q.userId}-${q.model}-${idx}`} className="flex items-center justify-between py-2 text-sm">
-                                                        <div className="flex items-center gap-3 min-w-0">
-                                                            <div className="flex flex-col min-w-0">
-                                                                <span className="font-medium truncate">{user?.name || user?.email || q.userId}</span>
-                                                                {user?.email && <span className="text-xs text-muted-foreground truncate">{user.email}</span>}
-                                                            </div>
-                                                            <span className="text-xs font-mono px-2 py-0.5 rounded bg-muted">{q.model}</span>
-                                                        </div>
-                                                        <div className="flex items-center gap-3">
-                                                            <span className="text-xs text-muted-foreground">
-                                                                {q.limitTokens === null ? "無上限" : q.limitTokens.toLocaleString()}
-                                                            </span>
-                                                            <button
-                                                                onClick={() => removeModelQuota(idx)}
-                                                                className="text-xs text-destructive hover:underline"
-                                                            >
-                                                                移除
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                )
-                                            })}
-                                        </div>
-                                    ) : (
-                                        <p className="text-xs text-muted-foreground">尚未設定模型額度</p>
-                                    )}
-                                </div>
-                            )}
                         </div>
                     </div>
                 )}
@@ -1244,7 +1195,8 @@ function GroupDetail({
                                     {selectedMembers.length === 0 ? (
                                         <p className="text-xs text-muted-foreground">尚無成員，無法設定額度。</p>
                                     ) : selectedMembers.map(u => {
-                                        const limit = userQuotas.get(u.id)
+                                        const quota = userQuotas.get(u.id) || { userId: u.id, limitTokens: null, refillIntervalHours: 12 }
+                                        const limit = quota.limitTokens
                                         return (
                                             <div key={u.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border/50 px-3 py-2">
                                                 <div className="flex items-center gap-2 min-w-[180px]">
@@ -1264,7 +1216,7 @@ function GroupDetail({
                                                     <input
                                                         type="checkbox"
                                                         checked={limit === null}
-                                                        onChange={e => setUserQuotaValue(u.id, e.target.checked ? null : (limit || 0))}
+                                                        onChange={e => setUserQuotaValue(u.id, e.target.checked ? null : (limit ?? 0))}
                                                     />
                                                     無上限
                                                 </label>
@@ -1277,6 +1229,17 @@ function GroupDetail({
                                                     className="w-32 rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
                                                     placeholder="Token 上限"
                                                 />
+                                                <div className="flex items-center gap-1 text-xs">
+                                                    <span className="text-muted-foreground">刷新(小時)</span>
+                                                    <input
+                                                        type="number"
+                                                        min={1}
+                                                        value={quota.refillIntervalHours || 12}
+                                                        onChange={e => setUserQuotaInterval(u.id, Number(e.target.value || 12))}
+                                                        className="w-20 rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                                                    />
+                                                </div>
+                                                <span className="text-xs text-muted-foreground">{quotaHintText(quota)}</span>
                                             </div>
                                         )
                                     })}
@@ -1290,33 +1253,61 @@ function GroupDetail({
                                     {availableModels.length === 0 ? (
                                         <p className="text-xs text-muted-foreground">尚無模型</p>
                                     ) : availableModels.map(model => {
-                                        const quota = groupModelQuotas.find(q => q.model === model)?.limitTokens ?? null
+                                        const quota = groupModelQuotas.find(q => q.model === model) || { model, limitTokens: null, refillIntervalHours: 12 }
+                                        const limit = quota.limitTokens
                                         return (
-                                            <div key={model} className="flex items-center gap-3 rounded-xl border border-border/50 px-3 py-2">
+                                            <div
+                                                key={model}
+                                                className="flex flex-wrap items-center gap-3 rounded-xl border border-border/50 px-3 py-2"
+                                            >
+                                                {/* 第一行元素 */}
                                                 <span className="text-xs font-mono bg-muted px-2 py-1 rounded">{model}</span>
+
                                                 <label className="flex items-center gap-2 text-xs text-muted-foreground">
                                                     <input
                                                         type="checkbox"
-                                                        checked={quota === null}
+                                                        checked={limit === null}
                                                         onChange={e => setGroupModelQuotas(prev => {
                                                             const filtered = prev.filter(q => q.model !== model)
-                                                            return [...filtered, { model, limitTokens: e.target.checked ? null : 0 }]
+                                                            return [...filtered, { ...quota, limitTokens: e.target.checked ? null : (limit ?? 0) }]
                                                         })}
                                                     />
                                                     無上限
                                                 </label>
+
                                                 <input
                                                     type="number"
                                                     min={0}
-                                                    value={quota === null || Number.isNaN(quota) ? "" : quota}
+                                                    value={limit === null || Number.isNaN(limit) ? "" : limit}
                                                     onChange={e => setGroupModelQuotas(prev => {
                                                         const filtered = prev.filter(q => q.model !== model)
-                                                        return [...filtered, { model, limitTokens: e.target.value === "" ? null : Number(e.target.value) }]
+                                                        return [...filtered, { ...quota, limitTokens: e.target.value === "" ? null : Number(e.target.value) }]
                                                     })}
-                                                    disabled={quota === null}
+                                                    disabled={limit === null}
                                                     className="w-32 rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
                                                     placeholder="Token 上限"
                                                 />
+
+                                                {/* 強制換行 */}
+                                                <div className="w-full h-0" aria-hidden="true"></div>
+                                                {/* 或者用 <div className="basis-full"></div> 也可以 */}
+
+                                                {/* 第二行元素 */}
+                                                <div className="flex items-center gap-1 text-xs">
+                                                    <span className="text-muted-foreground">刷新(小時)</span>
+                                                    <input
+                                                        type="number"
+                                                        min={1}
+                                                        value={quota.refillIntervalHours || 12}
+                                                        onChange={e => setGroupModelQuotas(prev => {
+                                                            const filtered = prev.filter(q => q.model !== model)
+                                                            return [...filtered, { ...quota, refillIntervalHours: Math.max(1, Number(e.target.value || 12)) }]
+                                                        })}
+                                                        className="w-20 rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                                                    />
+                                                </div>
+
+                                                <span className="text-xs text-muted-foreground">{quotaHintText(quota)}</span>
                                             </div>
                                         )
                                     })}
@@ -1377,12 +1368,24 @@ function GroupDetail({
                                         placeholder="Token 上限"
                                     />
                                 </div>
+                                <div className="flex items-center gap-2 text-xs">
+                                    <span className="text-muted-foreground">刷新(小時)</span>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        value={newQuotaRefill}
+                                        onChange={e => setNewQuotaRefill(e.target.value)}
+                                        className="w-20 rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                                    />
+                                </div>
                                 <button
                                     onClick={() => {
                                         const limit = newQuotaUnlimited || newQuotaLimit === "" ? null : Number(newQuotaLimit)
-                                        addModelQuota(newQuotaUser, newQuotaModel, limit)
+                                        const refill = Math.max(1, Number(newQuotaRefill || 12))
+                                        addModelQuota(newQuotaUser, newQuotaModel, limit, refill)
                                         setNewQuotaLimit("")
                                         setNewQuotaUnlimited(false)
+                                        setNewQuotaRefill("12")
                                     }}
                                     className="px-3 py-1.5 rounded-md border border-border text-xs hover:bg-muted transition-colors"
                                     disabled={!newQuotaUser || !newQuotaModel}
@@ -1404,9 +1407,14 @@ function GroupDetail({
                                                     <span className="text-xs font-mono px-2 py-0.5 rounded bg-muted">{q.model}</span>
                                                 </div>
                                                 <div className="flex items-center gap-3">
-                                                    <span className="text-xs text-muted-foreground">
-                                                        {q.limitTokens === null ? "無上限" : q.limitTokens.toLocaleString()}
-                                                    </span>
+                                                    <span className="text-xs text-muted-foreground">{quotaHintText(q)}</span>
+                                                    <input
+                                                        type="number"
+                                                        min={1}
+                                                        value={q.refillIntervalHours || 12}
+                                                        onChange={e => setModelQuotas(prev => prev.map((item, i) => i === idx ? { ...item, refillIntervalHours: Math.max(1, Number(e.target.value || 12)) } : item))}
+                                                        className="w-20 rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                                                    />
                                                     <button
                                                         onClick={() => removeModelQuota(idx)}
                                                         className="text-xs text-destructive hover:underline"

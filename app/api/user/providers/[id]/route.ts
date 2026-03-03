@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { userProviders } from "@/lib/db/schema";
+import { userProviders, groupProviders, globalProviders } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 
 // PATCH /api/user/providers/[id] — update a provider
@@ -19,12 +19,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         return Response.json({ error: "Prefix must be exactly 4 alphanumeric characters" }, { status: 400 });
     }
 
-    // Check prefix uniqueness (exclude current provider)
+    // Check prefix uniqueness globally (exclude current provider)
     if (prefix !== undefined) {
-        const conflict = await db.query.userProviders.findFirst({
-            where: and(eq(userProviders.userId, userId), eq(userProviders.prefix, prefix.toUpperCase())),
-        });
-        if (conflict && conflict.id !== id) {
+        const upperPrefix = prefix.toUpperCase();
+        const [userProviderConflict, groupProviderConflict, globalProviderConflict] = await Promise.all([
+            db.query.userProviders.findFirst({
+                where: eq(userProviders.prefix, upperPrefix),
+            }),
+            db.query.groupProviders.findFirst({
+                where: eq(groupProviders.prefix, upperPrefix),
+            }),
+            db.query.globalProviders.findFirst({
+                where: eq(globalProviders.prefix, upperPrefix),
+            }),
+        ]);
+
+        if ((userProviderConflict && userProviderConflict.id !== id) || groupProviderConflict || globalProviderConflict) {
             return Response.json({ error: "Prefix already in use" }, { status: 409 });
         }
     }

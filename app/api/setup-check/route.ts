@@ -3,13 +3,14 @@ import { auth } from "@/auth"
 import { db } from "@/lib/db"
 import { adminSettings, userProviders } from "@/lib/db/schema"
 import { getGroupModels } from "@/lib/get-group-models"
+import { getGlobalModels } from "@/lib/get-global-models"
 import { eq } from "drizzle-orm"
 
 /**
  * GET /api/setup-check
  * Returns which setup issues exist for the current user.
  * - adminIssues: present only for admin/super, lists missing system model fields
- * - providerIssue: true only if neither personal nor group providers expose any models
+ * - providerIssue: true only if personal/group/global providers expose no models
  */
 export async function GET(req: NextRequest) {
     const session = await auth()
@@ -43,12 +44,15 @@ export async function GET(req: NextRequest) {
 
         // Group providers: models visible to this user's groups
         getGroupModels(userId).then(models => models.length > 0),
+
+        // Global providers: models visible to everyone
+        getGlobalModels().then(models => models.length > 0),
     ])
 
-    const [adminMissing, userHasProviders, groupHasProviders] = checks
+    const [adminMissing, userHasProviders, groupHasProviders, globalHasProviders] = checks
 
     return Response.json({
         adminIssues: adminMissing && adminMissing.length > 0 ? adminMissing : null,
-        providerIssue: !userHasProviders && !groupHasProviders,
+        providerIssue: !userHasProviders && !groupHasProviders && !globalHasProviders,
     })
 }

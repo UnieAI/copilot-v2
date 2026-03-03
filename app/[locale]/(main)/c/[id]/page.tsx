@@ -5,6 +5,7 @@ import { userProviders, userPreferences, chatMessages, chatSessions } from "@/li
 import { eq, and } from "drizzle-orm"
 import { ChatInterface } from "@/components/chat/chat-interface"
 import { getGroupModels } from "@/lib/get-group-models"
+import { getGlobalModels } from "@/lib/get-global-models"
 
 export default async function ChatSessionPage({ params }: { params: Promise<{ id: string }> }) {
     const session = await auth()
@@ -31,6 +32,7 @@ export default async function ChatSessionPage({ params }: { params: Promise<{ id
             }))
         }),
         ...(await getGroupModels(userId)),
+        ...(await getGlobalModels()),
     ]
 
     // Fetch the session to ensure it exists and get stored model+provider

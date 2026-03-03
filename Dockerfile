@@ -11,7 +11,7 @@ COPY tsconfig*.json ./
 COPY next.config.* ./
 
 # 安裝所有依賴（包含開發依賴）
-RUN npm ci
+RUN npm i
 
 # 複製所有原始碼
 COPY . .
@@ -39,7 +39,7 @@ COPY --from=builder /app/next.config.* ./
 COPY --from=builder /app/tsconfig*.json ./
 
 # 安裝生產環境依賴（不包含 devDependencies）
-RUN npm ci --omit=dev --frozen-lockfile
+RUN npm i --omit=dev --frozen-lockfile
 
 # 確保權限（alpine 常見做法）
 RUN addgroup --system --gid 1001 nodejs

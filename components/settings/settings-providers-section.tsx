@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { toast } from "sonner"
 import { Plus, Trash2, RefreshCw, ChevronDown, ChevronUp, ToggleLeft, ToggleRight, X } from "lucide-react"
+import { UnieAIIcon } from "@/components/sidebar/unieai-logo"
 
 type ModelItem = {
     id: string
@@ -29,6 +30,9 @@ type ProviderFormState = {
     apiKey: string
     enable: boolean
 }
+
+const UNIEAI_PROVIDER_URL = process.env.NEXT_PUBLIC_UNIEAI_PROVIDER_URL || ""
+const getModelId = (model: ModelItem) => model.id || String(model)
 
 function ModelBadge({ model, onRemove }: { model: ModelItem; onRemove: () => void }) {
     return (
@@ -71,6 +75,9 @@ function ProviderCard({
     const [models, setModels] = useState<ModelItem[]>(
         Array.isArray(provider.modelList) ? provider.modelList : []
     )
+    const [selectedModelIds, setSelectedModelIds] = useState<string[]>(
+        (Array.isArray(provider.modelList) ? provider.modelList : []).map(getModelId)
+    )
 
     const validatePrefix = (val: string) => {
         if (!val) return "Prefix 為必填"
@@ -85,8 +92,19 @@ function ProviderCard({
         setPrefixError(validatePrefix(val))
     }
 
+    const applyUnieAIProviderUrlForEdit = () => {
+        if (!UNIEAI_PROVIDER_URL) {
+            toast.error("NEXT_PUBLIC_UNIEAI_PROVIDER_URL 未設定")
+            return
+        }
+        setForm(prev => ({ ...prev, apiUrl: UNIEAI_PROVIDER_URL }))
+        toast.info("已帶入 UnieAI Base URL，請輸入您的 UnieAI API KEY。")
+    }
+
     const handleToggleEnable = async () => {
         const newEnable = !form.enable
+        const selectedIdSet = new Set(selectedModelIds)
+        const selectedModels = models.filter((model) => selectedIdSet.has(getModelId(model)))
         setForm(prev => ({ ...prev, enable: newEnable }))
         try {
             const res = await fetch(`/api/user/providers/${provider.id}`, {
@@ -96,7 +114,9 @@ function ProviderCard({
             })
             if (!res.ok) throw new Error()
             const updated = await res.json()
-            onUpdate({ ...updated, modelList: models })
+            setModels(selectedModels)
+            setSelectedModelIds(selectedModels.map(getModelId))
+            onUpdate({ ...updated, modelList: selectedModels })
             toast.success(newEnable ? "Provider 已啟用" : "Provider 已停用")
         } catch {
             setForm(prev => ({ ...prev, enable: !newEnable }))
@@ -108,6 +128,9 @@ function ProviderCard({
         const err = validatePrefix(form.prefix)
         if (err) { setPrefixError(err); return }
 
+        const selectedIdSet = new Set(selectedModelIds)
+        const selectedModels = models.filter((model) => selectedIdSet.has(getModelId(model)))
+
         setSaving(true)
         try {
             const res = await fetch(`/api/user/providers/${provider.id}`, {
@@ -118,6 +141,7 @@ function ProviderCard({
                     prefix: form.prefix,
                     apiUrl: form.apiUrl,
                     apiKey: form.apiKey,
+                    modelList: selectedModels,
                 }),
             })
             if (!res.ok) {
@@ -155,6 +179,7 @@ function ProviderCard({
             const data = await res.json()
             const newModels = Array.isArray(data.modelList) ? data.modelList : []
             setModels(newModels)
+            setSelectedModelIds(newModels.map(getModelId))
             onUpdate({ ...provider, ...data.provider, modelList: newModels })
             toast.success(`已同步 ${newModels.length} 個模型`)
             setExpanded(true)
@@ -277,13 +302,23 @@ function ProviderCard({
                         {/* API URL */}
                         <div className="space-y-1">
                             <label className="text-xs font-medium">API URL</label>
-                            <input
-                                type="url"
-                                value={form.apiUrl}
-                                onChange={e => setForm(prev => ({ ...prev, apiUrl: e.target.value }))}
-                                placeholder="https://api.openai.com/v1"
-                                className="w-full h-9 rounded-xl border border-input/60 bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
-                            />
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="url"
+                                    value={form.apiUrl}
+                                    onChange={e => setForm(prev => ({ ...prev, apiUrl: e.target.value }))}
+                                    placeholder="https://api.openai.com/v1"
+                                    className="flex-1 h-9 rounded-xl border border-input/60 bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={applyUnieAIProviderUrlForEdit}
+                                    className="h-9 w-9 shrink-0 rounded-full border border-input/60 bg-background hover:bg-muted transition-colors inline-flex items-center justify-center"
+                                    title="Use UnieAI"
+                                >
+                                    <UnieAIIcon className="h-4 w-4" />
+                                </button>
+                            </div>
                         </div>
 
                         {/* API Key */}
@@ -313,15 +348,46 @@ function ProviderCard({
                     {/* Model List */}
                     {models.length > 0 && (
                         <div className="space-y-2 pt-2 border-t border-border/40">
-                            <p className="text-xs font-medium text-muted-foreground">已同步模型（{models.length}）· 懸停可移除</p>
-                            <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
-                                {models.map((m: ModelItem) => (
-                                    <ModelBadge
-                                        key={m.id || String(m)}
-                                        model={m}
-                                        onRemove={() => handleRemoveModel(m.id || String(m))}
-                                    />
-                                ))}
+                            <div className="flex items-center justify-between gap-2">
+                                <p className="text-xs text-muted-foreground">選擇模型（已選 {selectedModelIds.length}/{models.length} 個）</p>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedModelIds(models.map(getModelId))}
+                                        className="h-7 px-2.5 rounded-lg border border-border bg-background hover:bg-muted text-xs"
+                                        disabled={models.length === 0}
+                                    >
+                                        全選
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedModelIds([])}
+                                        className="h-7 px-2.5 rounded-lg border border-border bg-background hover:bg-muted text-xs"
+                                        disabled={selectedModelIds.length === 0}
+                                    >
+                                        清除選擇
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto border border-border/50 rounded-xl p-2">
+                                {models.map((m: ModelItem) => {
+                                    const modelId = getModelId(m)
+                                    return (
+                                        <label key={modelId} className="text-xs flex items-center gap-2 rounded-md px-2 py-1 hover:bg-muted/60">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedModelIds.includes(modelId)}
+                                                onChange={(e) => {
+                                                    const next = e.target.checked
+                                                        ? Array.from(new Set([...selectedModelIds, modelId]))
+                                                        : selectedModelIds.filter((id) => id !== modelId)
+                                                    setSelectedModelIds(next)
+                                                }}
+                                            />
+                                            <span className="font-mono truncate">{modelId}</span>
+                                        </label>
+                                    )
+                                })}
                             </div>
                         </div>
                     )}
@@ -399,6 +465,15 @@ function CreateProviderDialog({
         }
     }
 
+    const applyUnieAIProviderUrl = () => {
+        if (!UNIEAI_PROVIDER_URL) {
+            toast.error("NEXT_PUBLIC_UNIEAI_PROVIDER_URL 未設定")
+            return
+        }
+        setForm(prev => ({ ...prev, apiUrl: UNIEAI_PROVIDER_URL }))
+        toast.info("已帶入 UnieAI Base URL，請輸入您的 UnieAI API KEY。")
+    }
+
     // Close on backdrop click
     const handleBackdrop = (e: React.MouseEvent<HTMLDivElement>) => {
         if (e.target === e.currentTarget) onClose()
@@ -463,13 +538,23 @@ function CreateProviderDialog({
                             API URL
                             <span className="ml-1.5 text-xs text-muted-foreground font-normal">（可之後再填）</span>
                         </label>
-                        <input
-                            type="text"
-                            value={form.apiUrl}
-                            onChange={e => setForm(prev => ({ ...prev, apiUrl: e.target.value }))}
-                            placeholder="https://api.openai.com/v1"
-                            className="w-full h-10 rounded-xl border border-input/60 bg-background px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
-                        />
+                        <div className="flex items-center gap-2">
+                            <input
+                                type="text"
+                                value={form.apiUrl}
+                                onChange={e => setForm(prev => ({ ...prev, apiUrl: e.target.value }))}
+                                placeholder="https://api.openai.com/v1"
+                                className="flex-1 h-10 rounded-xl border border-input/60 bg-background px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
+                            />
+                            <button
+                                type="button"
+                                onClick={applyUnieAIProviderUrl}
+                                className="h-10 w-10 shrink-0 rounded-full border border-input/60 bg-background hover:bg-muted transition-colors inline-flex items-center justify-center"
+                                title="Use UnieAI"
+                            >
+                                <UnieAIIcon className="h-4 w-4" />
+                            </button>
+                        </div>
                     </div>
 
                     {/* API Key */}

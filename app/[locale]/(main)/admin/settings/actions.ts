@@ -12,6 +12,7 @@ export const adminConfigActions = async (formData: FormData) => {
 
     const defaultUserRole = formData.get('defaultUserRole') as string || 'pending'
     const pendingMessage = formData.get('pendingMessage') as string || 'Your account is pending administrator approval.'
+    const fileAttachmentSessionOnly = formData.get('fileAttachmentSessionOnly') === 'true'
     const workModelUrl = formData.get('workModelUrl') as string
     const workModelKey = formData.get('workModelKey') as string
     const workModelName = formData.get('workModelName') as string
@@ -28,7 +29,7 @@ export const adminConfigActions = async (formData: FormData) => {
     const existing = await db.query.adminSettings.findFirst()
 
     const payload = {
-        defaultUserRole, pendingMessage,
+        defaultUserRole, pendingMessage, fileAttachmentSessionOnly,
         workModelUrl, workModelKey, workModelName,
         taskModelUrl, taskModelKey, taskModelName,
         visionModelUrl, visionModelKey, visionModelName,

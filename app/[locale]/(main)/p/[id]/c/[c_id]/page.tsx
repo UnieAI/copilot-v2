@@ -5,6 +5,7 @@ import { chatProjects, chatSessions, chatMessages, userProviders, userPreference
 import { eq, and } from "drizzle-orm"
 import { ProjectPageClient } from "@/components/project/project-page-client"
 import { getGroupModels } from "@/lib/get-group-models"
+import { getGlobalModels } from "@/lib/get-global-models"
 
 export default async function ProjectChatPage({
     params,
@@ -70,6 +71,7 @@ export default async function ProjectChatPage({
             }))
         }),
         ...(await getGroupModels(userId)),
+        ...(await getGlobalModels()),
     ]
 
     // Determine selected model (from chat session, then preference, then first)

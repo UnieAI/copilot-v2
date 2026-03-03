@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { groupProviders, userProviders } from "@/lib/db/schema";
+import { groupProviders, userProviders, globalProviders } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { requireGroupEditor, requireGroupMember } from "@/lib/group-permissions";
 
@@ -56,6 +56,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     });
     if (existingInAnyGroup) {
         return Response.json({ error: "此 Prefix 已被另一個群組使用，請換一個" }, { status: 409 });
+    }
+
+    // Check prefix uniqueness: must not conflict with ANY global provider prefix
+    const existingInGlobals = await db.query.globalProviders.findFirst({
+        where: eq(globalProviders.prefix, upperPrefix),
+    });
+    if (existingInGlobals) {
+        return Response.json({ error: "Prefix already in use" }, { status: 409 });
     }
 
     // Create the provider

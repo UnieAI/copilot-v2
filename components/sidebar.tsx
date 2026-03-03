@@ -249,12 +249,15 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
     return (<>
         <ShadcnSidebar collapsible="icon" className="border-r border-border/30 bg-muted/20 backdrop-blur-sm" {...props}>
             {/* Header: 修復後的 Logo 佈局 */}
-            <SidebarHeader className="h-16 flex flex-row items-center px-4 justify-between">
+            <SidebarHeader className={cn(
+                "h-16 flex flex-row items-center",
+                state === 'collapsed' ? "justify-center" : "justify-between"
+            )}>
                 <div className={cn(
                     "flex items-center gap-3 transition-all duration-300 overflow-hidden",
                     state === 'collapsed' ? "w-0 opacity-0" : "w-auto opacity-100"
                 )}>
-                    <button onClick={() => router.push('/')} className="flex items-center gap-2.5 outline-none group shrink-0">
+                    <button onClick={() => router.push('/')} className="flex items-center gap-2.5 pl-3 outline-none group shrink-0">
                         <div className="p-1.5 rounded-xl bg-primary/10 group-hover:scale-110 transition-transform">
                             <UnieAIIcon className="size-4 text-primary" />
                         </div>
@@ -273,21 +276,23 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                 )}
             </SidebarHeader>
 
-            <SidebarContent className="px-3 pb-4 space-y-6 scrollbar-hide overflow-x-hidden">
+            <SidebarContent className="px-1 pb-4 space-y-6 scrollbar-hide overflow-x-hidden">
                 {/* 新對話與建立專案 膠囊 */}
-                <div className="px-2 pt-2">
+                <div className={cn(
+                    state === 'expanded' ? "px-2 pt-2" : ""
+                )}>
                     <div className={cn(
-                        "group flex items-center bg-background shadow-sm border border-border/50 rounded-[20px] hover:border-primary/30 transition-all duration-300 overflow-hidden",
-                        state === 'collapsed' ? "w-11 h-11 mx-auto justify-center" : "h-11 px-1.5"
+                        "group flex items-center bg-background shadow-sm rounded-[20px] border border-border/50 hover:border-primary/30 transition-all duration-300 overflow-hidden",
+                        state === 'collapsed' ? "p-1.5 h-8 w-8 mx-auto justify-center" : "h-11 px-1.5 "
                     )}>
                         <button
                             onClick={startNewChat}
                             className={cn(
-                                "flex items-center gap-3 font-bold text-[13.5px] transition-colors hover:text-primary",
-                                state === 'expanded' ? "flex-1 pl-3 h-full text-left" : "justify-center shrink-0"
+                                "flex items-center gap-2 font-bold transition-colors hover:text-primary",
+                                state === 'expanded' ? "flex-1 h-full text-left" : "justify-center shrink-0"
                             )}
                         >
-                            <Plus className="h-4 w-4 shrink-0" />
+                            <Plus className="size-4 shrink-0" />
                             {state === 'expanded' && "新對話"}
                         </button>
 
@@ -413,13 +418,13 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
             </SidebarContent>
 
             {/* Footer: 用戶名片 */}
-            <div className="mt-auto p-4 border-t border-border/40 bg-background/40 backdrop-blur-md">
+            <div className="mt-auto p-2 border-t border-border/40 bg-background/40 backdrop-blur-md">
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <button className="flex w-full items-center gap-3 p-2 rounded-2xl hover:bg-muted/60 transition-all outline-none">
                             <div className="relative shrink-0">
                                 {session?.user?.image ? (
-                                    <img src={session.user.image} alt="avatar" className="h-9 w-9 rounded-full ring-2 ring-background shadow-sm" />
+                                    <img src={session.user.image} alt="avatar" className="size-6 rounded-full ring-2 ring-background shadow-sm" />
                                 ) : (
                                     <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 text-primary flex items-center justify-center text-xs font-bold shrink-0">{session?.user?.name?.[0]?.toUpperCase()}</div>
                                 )}
@@ -457,6 +462,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                                             <Link href="/admin/users"><DropdownMenuItem className="rounded-lg gap-2">使用者中心</DropdownMenuItem></Link>
                                             <Link href="/admin/groups"><DropdownMenuItem className="rounded-lg gap-2">群組資源</DropdownMenuItem></Link>
                                             <Link href="/admin/usage"><DropdownMenuItem className="rounded-lg gap-2">用量監控</DropdownMenuItem></Link>
+                                            <Link href="/admin/chat"><DropdownMenuItem className="rounded-lg gap-2">聊天監控</DropdownMenuItem></Link>
                                             <DropdownMenuSeparator /><Link href="/admin/settings"><DropdownMenuItem className="rounded-lg gap-2 text-primary font-bold">核心系統設定</DropdownMenuItem></Link>
                                         </DropdownMenuSubContent>
                                     </DropdownMenuPortal>

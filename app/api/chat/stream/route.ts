@@ -1,10 +1,11 @@
 import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { adminSettings, userProviders, mcpTools, chatSessions, chatMessages, chatFiles, userGroups, groupProviders, groupTokenUsage, tokenUsage, groupUserQuotas, groupUserModelQuotas, groupModelQuotas } from "@/lib/db/schema";
-import { eq, and, inArray, sql } from "drizzle-orm";
+import { adminSettings, userProviders, mcpTools, chatSessions, chatMessages, chatFiles, userGroups, groupProviders, groupTokenUsage, tokenUsage, groupUserQuotas, groupUserModelQuotas, groupModelQuotas, globalProviders, globalProviderRoleModelQuotas } from "@/lib/db/schema";
+import { eq, and, inArray, sql, gte } from "drizzle-orm";
 import { parseFile, isImageFile, isDocumentFile, stripThinkAndKeepFinal } from "@/lib/parsers";
 import { processPdfPagesEnhanced, isPdf } from "@/lib/parsers/pdf-enhanced";
+import { getQuotaWindow } from "@/lib/quota-window";
 
 /** Strip <think>...</think> blocks (including unclosed ones) and trim. */
 function stripThink(text: string): string {
@@ -13,6 +14,18 @@ function stripThink(text: string): string {
     // Remove any remaining unclosed <think> block (from <think> to end of string)
     result = result.replace(/<think>[\s\S]*/gi, '');
     return result.trim();
+}
+
+function formatQuotaResetTime(date: Date): string {
+    return new Intl.DateTimeFormat("zh-TW", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+    }).format(date);
 }
 
 export async function POST(req: NextRequest) {
@@ -104,19 +117,23 @@ export async function POST(req: NextRequest) {
                     });
                     const memberGroupIds = memberships.map(g => g.groupId);
                     let providerGroupId: string | null = null;
-                    let providerGroupRole: string | null = null;
+                    let providerScope: "user" | "group" | "global" | null = null;
+                    let providerGlobalId: string | null = null;
+                    const currentUserRole = ((session.user as any).role || "user") as string;
 
-                    // Look up provider by prefix (personal first, then group)
-                    let providerConf =
+                    // Look up provider by prefix (personal first, then group, then global)
+                    let providerConf: any =
                         providerPrefix
                             ? await db.query.userProviders.findFirst({
-                                where: and(eq(userProviders.userId, userId), eq(userProviders.prefix, providerPrefix))
+                                where: and(eq(userProviders.userId, userId), eq(userProviders.prefix, providerPrefix), eq(userProviders.enable, 1))
                             })
                             : await db.query.userProviders.findFirst({
                                 where: and(eq(userProviders.userId, userId), eq(userProviders.enable, 1))
                             });
 
-                    if (providerConf) providerGroupId = null;
+                    if (providerConf) {
+                        providerScope = "user";
+                    }
 
                     if (!providerConf && providerPrefix && memberGroupIds.length > 0) {
                         providerConf = await db.query.groupProviders.findFirst({
@@ -128,12 +145,12 @@ export async function POST(req: NextRequest) {
                         });
                         if (providerConf) {
                             providerGroupId = (providerConf as any).groupId;
-                            providerGroupRole = memberships.find(m => m.groupId === providerGroupId)?.role || null;
+                            providerScope = "group";
                         }
                     }
 
-                    // Fallback: any enabled group provider if none selected and user has membership
-                    if (!providerConf && memberGroupIds.length > 0) {
+                    // Fallback: only when no prefix is specified
+                    if (!providerConf && !providerPrefix && memberGroupIds.length > 0) {
                         providerConf = await db.query.groupProviders.findFirst({
                             where: and(
                                 inArray(groupProviders.groupId, memberGroupIds),
@@ -142,8 +159,37 @@ export async function POST(req: NextRequest) {
                         });
                         if (providerConf) {
                             providerGroupId = (providerConf as any).groupId;
-                            providerGroupRole = memberships.find(m => m.groupId === providerGroupId)?.role || null;
+                            providerScope = "group";
                         }
+                    }
+
+                    // Prefix-selected global provider
+                    if (!providerConf && providerPrefix) {
+                        providerConf = await db.query.globalProviders.findFirst({
+                            where: and(eq(globalProviders.prefix, providerPrefix), eq(globalProviders.enable, 1)),
+                        });
+                        if (providerConf) {
+                            providerGlobalId = (providerConf as any).id;
+                            providerScope = "global";
+                        }
+                    }
+
+                    // Fallback: only when no prefix is specified
+                    if (!providerConf && !providerPrefix) {
+                        providerConf = await db.query.globalProviders.findFirst({
+                            where: eq(globalProviders.enable, 1),
+                        });
+                        if (providerConf) {
+                            providerGlobalId = (providerConf as any).id;
+                            providerScope = "global";
+                        }
+                    }
+
+                    // If a specific provider prefix was selected but cannot be resolved, do not fall back to other providers.
+                    if (!providerConf && providerPrefix) {
+                        send({ type: 'error', data: '所選模型來源不可用，請重新選擇模型。' });
+                        controller.close();
+                        return;
                     }
 
                     if (!providerConf?.apiUrl || !providerConf?.apiKey) {
@@ -163,13 +209,14 @@ export async function POST(req: NextRequest) {
 
                     // ─── 3. Build Context from Attachments (all in parallel) ─────────
                     const contextParts: string[] = [];
+                    let parsedParts: (string | null)[] = [];
 
                     if (attachments && attachments.length > 0) {
                         // Announce parsing start with a single status event
                         send({ type: 'status', data: `正在解析 ${attachments.length} 個附件...` });
 
                         // Parse ALL attachments concurrently, then collect results in order
-                        const parsedParts = await Promise.all(
+                        parsedParts = await Promise.all(
                             attachments.map(async (att: any) => {
                                 const { name, mimeType, base64 } = att;
 
@@ -364,12 +411,42 @@ export async function POST(req: NextRequest) {
                     }
 
                     // Conversation history
-                    for (const m of messages) {
-                        finalMessages.push({ role: m.role, content: m.content });
+                    // If fileAttachmentSessionOnly is false (default), embed chatFiles parsed content
+                    const fileAttachmentSessionOnly = adminConf?.fileAttachmentSessionOnly ?? false;
+
+                    if (!fileAttachmentSessionOnly) {
+                        // Collect DB IDs from history messages
+                        const historyMessageIds = (messages as any[])
+                            .map((m: any) => m.id as string)
+                            .filter((id: string) => id && UUID_RE.test(id));
+
+                        const filesByMessageId = new Map<string, string[]>();
+                        if (historyMessageIds.length > 0) {
+                            const files = await db.query.chatFiles.findMany({
+                                where: inArray(chatFiles.messageId, historyMessageIds),
+                                columns: { messageId: true, parsedContent: true },
+                            });
+                            for (const f of files) {
+                                if (!f.parsedContent) continue;
+                                const arr = filesByMessageId.get(f.messageId) ?? [];
+                                arr.push(f.parsedContent);
+                                filesByMessageId.set(f.messageId, arr);
+                            }
+                        }
+
+                        for (const m of messages) {
+                            const parts = filesByMessageId.get((m as any).id) ?? [];
+                            const embed = parts.length > 0 ? `\n\n[附件解析內容]\n${parts.join('\n\n')}` : '';
+                            finalMessages.push({ role: m.role, content: m.content + embed });
+                        }
+                    } else {
+                        for (const m of messages) {
+                            finalMessages.push({ role: m.role, content: m.content });
+                        }
                     }
 
                     // ─── 6. Quota check (group only) ────────────────────────────────
-                    if (providerGroupId) {
+                    if (providerScope === "group" && providerGroupId) {
                         const [userQuota, modelQuota, groupModelQuota] = await Promise.all([
                             db.query.groupUserQuotas.findFirst({
                                 where: and(eq(groupUserQuotas.groupId, providerGroupId), eq(groupUserQuotas.userId, userId)),
@@ -390,46 +467,83 @@ export async function POST(req: NextRequest) {
                         ]);
 
                         if (userQuota?.limitTokens != null) {
+                            const window = getQuotaWindow(new Date(), userQuota.refillIntervalHours);
                             const [used] = await db
                                 .select({ total: sql<number>`coalesce(sum(${tokenUsage.totalTokens}),0)` })
                                 .from(tokenUsage)
                                 .where(and(
                                     eq(tokenUsage.groupId, providerGroupId),
-                                    eq(tokenUsage.userId, userId)
+                                    eq(tokenUsage.userId, userId),
+                                    gte(tokenUsage.createdAt, window.start)
                                 ));
                             if ((used?.total || 0) >= userQuota.limitTokens) {
-                                send({ type: 'error', data: '群組使用額度已用完，請聯絡管理員。' });
+                                send({ type: 'error', data: `群組使用額度已用完，額度恢復日期為${formatQuotaResetTime(window.end)}。` });
                                 controller.close();
                                 return;
                             }
                         }
 
                         if (modelQuota?.limitTokens != null) {
+                            const window = getQuotaWindow(new Date(), modelQuota.refillIntervalHours);
                             const [usedModel] = await db
                                 .select({ total: sql<number>`coalesce(sum(${tokenUsage.totalTokens}),0)` })
                                 .from(tokenUsage)
                                 .where(and(
                                     eq(tokenUsage.groupId, providerGroupId),
                                     eq(tokenUsage.userId, userId),
-                                    eq(tokenUsage.model, realModelName || selectedModel)
+                                    eq(tokenUsage.model, realModelName || selectedModel),
+                                    gte(tokenUsage.createdAt, window.start)
                                 ));
                             if ((usedModel?.total || 0) >= modelQuota.limitTokens) {
-                                send({ type: 'error', data: '此模型額度已用完，請聯絡管理員。' });
+                                send({ type: 'error', data: `群組使用額度已用完，額度恢復日期為${formatQuotaResetTime(window.end)}。` });
                                 controller.close();
                                 return;
                             }
                         }
 
                         if (groupModelQuota?.limitTokens != null) {
+                            const window = getQuotaWindow(new Date(), groupModelQuota.refillIntervalHours);
                             const [usedGroupModel] = await db
                                 .select({ total: sql<number>`coalesce(sum(${tokenUsage.totalTokens}),0)` })
                                 .from(tokenUsage)
                                 .where(and(
                                     eq(tokenUsage.groupId, providerGroupId),
-                                    eq(tokenUsage.model, realModelName || selectedModel)
+                                    eq(tokenUsage.model, realModelName || selectedModel),
+                                    gte(tokenUsage.createdAt, window.start)
                                 ));
                             if ((usedGroupModel?.total || 0) >= groupModelQuota.limitTokens) {
-                                send({ type: 'error', data: '群組該模型總額度已用完，請聯絡管理員。' });
+                                send({ type: 'error', data: `群組使用額度已用完，額度恢復日期為${formatQuotaResetTime(window.end)}。` });
+                                controller.close();
+                                return;
+                            }
+                        }
+                    }
+
+                    if (providerScope === "global" && providerGlobalId) {
+                        const activeProviderPrefix = (providerConf as any)?.prefix || providerPrefix || "";
+                        const roleQuotas = await db.query.globalProviderRoleModelQuotas.findMany({
+                            where: and(
+                                eq(globalProviderRoleModelQuotas.providerId, providerGlobalId),
+                                eq(globalProviderRoleModelQuotas.role, currentUserRole),
+                                eq(globalProviderRoleModelQuotas.model, realModelName || selectedModel)
+                            ),
+                        });
+
+                        for (const quota of roleQuotas) {
+                            if (quota.limitTokens == null) continue;
+                            const window = getQuotaWindow(new Date(), quota.refillIntervalHours);
+                            const [used] = await db
+                                .select({ total: sql<number>`coalesce(sum(${tokenUsage.totalTokens}),0)` })
+                                .from(tokenUsage)
+                                .where(and(
+                                    eq(tokenUsage.userId, userId),
+                                    eq(tokenUsage.providerPrefix, activeProviderPrefix),
+                                    eq(tokenUsage.model, realModelName || selectedModel),
+                                    gte(tokenUsage.createdAt, window.start)
+                                ));
+
+                            if ((used?.total || 0) >= quota.limitTokens) {
+                                send({ type: 'error', data: `該模型可使用額度已用完，額度恢復日期為${formatQuotaResetTime(window.end)}。` });
                                 controller.close();
                                 return;
                             }
@@ -456,6 +570,19 @@ export async function POST(req: NextRequest) {
                     await db.update(chatSessions)
                         .set({ updatedAt: new Date() })
                         .where(eq(chatSessions.id, currentSessionId));
+
+                    // ─── 6b. Save parsed file content to chatFiles (if setting allows) ──
+                    if (!adminConf?.fileAttachmentSessionOnly && savedUserMsg?.id && parsedParts.some(p => p)) {
+                        const fileInserts = (attachments as any[] || []).map((att: any, idx: number) => ({
+                            messageId: savedUserMsg.id,
+                            name: att.name,
+                            mimeType: att.mimeType,
+                            parsedContent: parsedParts[idx] ?? null,
+                        })).filter((f: any) => f.parsedContent);
+                        if (fileInserts.length > 0) {
+                            try { await db.insert(chatFiles).values(fileInserts); } catch { }
+                        }
+                    }
 
                     // ─── 7. Stream Main Generation ──────────────────────────────────
                     const requestBody = {

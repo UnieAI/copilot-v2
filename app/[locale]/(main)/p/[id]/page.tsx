@@ -4,6 +4,8 @@ import { redirect } from "next/navigation"
 import { chatProjects, chatSessions, userProviders, userPreferences } from "@/lib/db/schema"
 import { eq, and } from "drizzle-orm"
 import { ProjectPageClient } from "@/components/project/project-page-client"
+import { getGroupModels } from "@/lib/get-group-models"
+import { getGlobalModels } from "@/lib/get-global-models"
 
 export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
     const session = await auth()
@@ -28,15 +30,20 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
     const providers = await db.query.userProviders.findMany({
         where: and(eq(userProviders.userId, userId), eq(userProviders.enable, 1)),
     })
-    const availableModels = providers.flatMap(p => {
-        const models = Array.isArray(p.modelList) ? (p.modelList as any[]) : []
-        return models.map((m: any) => ({
-            value: `${p.prefix}-${m.id || String(m)}`,
-            label: m.id || String(m),
-            providerName: p.displayName || p.prefix,
-            providerPrefix: p.prefix,
-        }))
-    })
+    const availableModels = [
+        ...providers.flatMap(p => {
+            const models = Array.isArray(p.modelList) ? (p.modelList as any[]) : []
+            return models.map((m: any) => ({
+                value: `${p.prefix}-${m.id || String(m)}`,
+                label: m.id || String(m),
+                providerName: p.displayName || p.prefix,
+                providerPrefix: p.prefix,
+                source: 'user' as const,
+            }))
+        }),
+        ...(await getGroupModels(userId)),
+        ...(await getGlobalModels()),
+    ]
 
     // User preference for model
     const pref = await db.query.userPreferences.findFirst({
