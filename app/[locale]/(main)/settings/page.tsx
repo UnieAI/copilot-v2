@@ -51,6 +51,7 @@ export default async function SettingsPage() {
                             initialProviders={userProviderList.map(p => ({
                                 ...p,
                                 modelList: Array.isArray(p.modelList) ? p.modelList as any[] : [],
+                                selectedModels: Array.isArray((p as any).selectedModels) ? (p as any).selectedModels as string[] : [],
                                 updatedAt: String(p.updatedAt),
                             }))}
                         />

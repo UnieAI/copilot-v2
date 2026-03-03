@@ -25,11 +25,13 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
     const currentModels = Array.isArray(provider.modelList) ? (provider.modelList as any[]) : [];
     const updatedModels = currentModels.filter((m: any) => (m.id || String(m)) !== modelId);
+    const currentSelected = Array.isArray((provider as any).selectedModels) ? ((provider as any).selectedModels as string[]) : [];
+    const updatedSelected = currentSelected.filter((id) => id !== modelId);
 
     const [updated] = await db.update(userProviders)
-        .set({ modelList: updatedModels as any, updatedAt: new Date() })
+        .set({ modelList: updatedModels as any, selectedModels: updatedSelected as any, updatedAt: new Date() })
         .where(and(eq(userProviders.id, id), eq(userProviders.userId, userId)))
         .returning();
 
-    return Response.json({ modelList: updatedModels, provider: updated });
+    return Response.json({ modelList: updatedModels, selectedModels: updatedSelected, provider: updated });
 }

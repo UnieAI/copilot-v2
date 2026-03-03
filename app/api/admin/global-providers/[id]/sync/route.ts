@@ -47,11 +47,8 @@ export async function POST(
     const models = Array.isArray(data?.data) ? data.data : [];
     const modelIds = models.map((m: any) => m.id || String(m));
 
-    const existingSelected = Array.isArray(provider.selectedModels)
-      ? (provider.selectedModels as string[])
-      : [];
-    const selectedStillExists = existingSelected.filter((modelId) => modelIds.includes(modelId));
-    const selectedModels = selectedStillExists.length > 0 ? selectedStillExists : modelIds;
+    // Match personal provider sync behavior: after sync default to selecting all models.
+    const selectedModels = modelIds;
 
     const [updated] = await db
       .update(globalProviders)

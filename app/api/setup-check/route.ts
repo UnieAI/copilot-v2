@@ -37,8 +37,8 @@ export async function GET(req: NextRequest) {
             where: eq(userProviders.userId, userId),
         }).then(providers => {
             return providers.some(p => {
-                const models = Array.isArray(p.modelList) ? (p.modelList as any[]) : []
-                return p.enable === 1 && models.length > 0
+                const selected = Array.isArray((p as any).selectedModels) ? ((p as any).selectedModels as string[]) : []
+                return p.enable === 1 && selected.length > 0
             })
         }),
 

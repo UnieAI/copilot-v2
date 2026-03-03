@@ -18,12 +18,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     if (!provider) return new Response("Not found", { status: 404 });
 
-    const cleanUrl = provider.apiUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
+    const body = await req.json().catch(() => ({}));
+    const inputApiUrl = typeof body?.apiUrl === "string" ? body.apiUrl.trim() : "";
+    const inputApiKey = typeof body?.apiKey === "string" ? body.apiKey.trim() : "";
+
+    const apiUrl = inputApiUrl || provider.apiUrl;
+    const apiKey = inputApiKey || provider.apiKey;
+    if (!apiUrl || !apiKey) {
+        return Response.json({ error: "apiUrl and apiKey are required" }, { status: 400 });
+    }
+
+    const cleanUrl = apiUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
     const targetUrl = `${cleanUrl}/v1/models`;
 
     try {
         const res = await fetch(targetUrl, {
-            headers: { "Authorization": `Bearer ${provider.apiKey}` },
+            headers: { "Authorization": `Bearer ${apiKey}` },
         });
 
         if (!res.ok) {
@@ -32,13 +42,25 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
         const data = await res.json();
         const models = Array.isArray(data?.data) ? data.data : [];
+        const modelIds = models.map((m: any) => m.id || String(m));
+        const existingSelected = Array.isArray((provider as any).selectedModels)
+            ? ((provider as any).selectedModels as string[])
+            : [];
+        const selectedStillExists = existingSelected.filter((modelId) => modelIds.includes(modelId));
+        const selectedModels = selectedStillExists.length > 0 ? selectedStillExists : modelIds;
 
         const [updated] = await db.update(userProviders)
-            .set({ modelList: models as any, updatedAt: new Date() })
+            .set({
+                apiUrl,
+                apiKey,
+                modelList: models as any,
+                selectedModels: selectedModels as any,
+                updatedAt: new Date(),
+            })
             .where(and(eq(userProviders.id, id), eq(userProviders.userId, userId)))
             .returning();
 
-        return Response.json({ modelList: models, provider: updated });
+        return Response.json({ modelList: models, selectedModels, provider: updated });
     } catch (e: any) {
         return Response.json({ error: `Connection failed: ${e.message}` }, { status: 502 });
     }

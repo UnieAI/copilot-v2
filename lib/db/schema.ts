@@ -118,6 +118,7 @@ export const userProviders = pgTable('user_providers', {
     apiUrl: text('api_url').notNull(),
     apiKey: text('api_key').notNull(),
     modelList: json('model_list').notNull().default('[]'),      // result from /v1/models (filtered)
+    selectedModels: json('selected_models').notNull().default('[]'), // user-selected subset (IDs only)
 
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

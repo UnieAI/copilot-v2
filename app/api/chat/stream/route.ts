@@ -198,6 +198,16 @@ export async function POST(req: NextRequest) {
                         return;
                     }
 
+                    const requestedModel = realModelName || selectedModel;
+                    const selectedModels = Array.isArray((providerConf as any)?.selectedModels)
+                        ? ((providerConf as any).selectedModels as string[])
+                        : null;
+                    if (selectedModels && (selectedModels.length === 0 || !selectedModels.includes(requestedModel))) {
+                        send({ type: 'error', data: 'Selected model is not enabled for this provider.' });
+                        controller.close();
+                        return;
+                    }
+
                     const cleanApiUrl = providerConf.apiUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
                     const visionConfig = (adminConf?.visionModelUrl && adminConf?.visionModelKey && adminConf?.visionModelName)
                         ? {

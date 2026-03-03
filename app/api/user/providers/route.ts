@@ -61,6 +61,7 @@ export async function POST(req: NextRequest) {
         apiKey,
         enable: enable === false ? 0 : 1,
         modelList: [] as any,
+        selectedModels: [] as any,
     }).returning();
 
     return Response.json(newProvider, { status: 201 });
