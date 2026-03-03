@@ -9,7 +9,7 @@ function requireAdmin(role?: string | null) {
 }
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await auth();
@@ -22,12 +22,22 @@ export async function POST(
   });
   if (!provider) return new Response("Not found", { status: 404 });
 
-  const cleanUrl = provider.apiUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
+  const body = await req.json().catch(() => ({}));
+  const inputApiUrl = typeof body?.apiUrl === "string" ? body.apiUrl.trim() : "";
+  const inputApiKey = typeof body?.apiKey === "string" ? body.apiKey.trim() : "";
+
+  const apiUrl = inputApiUrl || provider.apiUrl;
+  const apiKey = inputApiKey || provider.apiKey;
+  if (!apiUrl || !apiKey) {
+    return Response.json({ error: "apiUrl and apiKey are required" }, { status: 400 });
+  }
+
+  const cleanUrl = apiUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
   const targetUrl = `${cleanUrl}/v1/models`;
 
   try {
     const res = await fetch(targetUrl, {
-      headers: { Authorization: `Bearer ${provider.apiKey}` },
+      headers: { Authorization: `Bearer ${apiKey}` },
     });
     if (!res.ok) {
       return Response.json({ error: `API returned ${res.status}: ${res.statusText}` }, { status: 502 });
@@ -35,13 +45,13 @@ export async function POST(
 
     const data = await res.json();
     const models = Array.isArray(data?.data) ? data.data : [];
+    const modelIds = models.map((m: any) => m.id || String(m));
 
     const existingSelected = Array.isArray(provider.selectedModels)
       ? (provider.selectedModels as string[])
       : [];
-    const selectedModels = existingSelected.length > 0
-      ? existingSelected
-      : models.map((m: any) => m.id || String(m));
+    const selectedStillExists = existingSelected.filter((modelId) => modelIds.includes(modelId));
+    const selectedModels = selectedStillExists.length > 0 ? selectedStillExists : modelIds;
 
     const [updated] = await db
       .update(globalProviders)

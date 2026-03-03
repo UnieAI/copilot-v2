@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ChevronDown, ChevronUp, Eye, Plus, RefreshCw, ToggleLeft, ToggleRight, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Eye, EyeOff, Plus, RefreshCw, ToggleLeft, ToggleRight, Trash2, X } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { UnieAIIcon } from "@/components/sidebar/unieai-logo";
 
@@ -82,12 +82,15 @@ export function GlobalProvidersPanel() {
   const [quotaItems, setQuotaItems] = useState<QuotaItem[]>([]);
   const [loadingQuotaProviderId, setLoadingQuotaProviderId] = useState<string | null>(null);
   const [savingProviderId, setSavingProviderId] = useState<string | null>(null);
+  const [syncingProviderId, setSyncingProviderId] = useState<string | null>(null);
   const [quotaSearch, setQuotaSearch] = useState("");
   const [quotaRoleFilter, setQuotaRoleFilter] = useState<"all" | "user" | "admin" | "super">("all");
   const [usageDialogOpen, setUsageDialogOpen] = useState(false);
   const [usageLoading, setUsageLoading] = useState(false);
   const [usageItems, setUsageItems] = useState<QuotaUsageItem[]>([]);
   const [usageDialogTitle, setUsageDialogTitle] = useState("");
+  const [showCreateApiKey, setShowCreateApiKey] = useState(false);
+  const [showEditApiKeys, setShowEditApiKeys] = useState<Record<string, boolean>>({});
 
   const existingPrefixes = providers.map((p) => p.prefix.toUpperCase());
 
@@ -216,15 +219,56 @@ export function GlobalProvidersPanel() {
     }
   };
 
-  const syncProviderModels = async (id: string) => {
-    const res = await fetch(`/api/admin/global-providers/${id}/sync`, { method: "POST" });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      toast.error(data?.error || "Sync models failed");
+  const syncProviderModels = async (provider: GlobalProvider) => {
+    const apiUrl = (provider.apiUrl || "").trim();
+    const apiKey = (provider.apiKey || "").trim();
+    if (!apiUrl || !apiKey) {
+      toast.error("Please fill API URL / API Key before sync");
       return;
     }
-    toast.success(`Synced ${Array.isArray(data?.modelList) ? data.modelList.length : 0} models`);
-    await fetchProviders();
+
+    setSyncingProviderId(provider.id);
+    try {
+      const res = await fetch(`/api/admin/global-providers/${provider.id}/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiUrl, apiKey }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data?.error || "Sync models failed");
+        return;
+      }
+
+      const nextModels = Array.isArray(data?.modelList) ? data.modelList : [];
+      const nextModelIds = nextModels.map((m: any) => m.id || String(m));
+      const nextSelectedModels = nextModelIds;
+
+      setProviders((prev) =>
+        prev.map((item) =>
+          item.id === provider.id
+            ? { ...item, modelList: nextModels, selectedModels: nextSelectedModels }
+            : item
+        )
+      );
+      setQuotaItems((prev) => {
+        const currentQuotaItems = prev.filter((q) => q.providerId === provider.id);
+        const nextQuotaItems = buildQuotaItemsForModels(provider.id, nextSelectedModels, currentQuotaItems);
+        return [...prev.filter((q) => q.providerId !== provider.id), ...nextQuotaItems];
+      });
+
+      if (quotaProviderId === provider.id) {
+        await fetchQuotas({
+          ...provider,
+          modelList: nextModels,
+          selectedModels: nextSelectedModels,
+        });
+      }
+
+      toast.success(`Synced ${nextModels.length} models`);
+    } finally {
+      setSyncingProviderId((prev) => (prev === provider.id ? null : prev));
+    }
   };
 
   const buildQuotaItemsForModels = (
@@ -410,327 +454,341 @@ export function GlobalProvidersPanel() {
               return a.id.localeCompare(b.id);
             })
             .map((p) => {
-            const models = Array.isArray(p.modelList) ? p.modelList : [];
-            const selected = Array.isArray(p.selectedModels) ? p.selectedModels : [];
-            const isExpanded = expandedId === p.id;
-            const providerQuotaItems = quotaItems.filter((q) => q.providerId === p.id);
-            const quotaSearchTerm = quotaSearch.trim().toLowerCase();
-            const filteredQuotaItems = providerQuotaItems.filter((q) => {
-              const roleMatch = quotaRoleFilter === "all" || q.role === quotaRoleFilter;
-              const textMatch =
-                !quotaSearchTerm ||
-                q.model.toLowerCase().includes(quotaSearchTerm) ||
-                q.role.toLowerCase().includes(quotaSearchTerm);
-              return roleMatch && textMatch;
-            });
-            return (
-              <div
-                key={p.id}
-                className={`rounded-2xl border transition-colors ${p.enable ? "border-border bg-background" : "border-border/50 bg-muted/30"}`}
-              >
-                <div className="flex items-center gap-3 px-4 py-3">
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const nextEnable = p.enable !== 1;
-                      const ok = await updateProvider(p.id, { enable: nextEnable });
-                      if (ok) {
-                        setProviders((prev) => prev.map((item) => (item.id === p.id ? { ...item, enable: nextEnable ? 1 : 0 } : item)));
-                      }
-                    }}
-                    className={`shrink-0 transition-colors ${p.enable ? "text-primary" : "text-muted-foreground/50"}`}
-                    title={p.enable ? "Disable provider" : "Enable provider"}
-                  >
-                    {p.enable ? <ToggleRight className="h-5 w-5" /> : <ToggleLeft className="h-5 w-5" />}
-                  </button>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm truncate">{p.displayName || "Untitled Provider"}</span>
-                      <span className="text-[10px] font-mono bg-primary/10 text-primary px-1.5 py-0.5 rounded font-bold tracking-wider shrink-0">
-                        {p.prefix}
-                      </span>
-                      {!p.enable && (
-                        <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">Disabled</span>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {p.apiUrl || "No API URL"} | {selected.length}/{models.length} selected models
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-1 shrink-0">
+              const models = Array.isArray(p.modelList) ? p.modelList : [];
+              const selected = Array.isArray(p.selectedModels) ? p.selectedModels : [];
+              const isExpanded = expandedId === p.id;
+              const providerQuotaItems = quotaItems.filter((q) => q.providerId === p.id);
+              const quotaSearchTerm = quotaSearch.trim().toLowerCase();
+              const filteredQuotaItems = providerQuotaItems.filter((q) => {
+                const roleMatch = quotaRoleFilter === "all" || q.role === quotaRoleFilter;
+                const textMatch =
+                  !quotaSearchTerm ||
+                  q.model.toLowerCase().includes(quotaSearchTerm) ||
+                  q.role.toLowerCase().includes(quotaSearchTerm);
+                return roleMatch && textMatch;
+              });
+              return (
+                <div
+                  key={p.id}
+                  className={`rounded-2xl border transition-colors ${p.enable ? "border-border bg-background" : "border-border/50 bg-muted/30"}`}
+                >
+                  <div className="flex items-center gap-3 px-4 py-3">
                     <button
-                      onClick={() => syncProviderModels(p.id)}
-                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-muted transition-colors"
-                    >
-                      <RefreshCw className="h-3 w-3" />
-                      Sync
-                    </button>
-                    <button
+                      type="button"
                       onClick={async () => {
-                        if (isExpanded) {
-                          setExpandedId(null);
-                          return;
+                        const nextEnable = p.enable !== 1;
+                        const ok = await updateProvider(p.id, { enable: nextEnable });
+                        if (ok) {
+                          setProviders((prev) => prev.map((item) => (item.id === p.id ? { ...item, enable: nextEnable ? 1 : 0 } : item)));
                         }
-                        setExpandedId(p.id);
-                        await fetchQuotas(p);
                       }}
-                      className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
+                      className={`shrink-0 transition-colors ${p.enable ? "text-primary" : "text-muted-foreground/50"}`}
+                      title={p.enable ? "Disable provider" : "Enable provider"}
                     >
-                      {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                      {p.enable ? <ToggleRight className="h-5 w-5" /> : <ToggleLeft className="h-5 w-5" />}
                     </button>
-                    <button
-                      onClick={() => deleteProvider(p.id)}
-                      className="p-1.5 rounded-lg hover:bg-destructive/10 hover:text-destructive transition-colors text-muted-foreground"
-                      title="Delete provider"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-sm truncate">{p.displayName || "Untitled Provider"}</span>
+                        <span className="text-[10px] font-mono bg-primary/10 text-primary px-1.5 py-0.5 rounded font-bold tracking-wider shrink-0">
+                          {p.prefix}
+                        </span>
+                        {!p.enable && (
+                          <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">Disabled</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {p.apiUrl || "No API URL"} | {selected.length}/{models.length} selected models
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => syncProviderModels(p)}
+                        disabled={syncingProviderId === p.id}
+                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-muted transition-colors"
+                      >
+                        <RefreshCw className={`h-3 w-3 ${syncingProviderId === p.id ? "animate-spin" : ""}`} />
+                        同步模型
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (isExpanded) {
+                            setExpandedId(null);
+                            return;
+                          }
+                          setExpandedId(p.id);
+                          await fetchQuotas(p);
+                        }}
+                        className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
+                      >
+                        {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                      </button>
+                      <button
+                        onClick={() => deleteProvider(p.id)}
+                        className="p-1.5 rounded-lg hover:bg-destructive/10 hover:text-destructive transition-colors text-muted-foreground"
+                        title="Delete provider"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
-                </div>
 
-                {isExpanded && (
-                  <div className="px-4 pb-4 space-y-4 border-t border-border/40 pt-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium">顯示名稱</label>
-                        <input
-                          value={p.displayName}
-                          onChange={(e) => setProviders((prev) => prev.map((item) => (item.id === p.id ? { ...item, displayName: e.target.value } : item)))}
-                          className="w-full h-9 rounded-xl border border-input/60 bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium">Prefix（4碼英數字，唯一識別）</label>
-                        <input
-                          value={p.prefix}
-                          disabled
-                          className="w-full h-9 rounded-xl border border-input/60 bg-background px-3 text-sm font-mono uppercase opacity-70"
-                        />
-                      </div>
-                      <div className="space-y-1 md:col-span-2">
-                        <label className="text-xs font-medium">API URL</label>
-                        <div className="flex items-center gap-2">
+                  {isExpanded && (
+                    <div className="px-4 pb-4 space-y-4 border-t border-border/40 pt-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium">顯示名稱</label>
                           <input
-                            value={p.apiUrl}
-                            onChange={(e) => setProviders((prev) => prev.map((item) => (item.id === p.id ? { ...item, apiUrl: e.target.value } : item)))}
-                            className="flex-1 h-9 rounded-xl border border-input/60 bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
+                            value={p.displayName}
+                            onChange={(e) => setProviders((prev) => prev.map((item) => (item.id === p.id ? { ...item, displayName: e.target.value } : item)))}
+                            className="w-full h-9 rounded-xl border border-input/60 bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
                           />
-                          <button
-                            type="button"
-                            onClick={() => applyUnieAIToProviderEdit(p.id)}
-                            className="h-9 w-9 shrink-0 rounded-full border border-input/60 bg-background hover:bg-muted transition-colors inline-flex items-center justify-center"
-                            title="Use UnieAI"
-                          >
-                            <UnieAIIcon className="h-4 w-4" />
-                          </button>
                         </div>
-                      </div>
-                      <div className="space-y-1 md:col-span-2">
-                        <label className="text-xs font-medium">API Key</label>
-                        <input
-                          value={p.apiKey}
-                          onChange={(e) => setProviders((prev) => prev.map((item) => (item.id === p.id ? { ...item, apiKey: e.target.value } : item)))}
-                          className="w-full h-9 rounded-xl border border-input/60 bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
-                          type="password"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-2 pt-2 border-t border-border/40">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs text-muted-foreground">選擇模型（已選 {selected.length}/{models.length} 個）</p>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const allModelIds = models.map((m: any) => m.id || String(m));
-                              updateProviderSelectedModels(p.id, Array.from(new Set(allModelIds)));
-                            }}
-                            className="h-7 px-2.5 rounded-lg border border-border bg-background hover:bg-muted text-xs"
-                            disabled={models.length === 0}
-                          >
-                            全選
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => updateProviderSelectedModels(p.id, [])}
-                            className="h-7 px-2.5 rounded-lg border border-border bg-background hover:bg-muted text-xs"
-                            disabled={selected.length === 0}
-                          >
-                            清除選擇
-                          </button>
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium">Prefix（4碼英數字，唯一識別）</label>
+                          <input
+                            value={p.prefix}
+                            disabled
+                            className="w-full h-9 rounded-xl border border-input/60 bg-background px-3 text-sm font-mono uppercase opacity-70"
+                          />
                         </div>
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto border border-border/50 rounded-xl p-2">
-                        {models.map((m: any) => {
-                          const modelId = m.id || String(m);
-                          return (
-                            <label key={modelId} className="text-xs flex items-center gap-2 rounded-md px-2 py-1 hover:bg-muted/60">
-                              <input
-                                type="checkbox"
-                                checked={selected.includes(modelId)}
-                                onChange={(e) => {
-                                  const next = e.target.checked
-                                    ? Array.from(new Set([...selected, modelId]))
-                                    : selected.filter((id: string) => id !== modelId);
-                                  updateProviderSelectedModels(p.id, next);
-                                }}
-                              />
-                              <span className="font-mono truncate">{modelId}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div className="border-t border-border/40 pt-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-medium">用量設置</p>
-                        {loadingQuotaProviderId === p.id && <span className="text-xs text-muted-foreground">載入用量中...</span>}
-                      </div>
-
-                      {quotaProviderId === p.id && providerQuotaItems.length > 0 && (
-                        <div className="space-y-2">
-                          <div className="flex flex-wrap items-center gap-2">
+                        <div className="space-y-1 md:col-span-2">
+                          <label className="text-xs font-medium">API URL</label>
+                          <div className="flex items-center gap-2">
                             <input
-                              type="text"
-                              value={quotaSearch}
-                              onChange={(e) => setQuotaSearch(e.target.value)}
-                              placeholder="Search model or role"
-                              className="h-8 min-w-[180px] flex-1 rounded-lg border border-input/60 bg-background px-2.5 text-xs"
+                              value={p.apiUrl}
+                              onChange={(e) => setProviders((prev) => prev.map((item) => (item.id === p.id ? { ...item, apiUrl: e.target.value } : item)))}
+                              className="flex-1 h-9 rounded-xl border border-input/60 bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
                             />
-                            <select
-                              value={quotaRoleFilter}
-                              onChange={(e) => setQuotaRoleFilter(e.target.value as "all" | "user" | "admin" | "super")}
-                              className="h-8 rounded-lg border border-input/60 bg-background px-2.5 text-xs"
+                            <button
+                              type="button"
+                              onClick={() => applyUnieAIToProviderEdit(p.id)}
+                              className="h-9 w-9 shrink-0 rounded-full border border-input/60 bg-background hover:bg-muted transition-colors inline-flex items-center justify-center"
+                              title="Use UnieAI"
                             >
-                              <option value="all">All Roles</option>
-                              <option value="user">User</option>
-                              <option value="admin">Admin</option>
-                              <option value="super">Super</option>
-                            </select>
+                              <UnieAIIcon className="h-4 w-4" />
+                            </button>
                           </div>
                         </div>
-                      )}
-
-                      {quotaProviderId === p.id && filteredQuotaItems.length > 0 && (
-                        <div className="space-y-2 max-h-96 overflow-y-auto">
-                          {filteredQuotaItems.map((q) => (
-                            <div
-                              key={`${q.role}-${q.model}`}
-                              className="rounded-xl border border-border/50 p-3 flex flex-col gap-2.5 text-xs bg-background"
+                        <div className="space-y-1 md:col-span-2">
+                          <label className="text-xs font-medium">API Key</label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              value={p.apiKey}
+                              onChange={(e) => setProviders((prev) => prev.map((item) => (item.id === p.id ? { ...item, apiKey: e.target.value } : item)))}
+                              className="flex-1 h-9 rounded-xl border border-input/60 bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
+                              type={showEditApiKeys[p.id] ? "text" : "password"}
+                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setShowEditApiKeys((prev) => ({ ...prev, [p.id]: !prev[p.id] }))
+                              }
+                              className="h-9 w-9 shrink-0 rounded-full border border-input/60 bg-background hover:bg-muted transition-colors inline-flex items-center justify-center"
+                              title={showEditApiKeys[p.id] ? "Hide API Key" : "Show API Key"}
+                              aria-label={showEditApiKeys[p.id] ? "Hide API Key" : "Show API Key"}
                             >
-                              {/* 第一行：角色 + 模型 */}
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0 space-y-2">
-                                  <div className="flex items-center gap-2">
-                                <span
-                                  className={`
+                              {showEditApiKeys[p.id] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 pt-2 border-t border-border/40">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs text-muted-foreground">選擇模型（已選 {selected.length}/{models.length} 個）</p>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const allModelIds = models.map((m: any) => m.id || String(m));
+                                updateProviderSelectedModels(p.id, Array.from(new Set(allModelIds)));
+                              }}
+                              className="h-7 px-2.5 rounded-lg border border-border bg-background hover:bg-muted text-xs"
+                              disabled={models.length === 0}
+                            >
+                              全選
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => updateProviderSelectedModels(p.id, [])}
+                              className="h-7 px-2.5 rounded-lg border border-border bg-background hover:bg-muted text-xs"
+                              disabled={selected.length === 0}
+                            >
+                              清除選擇
+                            </button>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto border border-border/50 rounded-xl p-2">
+                          {models.map((m: any) => {
+                            const modelId = m.id || String(m);
+                            return (
+                              <label key={modelId} className="text-xs flex items-center gap-2 rounded-md px-2 py-1 hover:bg-muted/60">
+                                <input
+                                  type="checkbox"
+                                  checked={selected.includes(modelId)}
+                                  onChange={(e) => {
+                                    const next = e.target.checked
+                                      ? Array.from(new Set([...selected, modelId]))
+                                      : selected.filter((id: string) => id !== modelId);
+                                    updateProviderSelectedModels(p.id, next);
+                                  }}
+                                />
+                                <span className="font-mono truncate">{modelId}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="border-t border-border/40 pt-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-medium">用量設置</p>
+                          {loadingQuotaProviderId === p.id && <span className="text-xs text-muted-foreground">載入用量中...</span>}
+                        </div>
+
+                        {quotaProviderId === p.id && providerQuotaItems.length > 0 && (
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <input
+                                type="text"
+                                value={quotaSearch}
+                                onChange={(e) => setQuotaSearch(e.target.value)}
+                                placeholder="Search model or role"
+                                className="h-8 min-w-[180px] flex-1 rounded-lg border border-input/60 bg-background px-2.5 text-xs"
+                              />
+                              <select
+                                value={quotaRoleFilter}
+                                onChange={(e) => setQuotaRoleFilter(e.target.value as "all" | "user" | "admin" | "super")}
+                                className="h-8 rounded-lg border border-input/60 bg-background px-2.5 text-xs"
+                              >
+                                <option value="all">All Roles</option>
+                                <option value="user">User</option>
+                                <option value="admin">Admin</option>
+                                <option value="super">Super</option>
+                              </select>
+                            </div>
+                          </div>
+                        )}
+
+                        {quotaProviderId === p.id && filteredQuotaItems.length > 0 && (
+                          <div className="space-y-2 max-h-96 overflow-y-auto">
+                            {filteredQuotaItems.map((q) => (
+                              <div
+                                key={`${q.role}-${q.model}`}
+                                className="rounded-xl border border-border/50 p-3 flex flex-col gap-2.5 text-xs bg-background"
+                              >
+                                {/* 第一行：角色 + 模型 */}
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0 space-y-2">
+                                    <div className="flex items-center gap-2">
+                                      <span
+                                        className={`
         inline-flex items-center rounded-full 
         px-2.5 py-0.5 text-xs font-medium
         ${ROLE_COLORS[q.role] || 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'}
       `}
-                                >
-                                  {ROLE_LABELS[q.role] || q.role}
-                                </span>
-                                    <span className="font-mono px-2 py-1 rounded bg-muted truncate">{q.model}</span>
+                                      >
+                                        {ROLE_LABELS[q.role] || q.role}
+                                      </span>
+                                      <span className="font-mono px-2 py-1 rounded bg-muted truncate">{q.model}</span>
+                                    </div>
+
+                                    {/* 第二行：控制項們 */}
+                                    <div className="flex flex-wrap items-center gap-3">
+                                      <label className="flex items-center gap-1.5 whitespace-nowrap">
+                                        <input
+                                          type="checkbox"
+                                          checked={q.limitTokens === null}
+                                          onChange={(e) =>
+                                            setQuotaItems((prev) =>
+                                              prev.map((item) =>
+                                                item.providerId === q.providerId && item.role === q.role && item.model === q.model
+                                                  ? { ...item, limitTokens: e.target.checked ? null : 0 }
+                                                  : item
+                                              )
+                                            )
+                                          }
+                                        />
+                                        無上限
+                                      </label>
+
+                                      <input
+                                        type="number"
+                                        min={0}
+                                        value={q.limitTokens === null ? "" : q.limitTokens}
+                                        disabled={q.limitTokens === null}
+                                        onChange={(e) =>
+                                          setQuotaItems((prev) =>
+                                            prev.map((item) =>
+                                              item.providerId === q.providerId && item.role === q.role && item.model === q.model
+                                                ? { ...item, limitTokens: e.target.value === "" ? null : Number(e.target.value) }
+                                                : item
+                                            )
+                                          )
+                                        }
+                                        className="w-32 h-8 rounded-lg border border-input/60 bg-background px-2 py-1"
+                                        placeholder="Token Limit"
+                                      />
+
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-muted-foreground">刷新(小時)</span>
+                                        <input
+                                          type="number"
+                                          min={1}
+                                          value={q.refillIntervalHours}
+                                          onChange={(e) =>
+                                            setQuotaItems((prev) =>
+                                              prev.map((item) =>
+                                                item.providerId === q.providerId && item.role === q.role && item.model === q.model
+                                                  ? { ...item, refillIntervalHours: Math.max(1, Number(e.target.value || 12)) }
+                                                  : item
+                                              )
+                                            )
+                                          }
+                                          className="w-20 h-8 rounded-lg border border-input/60 bg-background px-2 py-1"
+                                        />
+                                      </div>
+                                    </div>
                                   </div>
-
-                              {/* 第二行：控制項們 */}
-                                  <div className="flex flex-wrap items-center gap-3">
-                                <label className="flex items-center gap-1.5 whitespace-nowrap">
-                                  <input
-                                    type="checkbox"
-                                    checked={q.limitTokens === null}
-                                    onChange={(e) =>
-                                      setQuotaItems((prev) =>
-                                        prev.map((item) =>
-                                          item.providerId === q.providerId && item.role === q.role && item.model === q.model
-                                            ? { ...item, limitTokens: e.target.checked ? null : 0 }
-                                            : item
-                                        )
-                                      )
-                                    }
-                                  />
-                                  無上限
-                                </label>
-
-                                <input
-                                  type="number"
-                                  min={0}
-                                  value={q.limitTokens === null ? "" : q.limitTokens}
-                                  disabled={q.limitTokens === null}
-                                  onChange={(e) =>
-                                    setQuotaItems((prev) =>
-                                      prev.map((item) =>
-                                        item.providerId === q.providerId && item.role === q.role && item.model === q.model
-                                          ? { ...item, limitTokens: e.target.value === "" ? null : Number(e.target.value) }
-                                          : item
-                                      )
-                                    )
-                                  }
-                                  className="w-32 h-8 rounded-lg border border-input/60 bg-background px-2 py-1"
-                                  placeholder="Token Limit"
-                                />
-
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-muted-foreground">刷新(小時)</span>
-                                  <input
-                                    type="number"
-                                    min={1}
-                                    value={q.refillIntervalHours}
-                                  onChange={(e) =>
-                                    setQuotaItems((prev) =>
-                                      prev.map((item) =>
-                                        item.providerId === q.providerId && item.role === q.role && item.model === q.model
-                                          ? { ...item, refillIntervalHours: Math.max(1, Number(e.target.value || 12)) }
-                                          : item
-                                      )
-                                    )
-                                  }
-                                    className="w-20 h-8 rounded-lg border border-input/60 bg-background px-2 py-1"
-                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => openQuotaUsageDialog(q)}
+                                    className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-border bg-background hover:bg-muted transition-colors shrink-0"
+                                    title="View usage list"
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                  </button>
                                 </div>
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => openQuotaUsageDialog(q)}
-                                  className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-border bg-background hover:bg-muted transition-colors shrink-0"
-                                  title="View usage list"
-                                >
-                                  <Eye className="h-4 w-4" />
-                                </button>
+
                               </div>
+                            ))}
+                          </div>
+                        )}
+                        {quotaProviderId === p.id && providerQuotaItems.length > 0 && filteredQuotaItems.length === 0 && (
+                          <p className="text-xs text-muted-foreground">No quota matched your search/filter.</p>
+                        )}
+                        {quotaProviderId === p.id && !loadingQuotaProviderId && quotaItems.length === 0 && (
+                          <p className="text-xs text-muted-foreground">No quota items. Select models to configure quotas.</p>
+                        )}
+                      </div>
 
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {quotaProviderId === p.id && providerQuotaItems.length > 0 && filteredQuotaItems.length === 0 && (
-                        <p className="text-xs text-muted-foreground">No quota matched your search/filter.</p>
-                      )}
-                      {quotaProviderId === p.id && !loadingQuotaProviderId && quotaItems.length === 0 && (
-                        <p className="text-xs text-muted-foreground">No quota items. Select models to configure quotas.</p>
-                      )}
+                      <div className="flex justify-end border-t border-border/40 pt-3">
+                        <button
+                          onClick={() => saveProviderAll(p)}
+                          disabled={savingProviderId === p.id || loadingQuotaProviderId === p.id}
+                          className="h-9 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-all shadow-sm active:scale-95 disabled:opacity-50"
+                        >
+                          {savingProviderId === p.id ? "Saving..." : "Save"}
+                        </button>
+                      </div>
                     </div>
-
-                    <div className="flex justify-end border-t border-border/40 pt-3">
-                      <button
-                        onClick={() => saveProviderAll(p)}
-                        disabled={savingProviderId === p.id || loadingQuotaProviderId === p.id}
-                        className="h-9 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-all shadow-sm active:scale-95 disabled:opacity-50"
-                      >
-                        {savingProviderId === p.id ? "Saving..." : "Save"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                  )}
+                </div>
+              );
+            })}
         </div>
       )}
 
@@ -843,13 +901,24 @@ export function GlobalProvidersPanel() {
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">API Key</label>
-                <input
-                  placeholder="sk-..."
-                  value={createForm.apiKey}
-                  onChange={(e) => setCreateForm((s) => ({ ...s, apiKey: e.target.value }))}
-                  className="w-full h-10 rounded-xl border border-input/60 bg-background px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
-                  type="password"
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    placeholder="sk-..."
+                    value={createForm.apiKey}
+                    onChange={(e) => setCreateForm((s) => ({ ...s, apiKey: e.target.value }))}
+                    className="flex-1 h-10 rounded-xl border border-input/60 bg-background px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
+                    type={showCreateApiKey ? "text" : "password"}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateApiKey((prev) => !prev)}
+                    className="h-10 w-10 shrink-0 rounded-full border border-input/60 bg-background hover:bg-muted transition-colors inline-flex items-center justify-center"
+                    title={showCreateApiKey ? "Hide API Key" : "Show API Key"}
+                    aria-label={showCreateApiKey ? "Hide API Key" : "Show API Key"}
+                  >
+                    {showCreateApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
             </div>
 

@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { adminConfigActions } from "./actions";
+import { adminConfigActions } from "../../app/[locale]/(main)/admin/settings/actions";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
-import { Sparkles, Globe, Eye, Zap, Save, RefreshCw, Paperclip } from "lucide-react";
+import { Sparkles, Globe, Eye, Zap, Save, RefreshCw, Paperclip, EyeOff } from "lucide-react";
 import { UnieAIIcon } from "@/components/sidebar/unieai-logo";
 import { Switch } from "@/components/ui/switch";
 
@@ -33,6 +33,10 @@ export function AdminSettingsForm({ settings }: { settings: AdminSettings | unde
     const [taskModels, setTaskModels] = useState<string[]>([]);
     const [visionModels, setVisionModels] = useState<string[]>([]);
     const [fileAttachmentSessionOnly, setFileAttachmentSessionOnly] = useState<boolean>(settings?.fileAttachmentSessionOnly ?? false);
+
+    const [showWorkKey, setShowWorkKey] = useState(false);
+    const [showTaskKey, setShowTaskKey] = useState(false);
+    const [showVisionKey, setShowVisionKey] = useState(false);
 
     const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
 
@@ -146,9 +150,45 @@ export function AdminSettingsForm({ settings }: { settings: AdminSettings | unde
 
             {/* 模型區塊範本組件 */}
             {[
-                { id: 'work', title: 'Work Model', icon: <Sparkles />, desc: '負責標題生成與內容摘要', url: 'workModelUrl', key: 'workModelKey', name: 'workModelName', models: workModels, setter: setWorkModels },
-                { id: 'task', title: 'Task Model', icon: <Zap />, desc: '負責 MCP 工具決策與複雜任務', url: 'taskModelUrl', key: 'taskModelKey', name: 'taskModelName', models: taskModels, setter: setTaskModels },
-                { id: 'vision', title: 'Vision Model', icon: <Eye />, desc: '負責圖片理解與視覺分析', url: 'visionModelUrl', key: 'visionModelKey', name: 'visionModelName', models: visionModels, setter: setVisionModels }
+                {
+                    id: 'work',
+                    title: 'Work Model',
+                    icon: <Sparkles />,
+                    desc: '負責標題生成與內容摘要',
+                    url: 'workModelUrl',
+                    key: 'workModelKey',
+                    name: 'workModelName',
+                    models: workModels,
+                    setter: setWorkModels,
+                    showKey: showWorkKey,
+                    setShowKey: setShowWorkKey
+                },
+                {
+                    id: 'task',
+                    title: 'Task Model',
+                    icon: <Zap />,
+                    desc: '負責 MCP 工具決策與複雜任務',
+                    url: 'taskModelUrl',
+                    key: 'taskModelKey',
+                    name: 'taskModelName',
+                    models: taskModels,
+                    setter: setTaskModels,
+                    showKey: showTaskKey,
+                    setShowKey: setShowTaskKey
+                },
+                {
+                    id: 'vision',
+                    title: 'Vision Model',
+                    icon: <Eye />,
+                    desc: '負責圖片理解與視覺分析',
+                    url: 'visionModelUrl',
+                    key: 'visionModelKey',
+                    name: 'visionModelName',
+                    models: visionModels,
+                    setter: setVisionModels,
+                    showKey: showVisionKey,
+                    setShowKey: setShowVisionKey
+                }
             ].map((m) => (
                 <section key={m.id} className={sectionClasses}>
                     <div className="flex items-center justify-between">
@@ -178,7 +218,28 @@ export function AdminSettingsForm({ settings }: { settings: AdminSettings | unde
                         </div>
                         <div>
                             <label className={labelClasses}>API Key</label>
-                            <input id={`${m.id}_key`} name={m.key} type="password" placeholder="sk-..." defaultValue={(settings as any)?.[m.key] || ""} className={inputClasses} />
+                            <div className="relative flex items-center gap-2">
+                                <input
+                                    id={`${m.id}_key`}
+                                    name={m.key}
+                                    type={m.showKey ? "text" : "password"}
+                                    placeholder="sk-..."
+                                    defaultValue={(settings as any)?.[m.key] || ""}
+                                    className={`${inputClasses} pr-12`}  // 右邊留空間給眼睛按鈕
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => m.setShowKey(prev => !prev)}
+                                    className="absolute right-3 h-9 w-9 rounded-full hover:bg-muted/80 transition-colors flex items-center justify-center text-muted-foreground"
+                                    title={m.showKey ? "隱藏 API Key" : "顯示 API Key"}
+                                >
+                                    {m.showKey ? (
+                                        <EyeOff className="h-4 w-4" />
+                                    ) : (
+                                        <Eye className="h-4 w-4" />
+                                    )}
+                                </button>
+                            </div>
                         </div>
                     </div>
 

@@ -1,7 +1,7 @@
 import { db } from "@/lib/db"
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
-import { AdminSettingsForm } from "./admin-settings-form"
+import { AdminSettingsForm } from "@/components/admin/admin-settings-form"
 import { GlobalProvidersPanel } from "@/components/admin/global-providers-panel"
 
 export default async function AdminSettingsPage() {
