@@ -844,7 +844,7 @@ function GroupDetail({
         super: "超級管理員", admin: "管理員", user: "用戶", pending: "待審核",
     }
 
-    const tabs: Array<"members" | "providers" | "usage" | "quota"> = canEdit ? ["members", "providers", "usage", "quota"] : ["members", "providers"]
+    const tabs: Array<"members" | "providers" | "quota" | "usage"> = canEdit ? ["members", "providers", "quota", "usage"] : ["members", "providers"]
     const selectedMembers = useMemo(
         () => [...selectedIds].map(id => allUsers.find(u => u.id === id) || { id } as any),
         [selectedIds, allUsers]
@@ -948,9 +948,9 @@ function GroupDetail({
                                             disabled={!canEdit || isCreator}
                                             className="text-xs border border-border rounded-md px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
                                         >
-                                            {isCreator && <option value="creator">Creator</option>}
+                                            {isCreator && <option value="creator">創建者</option>}
                                             <option value="editor">共編者</option>
-                                            <option value="member">用戶</option>
+                                            <option value="member">成員</option>
                                         </select>
                                         {canEdit && !isCreator && (
                                             <button
