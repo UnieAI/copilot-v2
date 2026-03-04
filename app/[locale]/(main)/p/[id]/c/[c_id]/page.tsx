@@ -113,6 +113,7 @@ export default async function ProjectChatPage({
             availableModels={availableModels}
             initialSelectedModel={initialSelectedModel}
             initialActiveSessionId={chatId}
+            initialActiveSystemPrompt={chatSession?.systemPrompt ?? ""}
             initialActiveMessages={activeMessages.map(m => ({
                 id: m.id,
                 role: m.role as "user" | "assistant" | "system",

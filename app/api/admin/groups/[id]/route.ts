@@ -4,17 +4,24 @@ import { groups } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { requireGroupCreator, requireGroupEditor } from "@/lib/group-permissions";
 
-// PATCH /api/admin/groups/[id] — rename group
+// PATCH /api/admin/groups/[id] — update group (name, image)
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
     if (!(await requireGroupEditor(id))) return new Response("Forbidden", { status: 403 });
 
-    const { name } = await req.json();
-    if (!name?.trim()) return Response.json({ error: "name is required" }, { status: 400 });
+    const { name, image } = await req.json();
+    const updateData: Record<string, any> = { updatedAt: new Date() };
+    if (name !== undefined) {
+        if (!name?.trim()) return Response.json({ error: "name is required" }, { status: 400 });
+        updateData.name = name.trim();
+    }
+    if (image !== undefined) {
+        updateData.image = image || null;
+    }
 
     const [updated] = await db
         .update(groups)
-        .set({ name: name.trim(), updatedAt: new Date() })
+        .set(updateData)
         .where(eq(groups.id, id))
         .returning();
 

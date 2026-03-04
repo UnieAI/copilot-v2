@@ -2,11 +2,12 @@ import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { userGroups } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
+import { Session } from "next-auth";
 
 export type GroupRole = "creator" | "editor" | "member";
 
-export const isAdminSession = (session: Awaited<ReturnType<typeof auth>>) => {
-    const role = (session?.user as any)?.role as string | undefined;
+export const isAdminSession = (session: Session) => {
+    const role = session?.user?.role as string | undefined;
     return !!session?.user && ["admin", "super"].includes(role || "");
 };
 

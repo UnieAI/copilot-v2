@@ -89,6 +89,7 @@ export async function POST(req: NextRequest) {
                             userId,
                             modelName: realModelName || selectedModel || 'default',
                             providerPrefix: providerPrefix || null,
+                            systemPrompt: (systemPrompt || '').trim() || null,
                             title: 'New Chat',
                             mode: 'normal',
                             projectId: projectId || null,
@@ -426,20 +427,36 @@ export async function POST(req: NextRequest) {
 
                     const finalMessages: { role: string; content: string }[] = [];
 
+                    // console.log(`data: `, `\n\n以下是本次附加資料的資訊：\n${contextParts.join('\n\n')}`);
+
                     // System prompt
-                    const sysContent = [
+                    let sysContent = [
                         systemPrompt || '',
-                        contextParts.length > 0 ? `\n\n以下是附加的上下文資訊：\n${contextParts.join('\n\n')}` : '',
+                        // contextParts.length > 0 ? `\n\n以下是本次附加資料的上下文資訊：\n${contextParts.join('\n\n')}` : '', // 先註解 因為最後的 user msg 有放了
                         mcpResults.length > 0 ? `\n\n以下是工具查詢結果：\n${mcpResults.join('\n\n')}` : '',
                     ].filter(Boolean).join('');
-
-                    if (sysContent.trim()) {
-                        finalMessages.push({ role: 'system', content: sysContent.trim() });
-                    }
+                    const latestAttachmentEmbed = contextParts.length > 0
+                        ? `\n\n[本次附件解析內容]\n${contextParts.join('\n\n')}`
+                        : '';
 
                     // Conversation history
                     // If fileAttachmentSessionOnly is false (default), embed chatFiles parsed content
                     const fileAttachmentSessionOnly = adminConf?.fileAttachmentSessionOnly ?? false;
+
+                    if (!fileAttachmentSessionOnly && attachments.length > 0) {
+                        sysContent += `\n\n 除非使用者有特別說明要比較或參考過往附件解析內容，否則輸出內容應以本次附加資料的資訊為主進行回答。`
+                    }
+
+                    // console.log(`sysContent: `, sysContent);
+
+                    const sysContentWithoutCurrent = [
+                        systemPrompt || '',
+                        mcpResults.length > 0 ? `\n\n以下是 MCP Tools 調用後取得的結果：\n${mcpResults.join('\n\n')}` : '',
+                    ].filter(Boolean).join('');
+
+                    if (sysContentWithoutCurrent.trim()) {
+                        finalMessages.push({ role: 'system', content: sysContentWithoutCurrent.trim() });
+                    }
 
                     if (!fileAttachmentSessionOnly) {
                         // Collect DB IDs from history messages
@@ -447,30 +464,41 @@ export async function POST(req: NextRequest) {
                             .map((m: any) => m.id as string)
                             .filter((id: string) => id && UUID_RE.test(id));
 
-                        const filesByMessageId = new Map<string, string[]>();
+                        const filesByMessageId = new Map<string, { name: string; parsedContent: string }[]>();
                         if (historyMessageIds.length > 0) {
                             const files = await db.query.chatFiles.findMany({
                                 where: inArray(chatFiles.messageId, historyMessageIds),
-                                columns: { messageId: true, parsedContent: true },
+                                columns: { messageId: true, name: true, parsedContent: true },
                             });
                             for (const f of files) {
                                 if (!f.parsedContent) continue;
                                 const arr = filesByMessageId.get(f.messageId) ?? [];
-                                arr.push(f.parsedContent);
+                                arr.push({
+                                    name: f.name || 'unknown',
+                                    parsedContent: f.parsedContent,
+                                });
                                 filesByMessageId.set(f.messageId, arr);
                             }
                         }
 
-                        for (const m of messages) {
+                        for (let i = 0; i < messages.length; i++) {
+                            const m = messages[i];
                             const parts = filesByMessageId.get((m as any).id) ?? [];
-                            const embed = parts.length > 0 ? `\n\n[附件解析內容]\n${parts.join('\n\n')}` : '';
-                            finalMessages.push({ role: m.role, content: m.content + embed });
+                            const historyEmbed = parts.length > 0
+                                ? `\n\n[過往附件解析內容]\n${parts.map((p) => `\n${p.parsedContent}`).join('\n\n')}`
+                                : '';
+                            const currentEmbed = (i === messages.length - 1 && m.role === 'user') ? latestAttachmentEmbed : '';
+                            finalMessages.push({ role: m.role, content: m.content + historyEmbed + currentEmbed });
                         }
                     } else {
-                        for (const m of messages) {
-                            finalMessages.push({ role: m.role, content: m.content });
+                        for (let i = 0; i < messages.length; i++) {
+                            const m = messages[i];
+                            const currentEmbed = (i === messages.length - 1 && m.role === 'user') ? latestAttachmentEmbed : '';
+                            finalMessages.push({ role: m.role, content: m.content + currentEmbed });
                         }
                     }
+
+                    // console.log(`finalMessages: `, JSON.stringify(finalMessages))
 
                     // ─── 6. Quota check (group only) ────────────────────────────────
                     if (providerScope === "group" && providerGroupId) {
@@ -595,7 +623,10 @@ export async function POST(req: NextRequest) {
 
                     // Bump session updatedAt so sidebar order reflects latest activity
                     await db.update(chatSessions)
-                        .set({ updatedAt: new Date() })
+                        .set({
+                            updatedAt: new Date(),
+                            systemPrompt: (systemPrompt || '').trim() || null,
+                        })
                         .where(eq(chatSessions.id, currentSessionId));
 
                     // ─── 6b. Save parsed file content to chatFiles (if setting allows) ──

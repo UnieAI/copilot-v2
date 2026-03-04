@@ -142,6 +142,7 @@ export const userProviders = pgTable('user_providers', {
 export const groups = pgTable('groups', {
     id: uuid('id').primaryKey().defaultRandom(),
     name: text('name').notNull(),
+    image: text('image'),
     creatorId: uuid('creator_id').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
