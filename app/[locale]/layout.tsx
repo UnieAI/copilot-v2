@@ -9,6 +9,7 @@ import { notFound } from "next/navigation"
 import { routing } from "@/i18n/routing"
 import { Providers } from "@/components/providers"
 import { AgentGlowProvider } from "@/components/agent/GlowFlowWrapper"
+import { AgentModeProvider } from "@/components/agent/agent-mode-provider"
 export const metadata: Metadata = {
     title: "UnieAI Agent",
     description: "Next Generation AI Chat Interface",
@@ -43,10 +44,12 @@ export default async function RootLayout({
                             enableSystem
                             disableTransitionOnChange
                         >
-                            <AgentGlowProvider>
-                                <Toaster position="top-center" />
-                                {children}
-                            </AgentGlowProvider>
+                            <AgentModeProvider>
+                                <AgentGlowProvider>
+                                    <Toaster position="top-center" />
+                                    {children}
+                                </AgentGlowProvider>
+                            </AgentModeProvider>
                         </ThemeProvider>
                     </Providers>
                 </NextIntlClientProvider>

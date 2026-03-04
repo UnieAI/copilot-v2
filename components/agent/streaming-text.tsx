@@ -196,6 +196,9 @@ export function StreamingText({
   const displayText = useThrottledValue(text, 40)
   const [isUpdateFading, setIsUpdateFading] = useState(false)
   const hasMountedRef = useRef(false)
+  // Capture the text that was already present when this component mounted.
+  // TextGenerateEffect uses this to skip animation for pre-existing content.
+  const initialTextRef = useRef(text)
 
   useEffect(() => {
     if (!hasMountedRef.current) {
@@ -235,6 +238,7 @@ export function StreamingText({
                     className="whitespace-pre-wrap leading-7 text-foreground/90"
                     wordClassName="text-foreground/90"
                     duration={0.18}
+                    initialText={initialTextRef.current}
                   />
                 ) : (
                   <ReactMarkdown
@@ -256,3 +260,4 @@ export function StreamingText({
     </div>
   )
 }
+

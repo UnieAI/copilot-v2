@@ -1,7 +1,7 @@
 "use client"
 
 import type { Dispatch, RefObject, SetStateAction } from "react"
-import { Bot, ChevronDown, Loader2 } from "lucide-react"
+import { Bot, ChevronDown } from "lucide-react"
 import type { AgentPart, PermissionRequest as PermReq, QuestionRequest as QReq } from "@/lib/agent/types"
 import type { Attachment, UIMessage } from "@/components/chat/types"
 import { DynamicGreeting } from "@/components/ui/dynamic-greeting"
@@ -84,27 +84,7 @@ export function ChatMessagesPanel({
       ref={scrollContainerRef}
       className="flex-1 overflow-y-auto w-full relative [scrollbar-color:auto_transparent] [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:bg-transparent"
     >
-      {/* Model sync banner — visible when entering agent mode and syncing providers */}
-      {isSyncingModels && chatMode === "agent" && (
-        <div className="sticky top-0 z-20 w-full animate-in slide-in-from-top-2 duration-300">
-          <div className="mx-auto max-w-3xl px-4 pt-3">
-            <div className="flex items-center gap-3 rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 backdrop-blur-sm shadow-sm">
-              <div className="flex-shrink-0 flex items-center justify-center h-8 w-8 rounded-full bg-primary/10">
-                <Loader2 className="h-4 w-4 text-primary animate-spin" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-foreground leading-tight">正在同步模型設定</p>
-                <p className="text-xs text-muted-foreground mt-0.5">將您的 API Provider 同步到 Agent 引擎，請稍候...</p>
-              </div>
-              <div className="flex gap-1 shrink-0">
-                <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "0ms" }} />
-                <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "150ms" }} />
-                <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "300ms" }} />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Agent init overlay is now handled by AgentInitOverlay in chat-interface.tsx */}
       <div className={`mx-auto w-full space-y-8 py-8 ${hasRightPanel ? "px-6 max-w-full" : "px-4 max-w-3xl"}`}>
         {showEmptyState && (
           chatMode === "agent" && !agentSessionId ? (

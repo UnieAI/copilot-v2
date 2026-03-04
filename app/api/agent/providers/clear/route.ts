@@ -16,48 +16,31 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, message: "No custom providers to clear" })
     }
 
-    const providerConfig: Record<string, any> = {}
-    const providerIds = rawProviders.map(p => p.id)
+    const providerIds = rawProviders.map((p) => p.id)
 
-    for (const id of providerIds) {
-      // Clear out the API key to prevent reuse by opencode background processes
-      providerConfig[id] = {
-        options: {
-          apiKey: "",
-        },
+    // 1. DELETE /auth/{provider} for each provider to remove credentials
+    await Promise.allSettled(
+      providerIds.map((id) =>
+        opencodeFetch(`/auth/${id}`, { method: "DELETE" })
+      )
+    )
+
+    // 2. PATCH /global/config to add providers to disabled_providers
+    let currentDisabled: string[] = []
+    try {
+      const cfgRes = await opencodeFetch("/global/config")
+      if (cfgRes.ok) {
+        const cfg = (await cfgRes.json()) as { disabled_providers?: string[] }
+        currentDisabled = cfg.disabled_providers || []
       }
-    }
+    } catch { /* proceed with empty */ }
 
-    // Call OpenCode /config endpoint using PATCH to remove these credentials
-    const ocRes = await opencodeFetch("/config", {
+    const nextDisabled = [...new Set([...currentDisabled, ...providerIds])]
+
+    await opencodeFetch("/global/config", {
       method: "PATCH",
-      body: {
-        provider: providerConfig,
-      },
+      body: { disabled_providers: nextDisabled },
     })
-
-    if (!ocRes.ok) {
-      console.error("[agent-clear-models] OpenCode config patch failed", await ocRes.text())
-      return NextResponse.json({ error: "Failed to clear provider config from OpenCode" }, { status: ocRes.status })
-    }
-
-    // Also disable these providers in OpenCode
-    const ocConfigRes = await opencodeFetch("/config")
-    if (ocConfigRes.ok) {
-      const ocConfigList = (await ocConfigRes.json()) as { disabled_providers?: string[] }
-      const currentDisabled = ocConfigList.disabled_providers || []
-      
-      const nextDisabled = [...new Set([...currentDisabled, ...providerIds])]
-      
-      if (nextDisabled.length !== currentDisabled.length) {
-          await opencodeFetch("/config", {
-              method: "PATCH",
-              body: {
-                  disabled_providers: nextDisabled
-              }
-          })
-      }
-    }
 
     return NextResponse.json({ success: true })
   } catch (e: any) {

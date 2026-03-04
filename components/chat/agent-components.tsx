@@ -535,15 +535,18 @@ export function AgentQuestionCard({ question, sessionId }: { question: QReq; ses
                                 return (
                                     <button
                                         key={opt.label}
-                                        onClick={() => toggleOption(qIdx, opt.label, q.multiple)}
+                                        onClick={() => toggleOption(qIdx, opt.label, true)}
                                         disabled={loading}
-                                        className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-all disabled:opacity-50 text-left ${isSelected
+                                        className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md border transition-all disabled:opacity-50 text-left ${isSelected
                                             ? 'bg-primary text-primary-foreground border-primary shadow-sm'
                                             : 'bg-muted/50 hover:bg-muted text-foreground border-border hover:border-foreground/20'
                                             }`}
                                         title={opt.description}
                                     >
-                                        {opt.label}
+                                        <div className={`flex shrink-0 items-center justify-center h-4 w-4 rounded-sm border ${isSelected ? 'bg-primary-foreground text-primary border-primary-foreground' : 'border-foreground/30 bg-background/50'}`}>
+                                            {isSelected && <Check className="h-3 w-3" />}
+                                        </div>
+                                        <span className="text-left">{opt.label}</span>
                                     </button>
                                 )
                             })}

@@ -109,7 +109,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
         return () => unsubscribe()
     }, [])
 
-    useEffect(() => { setMounted(true); fetchAll(); fetchProfileFromDb() }, [pathname])
+    useEffect(() => { setMounted(true); fetchAll(); fetchProfileFromDb() }, [pathname, searchParams?.toString()])
 
     useEffect(() => {
         const onProfileUpdated = (event: Event) => {

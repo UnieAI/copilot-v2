@@ -10,27 +10,27 @@ function longestCommonPrefixLength(a: string, b: string) {
   return i;
 }
 
-const SENTENCE_DELIM_RE = /[。！？!?；;，,：:、\n]/;
-
-function splitCompletedSentences(input: string) {
+/**
+ * Split text into chunks at every \n boundary.
+ * Both \n and \n\n are respected — each \n ends the current chunk
+ * (the \n is included at the end of the chunk so layout is preserved).
+ */
+function splitAtNewlines(input: string) {
   const normalized = input.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const completed: string[] = [];
   let buffer = "";
 
   for (const ch of Array.from(normalized)) {
     buffer += ch;
-    // Newline is always a hard boundary, independent of punctuation.
-    if (ch === "\n" || SENTENCE_DELIM_RE.test(ch)) {
+    if (ch === "\n") {
       completed.push(buffer);
       buffer = "";
     }
   }
 
-  return {
-    completed,
-    tail: buffer,
-  };
+  return { completed, tail: buffer };
 }
+
 
 export const TextGenerateEffect = ({
   words,
@@ -38,26 +38,32 @@ export const TextGenerateEffect = ({
   wordClassName,
   filter = true,
   duration = 0.18,
+  initialText,
 }: {
   words: string;
   className?: string;
   wordClassName?: string;
   filter?: boolean;
   duration?: number;
+  /** Text already present when this component mounted — skip animation for it. */
+  initialText?: string;
 }) => {
   const [scope, animate] = useAnimate();
-  const prevCompletedRef = useRef("");
+  // Pre-seed with initialText so existing text is never animated on mount.
+  const prevCompletedRef = useRef(
+    initialText ? splitAtNewlines(initialText).completed.join("") : ""
+  );
 
   const { stablePrefix, deltaSentences, pendingTail, nextCompletedText } = useMemo(() => {
     const prevCompleted = prevCompletedRef.current || "";
-    const { completed, tail } = splitCompletedSentences(words);
+    const { completed, tail } = splitAtNewlines(words);
     const completedText = completed.join("");
     const commonLen = longestCommonPrefixLength(prevCompleted, completedText);
     const prefix = completedText.slice(0, commonLen);
     const delta = completedText.slice(commonLen);
     return {
       stablePrefix: prefix,
-      deltaSentences: delta ? splitCompletedSentences(delta).completed : [],
+      deltaSentences: delta ? splitAtNewlines(delta).completed : [],
       pendingTail: tail,
       nextCompletedText: completedText,
     };
@@ -65,18 +71,24 @@ export const TextGenerateEffect = ({
 
   useEffect(() => {
     prevCompletedRef.current = nextCompletedText;
-    animate(
-      "[data-animate='1']",
-      {
-        opacity: 1,
-        filter: filter ? "blur(0px)" : "none",
-      },
-      {
-        duration: duration ? duration : 1,
-        delay: stagger(0.06),
+    if (scope.current && scope.current.querySelector("[data-animate='1']")) {
+      try {
+        animate(
+          "[data-animate='1']",
+          {
+            opacity: 1,
+            filter: filter ? "blur(0px)" : "none",
+          },
+          {
+            duration: duration ? duration : 1,
+            delay: stagger(0.06),
+          }
+        );
+      } catch (err) {
+        console.warn("Framer motion animation error:", err);
       }
-    );
-  }, [animate, filter, duration, words, nextCompletedText]);
+    }
+  }, [animate, filter, duration, scope, nextCompletedText]);
 
   const renderContent = () => {
     return (

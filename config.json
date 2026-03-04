@@ -5,12 +5,12 @@
   ],
   "mode": {
     "title": {
-      "model": "unieai/MiniMax-M2",
+      "model": "UNIE/MiniMax-M2",
       "options": {},
       "permission": {}
     },
     "summary": {
-      "model": "unieai/MiniMax-M2",
+      "model": "UNIE/MiniMax-M2",
       "options": {},
       "permission": {}
     },
@@ -63,10 +63,13 @@
         },
         "MiniMax-M2-20260204-0d8ddd2a": {
           "name": "MiniMax-M2-20260204-0d8ddd2a"
+        },
+        "TestModel": {
+          "name": "TestModel"
         }
       },
       "options": {
-        "apiKey": "sk-FKYGe0iyuCSUQIPbwRqk14eN6TYJCDgfpP5QPwQ46FW6jveA",
+        "apiKey": "sk-test123",
         "baseURL": "https://api.unieai.com/v1"
       }
     },
@@ -93,6 +96,79 @@
       },
       "options": {
         "apiKey": "sk-test",
+        "baseURL": "https://api.unieai.com/v1"
+      }
+    },
+    "unieai": {
+      "name": "UnieAI",
+      "npm": "@ai-sdk/openai-compatible",
+      "models": {
+        "Case_Index_": {
+          "name": "Case_Index_"
+        },
+        "Qwen3-30B-A3B-Instruct-2507": {
+          "name": "Qwen3-30B-A3B-Instruct-2507"
+        },
+        "MiniMax-M2-20260206-de8b6930": {
+          "name": "MiniMax-M2-20260206-de8b6930"
+        },
+        "Qwen3-30B-A3B-Thinking-2507": {
+          "name": "Qwen3-30B-A3B-Thinking-2507"
+        },
+        "Qwen3.5-27B": {
+          "name": "Qwen3.5-27B"
+        },
+        "Qwen3-30B-A3B-Instruct-2507-20260215-5807fff4": {
+          "name": "Qwen3-30B-A3B-Instruct-2507-20260215-5807fff4"
+        },
+        "sale-ai": {
+          "name": "sale-ai"
+        },
+        "gemma-3-12b-it": {
+          "name": "gemma-3-12b-it"
+        },
+        "unieai-coder": {
+          "name": "unieai-coder"
+        },
+        "royGPT": {
+          "name": "royGPT"
+        },
+        "MiniMax-M2": {
+          "name": "MiniMax-M2"
+        },
+        "trash-ai": {
+          "name": "trash-ai"
+        },
+        "MiniMax-M2-20260204-0d8ddd2a": {
+          "name": "MiniMax-M2-20260204-0d8ddd2a"
+        },
+        "Qwen3-30B-A3B-Instruct-2507-20260120-accton": {
+          "name": "RFQ",
+          "options": {
+            "apiKey": "sk-gNW9beBKfVh0rlIprds0pcMe9xit1xjW8U9bfytmeo1BBFQU"
+          }
+        },
+        "Case_Index": {
+          "name": "Case_Index",
+          "options": {
+            "apiKey": "sk-RVrprA7ogwzWUtc2jBvfeK9HYwq53Mrl2vRUPQPBtSP76MMf"
+          }
+        },
+        "MiniMax_M2": {
+          "name": "Case_Index__",
+          "options": {
+            "apiKey": "sk-FKYGe0iyuCSUQIPbwRqk14eN6TYJCDgfpP5QPwQ46FW6jveA"
+          }
+        },
+        "TestEnsure": {
+          "name": "TestEnsure",
+          "options": {
+            "apiKey": "sk-test"
+          }
+        }
+      },
+      "options": {
+        "apiKey": "sk-FKYGe0iyuCSUQIPbwRqk14eN6TYJCDgfpP5QPwQ46FW6jveA",
         "baseURL": "https://api.unieai.com/v1"
       }
     }

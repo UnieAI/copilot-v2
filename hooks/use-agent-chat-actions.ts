@@ -126,6 +126,20 @@ export function useAgentChatActions({
       return
     }
 
+    // Immediately remove all messages from the assistant message onward in the UI
+    const removedIds: string[] = []
+    for (let i = idx; i < agentStoreMessages.length; i++) {
+      removedIds.push(agentStoreMessages[i].id)
+    }
+    const sid2 = sid
+    agentStoreDispatch({
+      type: "SSE_BATCH",
+      events: removedIds.map((id) => ({
+        type: "message.removed" as const,
+        properties: { sessionID: sid2, messageID: id },
+      })),
+    })
+
     const waitingId = `agent-regen-wait-${Date.now()}`
     setMessages((prev) => {
       const next = prev.filter((message) => message.id !== waitingId)
@@ -139,7 +153,7 @@ export function useAgentChatActions({
     })
 
     setSubAgentSessionId(null)
-    setSelectedToolFlowMessageId((current) => (current === assistantMsg.id ? null : current))
+    setSelectedToolFlowMessageId((current) => (removedIds.includes(current ?? "") ? null : current))
     setAgentPaused(false)
     agentManualStopRef.current = false
     setIsGenerating(true)

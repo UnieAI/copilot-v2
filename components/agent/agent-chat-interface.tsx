@@ -817,7 +817,13 @@ export function AgentChatInterface({
   useEffect(() => {
     if (!selectedModel) return
     saveModelStorage(selectedModel)
-  }, [selectedModel])
+    // Ensure this model's provider is synced to opencode
+    agentFetch("/api/agent/providers/ensure", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ providerPrefix: selectedModel.providerID, modelID: selectedModel.modelID }),
+    }).catch(() => { /* non-blocking */ })
+  }, [selectedModel, agentFetch])
 
   // Reset session state when the selected instance changes
   const instanceIdRef = useRef(instance?.id ?? null)
@@ -856,6 +862,14 @@ export function AgentChatInterface({
       if (!sessionId) return
 
       try {
+        // Ensure model is synced to opencode before sending
+        if (selectedModel) {
+          await agentFetch("/api/agent/providers/ensure", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ providerPrefix: selectedModel.providerID, modelID: selectedModel.modelID }),
+          }).catch(() => {})
+        }
         const res = await agentFetch(`/api/agent/session/${sessionId}/prompt`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },

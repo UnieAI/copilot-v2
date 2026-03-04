@@ -8,6 +8,7 @@ import { toast } from "sonner"
 import { streamStore } from "@/lib/stream-store"
 import { useTranslations } from "next-intl"
 import { useAgentGlow } from "@/components/agent/GlowFlowWrapper"
+import { useAgentMode } from "@/components/agent/agent-mode-provider"
 import { Drawer, DrawerContent, DrawerTitle } from "@/components/ui/drawer"
 import { cn } from "@/lib/utils"
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
@@ -30,7 +31,7 @@ import {
     extractSessionIdFromTaskOutput, extractAgentToolCall, parseTodoJson,
     resolveTodoItems, buildActiveToolLabel, toUIAgentMessages, fileToBase64
 } from "@/components/chat/utils"
-import { FilePreviewDrawer, AgentToolFlowSidebar, SubAgentSidebar } from "@/components/chat/sidebars"
+import { FilePreviewSidebar, AgentToolFlowSidebar, SubAgentSidebar } from "@/components/chat/sidebars"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { ChatMessagesPanel } from "@/components/chat/chat-messages-panel"
 import { ChatComposer } from "@/components/chat/chat-composer"
@@ -70,6 +71,7 @@ export function ChatInterface({
     const localePrefix = segments.length && segments[0].length <= 5 ? `/${segments[0]}` : ''
     const t = useTranslations('Home')
     const { triggerGlow } = useAgentGlow()
+    const { activateAgent, deactivateAgent, activationCount } = useAgentMode()
     const { instance } = useInstanceStore()
     const [sessionId, setSessionId] = useState(initialSessionId)
     const [chatMode, setChatMode] = useState<"normal" | "agent">(initialMode)
@@ -432,6 +434,26 @@ export function ChatInterface({
             agentPollRef.current = setTimeout(poll, delay)
         }
 
+        // On mount (page load / session switch), check opencode's actual session
+        // status so we don't falsely resume a stopped generation.
+        // Non-blocking — runs in parallel with the first poll.
+        if (!agentLocalBusyRef.current) {
+            agentFetch("/api/agent/session/status", { cache: "no-store" })
+                .then(async (res) => {
+                    if (cancelled || !res.ok) return
+                    const statusMap = await res.json()
+                    const sessionStatus = statusMap?.[agentSessionId] || statusMap?.data?.[agentSessionId]
+                    const type = String(sessionStatus?.type || sessionStatus?.status || "idle").toLowerCase()
+                    if (type !== "busy" && type !== "running" && type !== "processing") {
+                        agentManualStopRef.current = true
+                        setAgentLocalBusy(false)
+                        setIsGenerating(false)
+                        setStatusText("")
+                    }
+                })
+                .catch(() => {})
+        }
+
         const poll = async () => {
             if (cancelled) return
             let stillBusy = agentLocalBusyRef.current
@@ -458,7 +480,7 @@ export function ChatInterface({
             cancelled = true
             if (agentPollRef.current) { clearTimeout(agentPollRef.current); agentPollRef.current = null }
         }
-    }, [chatMode, agentSessionId, loadAgentMessages, loadAgentPendingRequests])
+    }, [chatMode, agentSessionId, agentFetch, loadAgentMessages, loadAgentPendingRequests])
 
     useEffect(() => {
         if (chatMode !== "agent") return
@@ -497,9 +519,34 @@ export function ChatInterface({
             .catch(() => { })
     }, [chatMode])
 
-    // ── Fetch agent providers/models when entering agent mode ──
+    const ensureAgentModel = useCallback(async (providerID: string, modelID: string) => {
+        await agentFetch("/api/agent/providers/ensure", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ providerPrefix: providerID, modelID }),
+        }).catch(() => { /* non-blocking */ })
+    }, [agentFetch])
+
+    // On page refresh with agent mode already active, bump activationCount once
+    // so the model sync effect below fires exactly once.
+    const didInitActivation = useRef(false)
     useEffect(() => {
-        if (chatMode !== "agent") return
+        if (didInitActivation.current) return
+        didInitActivation.current = true
+        if (initialMode === "agent" && activationCount === 0) {
+            activateAgent()
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+
+    // ── Fetch agent providers/models when user explicitly enters agent mode ──
+    // Triggered ONLY by activationCount (bumped by activateAgent from provider).
+    // Does NOT re-trigger on new chat, send, URL changes, or HMR.
+    const prevActivationRef = useRef(0)
+    useEffect(() => {
+        if (activationCount === 0 || activationCount === prevActivationRef.current) return
+        prevActivationRef.current = activationCount
+
         setIsSyncingModels(true)
         agentFetch("/api/agent/providers/sync", { method: "POST", cache: "no-store" })
             .then(async (res) => {
@@ -507,24 +554,24 @@ export function ChatInterface({
                 const payload = await res.json()
                 const { models, defaultModel } = normalizeAgentProviders(payload)
                 setAgentModels(models)
-                // Restore from localStorage or use server default
                 const stored = readAgentModelStorage()
+                let picked: { providerID: string; modelID: string } | null = null
                 if (stored && models.some(m => m.providerID === stored.providerID && m.modelID === stored.modelID)) {
-                    setAgentSelectedModel(stored)
+                    picked = stored
                 } else if (defaultModel) {
-                    setAgentSelectedModel(defaultModel)
+                    picked = defaultModel
                 } else if (models.length > 0) {
-                    setAgentSelectedModel({ providerID: models[0].providerID, modelID: models[0].modelID })
+                    picked = { providerID: models[0].providerID, modelID: models[0].modelID }
+                }
+                if (picked) {
+                    setAgentSelectedModel(picked)
+                    ensureAgentModel(picked.providerID, picked.modelID)
                 }
             })
             .catch(() => { })
             .finally(() => setIsSyncingModels(false))
-
-        return () => {
-            // Clear API keys from opencode when unmounting or leaving agent mode
-            agentFetch("/api/agent/providers/clear", { method: "POST" }).catch(() => { })
-        }
-    }, [chatMode, agentFetch])
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activationCount])
 
     useEffect(() => {
         if (chatMode !== "agent") {
@@ -725,12 +772,15 @@ export function ChatInterface({
         setStatusText("Agent 思考中...")
 
         try {
+            // Ensure model is synced to opencode BEFORE sending the prompt
+            if (agentSelectedModel) {
+                await ensureAgentModel(agentSelectedModel.providerID, agentSelectedModel.modelID)
+            }
             const sid = await ensureAgentSession()
             const promptBody: Record<string, unknown> = {
                 text: content,
                 agent: agentName || undefined,
             }
-            // Pass selected model if available (works with agent + model)
             if (agentSelectedModel) {
                 promptBody.model = {
                     providerID: agentSelectedModel.providerID,
@@ -763,7 +813,7 @@ export function ChatInterface({
             setStatusText("")
             toast.error(error?.message || "Agent 回覆失敗")
         }
-    }, [agentName, agentSelectedModel, ensureAgentSession, isGenerating, loadAgentMessages])
+    }, [agentName, agentSelectedModel, ensureAgentModel, ensureAgentSession, isGenerating, loadAgentMessages])
 
     const { handleAgentStopGeneration, handleAgentRegenerate } = useAgentChatActions({
         agentSessionId,
@@ -861,7 +911,8 @@ export function ChatInterface({
     }
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+        // e.keyCode === 229 is the universal code for an IME composing event (even if isComposing just flipped to false)
+        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
             e.preventDefault()
             handleSubmit()
         }
@@ -958,8 +1009,9 @@ export function ChatInterface({
 
     const switchToAgentMode = useCallback(() => {
         if (isGenerating) return
+        activateAgent()
         router.push(agentChatHref(agentSessionId))
-    }, [agentChatHref, agentSessionId, isGenerating, router])
+    }, [activateAgent, agentChatHref, agentSessionId, isGenerating, router])
 
     const switchToAgentModeWithGlow = useCallback(() => {
         if (isGenerating) return
@@ -980,15 +1032,20 @@ export function ChatInterface({
 
     const switchToNormalMode = useCallback(() => {
         setSubAgentSessionId(null)
-        router.push(normalChatHref)
-    }, [normalChatHref, router])
+        deactivateAgent()
+        agentFetch("/api/agent/providers/clear", { method: "POST" }).catch(() => {})
+        // Always open a new chat when leaving agent mode
+        const newChatHref = projectId ? `${localePrefix}/p/${projectId}` : `${localePrefix}/chat`
+        router.push(newChatHref)
+    }, [agentFetch, deactivateAgent, localePrefix, projectId, router])
 
     const handleAgentModelSelect = useCallback((providerID: string, modelID: string) => {
         const model = { providerID, modelID }
         setAgentSelectedModel(model)
         saveAgentModelStorage(model)
         setAgentModelPickerOpen(false)
-    }, [])
+        ensureAgentModel(providerID, modelID)
+    }, [ensureAgentModel])
 
     // Agent model picker: filtered models
     const agentModelSearchTerm = agentModelSearch.trim().toLowerCase()
@@ -1028,35 +1085,58 @@ export function ChatInterface({
                 </div>
             )}
 
-            <div className={`relative flex flex-col h-full bg-background transition-all duration-300 ease-in-out ${hasRightPanel ? 'flex-1 min-w-0 border-r border-border' : 'w-full'} `}>
+            <div className="relative flex-1 min-w-0 flex flex-col h-full bg-background border-r border-border">
+
                 <ChatHeader
                     chatMode={chatMode}
                     showSystemPrompt={showSystemPrompt}
                     onToggleSystemPrompt={() => setShowSystemPrompt((v) => !v)}
                     systemPrompt={systemPrompt}
                     onSystemPromptChange={setSystemPrompt}
-                    agentModelPickerOpen={agentModelPickerOpen}
-                    onAgentModelPickerOpenChange={setAgentModelPickerOpen}
-                    agentModelSearch={agentModelSearch}
-                    onAgentModelSearchChange={setAgentModelSearch}
-                    filteredAgentModels={filteredAgentModels}
-                    agentModels={agentModels}
-                    agentSelectedModel={agentSelectedModel}
-                    agentSelectedModelLabel={agentSelectedModelLabel}
-                    agentSelectedModelProvider={agentSelectedModelProvider}
-                    onAgentModelSelect={handleAgentModelSelect}
-                    modelPickerOpen={modelPickerOpen}
-                    onModelPickerOpenChange={setModelPickerOpen}
-                    modelSearch={modelSearch}
-                    onModelSearchChange={setModelSearch}
-                    selectedModel={selectedModel}
-                    selectedModelObj={selectedModelObj}
-                    selectedModelLabel={selectedModelLabel}
-                    filteredUserModels={filteredUserModels}
-                    filteredGlobalModels={filteredGlobalModels}
-                    groupEntries={groupEntries}
-                    hasAnyMatch={hasAnyMatch}
-                    onNormalModelSelect={handleModelChange}
+                    modelPickerOpen={chatMode === "agent" ? agentModelPickerOpen : modelPickerOpen}
+                    onModelPickerOpenChange={chatMode === "agent" ? setAgentModelPickerOpen : setModelPickerOpen}
+                    modelSearch={chatMode === "agent" ? agentModelSearch : modelSearch}
+                    onModelSearchChange={chatMode === "agent" ? setAgentModelSearch : setModelSearch}
+                    selectedModel={
+                        chatMode === "agent" && agentSelectedModel
+                            ? `${agentSelectedModel.providerID}-${agentSelectedModel.modelID}`
+                            : selectedModel
+                    }
+                    selectedModelObj={
+                        chatMode === "agent" && agentSelectedModel
+                            ? { providerName: agentSelectedModelProvider } as any
+                            : selectedModelObj
+                    }
+                    selectedModelLabel={chatMode === "agent" ? agentSelectedModelLabel : selectedModelLabel}
+                    filteredUserModels={chatMode === "agent"
+                        ? availableModels.filter(m => m.source === "user" && (agentModelSearch ? m.label.toLowerCase().includes(agentModelSearch.toLowerCase()) : true))
+                        : filteredUserModels}
+                    filteredGlobalModels={chatMode === "agent"
+                        ? availableModels.filter(m => m.source === "group" && !m.groupId && (agentModelSearch ? m.label.toLowerCase().includes(agentModelSearch.toLowerCase()) : true))
+                        : filteredGlobalModels}
+                    groupEntries={chatMode === "agent"
+                        ? (() => {
+                            const groupModels = availableModels.filter(m => m.source === "group" && m.groupId && (agentModelSearch ? m.label.toLowerCase().includes(agentModelSearch.toLowerCase()) : true));
+                            const map = new Map<string, typeof availableModels>();
+                            groupModels.forEach(m => {
+                                const key = m.groupName || "Unknown Group";
+                                if (!map.has(key)) map.set(key, []);
+                                map.get(key)!.push(m);
+                            });
+                            return Array.from(map.entries()).map(([gName, filtered]) => ({ gName, filtered, total: filtered.length }));
+                        })()
+                        : groupEntries}
+                    hasAnyMatch={chatMode === "agent"
+                        ? availableModels.some(m => agentModelSearch ? m.label.toLowerCase().includes(agentModelSearch.toLowerCase()) : true)
+                        : hasAnyMatch}
+                    onNormalModelSelect={(val) => {
+                        if (chatMode === "agent") {
+                            const match = availableModels.find(m => m.value === val);
+                            if (match) handleAgentModelSelect(match.providerPrefix, match.label);
+                        } else {
+                            handleModelChange(val);
+                        }
+                    }}
                     isSyncingModels={isSyncingModels}
                 />
 
@@ -1127,19 +1207,23 @@ export function ChatInterface({
                 />
             </div>
 
-            {/* Split Sidebar View */}
-            {selectedToolFlowMessage ? (
-                <AgentToolFlowSidebar
-                    message={selectedToolFlowMessage}
-                    localePrefix={localePrefix}
-                    onClose={() => setSelectedToolFlowMessageId(null)}
-                />
-            ) : selectedPreviewAttachment ? (
-                <FilePreviewDrawer
-                    attachment={selectedPreviewAttachment}
-                    onClose={() => setSelectedPreviewAttachment(null)}
-                />
-            ) : null}
+            {/* Right Grouped Split Sidebar View */}
+            <AnimatePresence mode="wait">
+                {selectedToolFlowMessage ? (
+                    <AgentToolFlowSidebar
+                        key="tool-flow"
+                        message={selectedToolFlowMessage}
+                        localePrefix={localePrefix}
+                        onClose={() => setSelectedToolFlowMessageId(null)}
+                    />
+                ) : selectedPreviewAttachment ? (
+                    <FilePreviewSidebar
+                        key="file-preview"
+                        attachment={selectedPreviewAttachment}
+                        onClose={() => setSelectedPreviewAttachment(null)}
+                    />
+                ) : null}
+            </AnimatePresence>
 
             {/* Sub-Agent Drawer: desktop from right, mobile from bottom */}
             {subAgentSessionId && (

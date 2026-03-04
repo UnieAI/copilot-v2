@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react"
+import { motion } from "framer-motion"
 import { X, FileText, Loader2, ChevronDown } from "lucide-react"
 import { useAgentStore } from "@/hooks/use-agent-store"
 import { AgentPartsRenderer } from "@/components/agent/agent-parts-renderer"
@@ -10,45 +11,89 @@ import type { AgentPart, AgentMessage, AgentTextPart } from "@/lib/agent/types"
 
 import { Drawer, DrawerContent, DrawerTitle, DrawerHeader } from "@/components/ui/drawer"
 
-export function FilePreviewDrawer({ attachment, onClose }: { attachment: Attachment, onClose: () => void }) {
+export function FilePreviewSidebar({ attachment, onClose }: { attachment: Attachment, onClose: () => void }) {
     const isImage = attachment.mimeType.startsWith('image/')
-    const imgSrc = attachment.previewUrl || (attachment.base64 ? `data:${attachment.mimeType};base64,${attachment.base64}` : undefined)
+
+    // We need useEffect to convert base64 PDFs into Blob URLs
+    // Browsers block data:application/pdf base64 strings in iframes for security
+    const [objectUrl, setObjectUrl] = useState<string | null>(null)
+
+    useEffect(() => {
+        let url = ""
+        if (attachment.previewUrl) {
+            url = attachment.previewUrl
+            setObjectUrl(url)
+        } else if (attachment.base64) {
+            if (attachment.mimeType === 'application/pdf') {
+                try {
+                    const byteCharacters = atob(attachment.base64)
+                    const byteNumbers = new Array(byteCharacters.length)
+                    for (let i = 0; i < byteCharacters.length; i++) {
+                        byteNumbers[i] = byteCharacters.charCodeAt(i)
+                    }
+                    const byteArray = new Uint8Array(byteNumbers)
+                    const blob = new Blob([byteArray], { type: 'application/pdf' })
+                    url = URL.createObjectURL(blob)
+                    setObjectUrl(url)
+                } catch (e) {
+                    // Fallback if atob fails
+                    url = `data:${attachment.mimeType};base64,${attachment.base64}`
+                    setObjectUrl(url)
+                }
+            } else {
+                url = `data:${attachment.mimeType};base64,${attachment.base64}`
+                setObjectUrl(url)
+            }
+        }
+
+        return () => {
+            // Only revoke if we created a blob URL
+            if (url && url.startsWith('blob:')) {
+                URL.revokeObjectURL(url)
+            }
+        }
+    }, [attachment])
 
     return (
-        <Drawer open onOpenChange={(open) => { if (!open) onClose() }}>
-            <DrawerContent className="h-[85vh] max-h-[85vh] p-0 flex flex-col overflow-hidden outline-none">
-                <DrawerHeader className="sr-only">
-                    <DrawerTitle>Attachment Preview</DrawerTitle>
-                </DrawerHeader>
-                <div className="flex items-center justify-between p-4 border-b border-border bg-background shrink-0">
-                    <div className="flex flex-col overflow-hidden px-2">
-                        <p className="text-sm font-semibold truncate" title={attachment.name}>{attachment.name}</p>
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-widest">{attachment.mimeType}</p>
+        <motion.div
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: "50%", opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ type: "spring", bounce: 0, duration: 0.4 }}
+            className="border-l border-border bg-card shadow-xl overflow-hidden shrink-0 z-20 relative h-full flex flex-col w-[500px]"
+            style={{ width: "50%" }}
+        >
+            <div className="flex items-center justify-between p-4 border-b border-border bg-background shrink-0">
+                <div className="flex flex-col overflow-hidden px-2">
+                    <p className="text-sm font-semibold truncate" title={attachment.name}>{attachment.name}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-widest">{attachment.mimeType}</p>
+                </div>
+                <button onClick={onClose} className="p-2 rounded-md hover:bg-muted text-muted-foreground transition-colors shrink-0">
+                    <X className="h-4 w-4" />
+                </button>
+            </div>
+
+            <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-muted/20">
+                {!objectUrl ? (
+                    <div className="flex items-center justify-center h-full">
+                        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground/50" />
                     </div>
-                    <button onClick={onClose} className="p-2 rounded-md hover:bg-muted text-muted-foreground transition-colors shrink-0">
-                        <X className="h-4 w-4" />
-                    </button>
-                </div>
-                <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-muted/20">
-                    {isImage && imgSrc ? (
-                        <img src={imgSrc} alt={attachment.name} className="max-w-full max-h-full rounded-md shadow-sm border border-border object-contain" />
-                    ) : attachment.mimeType === 'application/pdf' ? (
-                        <iframe src={imgSrc} className="w-full h-full rounded-md border border-border bg-white" title={attachment.name} />
-                    ) : (
-                        <div className="text-center p-8 bg-background border border-border shadow-sm rounded-xl max-w-sm">
-                            <FileText className="h-16 w-16 mx-auto mb-4 text-muted-foreground/50" />
-                            <h3 className="text-sm font-medium mb-1 truncate">{attachment.name}</h3>
-                            <p className="text-xs text-muted-foreground mb-4">無法在瀏覽器中直接預覽此格式 ({attachment.mimeType})</p>
-                            {imgSrc && (
-                                <a href={imgSrc} download={attachment.name} className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium transition-colors bg-primary text-primary-foreground rounded-md shadow hover:bg-primary/90">
-                                    下載檔案
-                                </a>
-                            )}
-                        </div>
-                    )}
-                </div>
-            </DrawerContent>
-        </Drawer>
+                ) : isImage ? (
+                    <img src={objectUrl} alt={attachment.name} className="max-w-full max-h-full rounded-md shadow-sm border border-border object-contain" />
+                ) : attachment.mimeType === 'application/pdf' ? (
+                    <iframe src={objectUrl} className="w-full h-full rounded-md border border-border bg-white" title={attachment.name} />
+                ) : (
+                    <div className="text-center p-8 bg-background border border-border shadow-sm rounded-xl max-w-sm">
+                        <FileText className="h-16 w-16 mx-auto mb-4 text-muted-foreground/50" />
+                        <h3 className="text-sm font-medium mb-1 truncate">{attachment.name}</h3>
+                        <p className="text-xs text-muted-foreground mb-4">無法在瀏覽器中直接預覽此格式 ({attachment.mimeType})</p>
+                        <a href={objectUrl} download={attachment.name} className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium transition-colors bg-primary text-primary-foreground rounded-md shadow hover:bg-primary/90">
+                            下載檔案
+                        </a>
+                    </div>
+                )}
+            </div>
+        </motion.div>
     )
 }
 
@@ -66,7 +111,14 @@ export function AgentToolFlowSidebar({
     const running = calls.some((call) => call.status === "pending" || call.status === "running")
 
     return (
-        <div className="w-[28%] min-w-[250px] max-w-[360px] border-l border-border bg-card flex flex-col h-full animate-in slide-in-from-right-8 duration-300 relative z-20 shadow-xl">
+        <motion.div
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: "30%", opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ type: "spring", bounce: 0, duration: 0.4 }}
+            className="border-l border-border bg-card shadow-xl overflow-hidden shrink-0 z-20 relative h-full flex flex-col w-[300px]"
+            style={{ width: "30%" }}
+        >
             <div className="flex items-center justify-between p-4 border-b border-border bg-background">
                 <div className="flex flex-col overflow-hidden px-2">
                     <p className="text-sm font-semibold truncate">工具流程</p>
@@ -94,7 +146,7 @@ export function AgentToolFlowSidebar({
                     ))
                 )}
             </div>
-        </div>
+        </motion.div>
     )
 }
 

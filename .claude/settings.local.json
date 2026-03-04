@@ -3,7 +3,12 @@
     "allow": [
       "Bash(npx next:*)",
       "Bash(npx tsc:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(curl:*)",
+      "Bash(python3:*)",
+      "Bash(git:*)",
+      "Bash(source:*)",
+      "Bash(do:*)"
     ]
   }
 }
