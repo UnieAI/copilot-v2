@@ -62,7 +62,6 @@ type UIMessage = {
 
 const ACCEPTED_IMAGE_TYPES = ".jpg,.jpeg,.png"
 const ACCEPTED_DOC_TYPES = ".pdf,.doc,.docx,.csv,.txt,.md,.json,.js,.jsx,.ts,.tsx,.html,.css,.py"
-const SYSTEM_PROMPT_STORAGE_KEY = "chat:systemPrompt"
 
 function fileToBase64(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -543,6 +542,7 @@ export function ChatInterface({
     sessionId: initialSessionId,
     availableModels,
     initialSelectedModel,
+    initialSystemPrompt,
     initialQuery,
     initialMessages = [],
     projectId,
@@ -552,6 +552,7 @@ export function ChatInterface({
     sessionId?: string
     availableModels: AvailableModel[]
     initialSelectedModel?: string
+    initialSystemPrompt?: string | null
     initialQuery?: string
     initialMessages?: DBMessage[]
     projectId?: string          // if set, new sessions are placed in this project
@@ -578,7 +579,7 @@ export function ChatInterface({
     )
     const [input, setInput] = useState("")
     const [selectedModel, setSelectedModel] = useState(initialSelectedModel || availableModels[0]?.value || "")
-    const [systemPrompt, setSystemPrompt] = useState("")
+    const [systemPrompt, setSystemPrompt] = useState(initialSystemPrompt ?? "")
     const [showSystemPrompt, setShowSystemPrompt] = useState(false)
     const [isGenerating, setIsGenerating] = useState(false)
     const [isSetupBlocked, setIsSetupBlocked] = useState(false)
@@ -701,23 +702,6 @@ export function ChatInterface({
             setSelectedModel(availableModels[0].value)
         }
     }, [availableModels])
-
-    // Keep prompt input when route changes from /chat -> /c/[id] in the same tab.
-    useEffect(() => {
-        if (typeof window === "undefined") return
-        const saved = window.sessionStorage.getItem(SYSTEM_PROMPT_STORAGE_KEY)
-        if (saved !== null) setSystemPrompt(saved)
-    }, [])
-
-    useEffect(() => {
-        if (typeof window === "undefined") return
-        const value = systemPrompt.trim()
-        if (!value) {
-            window.sessionStorage.removeItem(SYSTEM_PROMPT_STORAGE_KEY)
-            return
-        }
-        window.sessionStorage.setItem(SYSTEM_PROMPT_STORAGE_KEY, systemPrompt)
-    }, [systemPrompt])
 
     // ── Mount: reconnect to live stream if it exists ──
     useEffect(() => {

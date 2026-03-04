@@ -19,6 +19,7 @@ export function ProjectPageClient({
     initialSelectedModel,
     initialActiveSessionId,
     initialActiveMessages = [],
+    initialActiveSystemPrompt = "",
 }: {
     session: Session
     project: { id: string; name: string }
@@ -27,6 +28,7 @@ export function ProjectPageClient({
     initialSelectedModel: string
     initialActiveSessionId?: string
     initialActiveMessages?: DBMessage[]
+    initialActiveSystemPrompt?: string
 }) {
     const router = useRouter()
     const pathname = usePathname()
@@ -185,6 +187,7 @@ export function ProjectPageClient({
                     sessionId={activeSessionId}
                     availableModels={availableModels}
                     initialSelectedModel={initialSelectedModel}
+                    initialSystemPrompt={activeSessionId ? initialActiveSystemPrompt : ""}
                     initialMessages={activeMessages as any[]}
                     projectId={project.id}
                     onSessionCreated={handleSessionCreated}

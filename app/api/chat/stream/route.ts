@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
                             userId,
                             modelName: realModelName || selectedModel || 'default',
                             providerPrefix: providerPrefix || null,
+                            systemPrompt: (systemPrompt || '').trim() || null,
                             title: 'New Chat',
                             projectId: projectId || null,
                         }).returning({ id: chatSessions.id });
@@ -578,7 +579,10 @@ export async function POST(req: NextRequest) {
 
                     // Bump session updatedAt so sidebar order reflects latest activity
                     await db.update(chatSessions)
-                        .set({ updatedAt: new Date() })
+                        .set({
+                            updatedAt: new Date(),
+                            systemPrompt: (systemPrompt || '').trim() || null,
+                        })
                         .where(eq(chatSessions.id, currentSessionId));
 
                     // ─── 6b. Save parsed file content to chatFiles (if setting allows) ──

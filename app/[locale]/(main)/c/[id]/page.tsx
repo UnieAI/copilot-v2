@@ -116,6 +116,7 @@ export default async function ChatSessionPage({ params }: { params: Promise<{ id
             sessionId={sessionId}
             availableModels={availableModels}
             initialSelectedModel={initialSelectedModel}
+            initialSystemPrompt={chatSession?.systemPrompt ?? ""}
             initialMessages={initialMessages.map(m => ({
                 id: m.id,
                 role: m.role as "user" | "assistant" | "system",

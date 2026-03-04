@@ -1,7 +1,7 @@
 import { db } from "@/lib/db"
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
-import { userProviders, userPreferences, chatMessages } from "@/lib/db/schema"
+import { userProviders, userPreferences, chatMessages, chatSessions } from "@/lib/db/schema"
 import { eq, and } from "drizzle-orm"
 import { ChatInterface } from "@/components/chat/chat-interface"
 import { getGroupModels } from "@/lib/get-group-models"
@@ -55,9 +55,16 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
         }
     }
 
-    // Load messages for the current session (if provided)
+    // Load messages and system prompt for the current session (if provided)
     let initialMessages: any[] = []
+    let initialSystemPrompt = ""
     if (sessionId) {
+        const chatSession = await db.query.chatSessions.findFirst({
+            where: and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)),
+            columns: { systemPrompt: true },
+        })
+        initialSystemPrompt = chatSession?.systemPrompt ?? ""
+
         initialMessages = await db.query.chatMessages.findMany({
             where: and(
                 eq(chatMessages.sessionId, sessionId),
@@ -74,6 +81,7 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
             sessionId={sessionId}
             availableModels={availableModels}
             initialSelectedModel={initialSelectedModel}
+            initialSystemPrompt={initialSystemPrompt}
             initialMessages={initialMessages}
             initialQuery={initialQuery as string | undefined}
         />
