@@ -459,7 +459,7 @@ export async function POST(req: NextRequest) {
                         for (const m of messages) {
                             const parts = filesByMessageId.get((m as any).id) ?? [];
                             const embed = parts.length > 0
-                                ? `\n\n${parts.map((p) => `[歷史對話中曾附加的檔案(${p.name})解析內容]\n${p.parsedContent}`).join('\n\n')}`
+                                ? `\n\n${parts.map((p) => `\n\n[曾附加的檔案]\n${p.parsedContent}`).join('\n\n')}`
                                 : '';
                             finalMessages.push({ role: m.role, content: m.content + embed });
                         }
