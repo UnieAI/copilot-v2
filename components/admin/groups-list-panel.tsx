@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Plus, Trash2, ChevronDown, ChevronUp, Users, Shield } from "lucide-react"
@@ -143,16 +143,40 @@ function CreateGroupDialog({ open, onClose, onCreated }: {
     const [search, setSearch] = useState("")
     const [selectedRoles, setSelectedRoles] = useState<Map<string, GroupRole>>(new Map())
     const [creating, setCreating] = useState(false)
+    const [imageDataUrl, setImageDataUrl] = useState("")
+    const fileInputRef = useRef<HTMLInputElement>(null)
+
+    const ACCEPTED_EXTS = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".tif", ".tiff"]
+    const ACCEPTED_MIMES = ["image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif", "image/tiff"]
 
     // Fetch users when dialog opens
     useEffect(() => {
         if (!open) return
-        setName(""); setSearch(""); setSelectedRoles(new Map())
+        setName(""); setSearch(""); setSelectedRoles(new Map()); setImageDataUrl("")
         setUsersLoading(true)
         fetch("/api/admin/users").then(r => r.ok ? r.json() : []).then(data => {
             setAllUsers(Array.isArray(data) ? data : data.users || [])
         }).finally(() => setUsersLoading(false))
     }, [open])
+
+    const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (!file) return
+        const ext = `.${file.name.split(".").pop()?.toLowerCase() || ""}`
+        const mime = file.type?.toLowerCase() || ""
+        if (!ACCEPTED_EXTS.includes(ext) && !ACCEPTED_MIMES.includes(mime)) {
+            toast.error("圖片格式不支援，請使用 jpg/jpeg/png/gif/webp/heic/tif/tiff")
+            e.target.value = ""; return
+        }
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () => resolve(String(reader.result || ""))
+            reader.onerror = () => reject(new Error("讀取失敗"))
+            reader.readAsDataURL(file)
+        }).catch(() => "")
+        if (dataUrl) setImageDataUrl(dataUrl)
+        e.target.value = ""
+    }
 
     const selectedIds = new Set(selectedRoles.keys())
 
@@ -192,6 +216,7 @@ function CreateGroupDialog({ open, onClose, onCreated }: {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     name: name.trim(),
+                    image: imageDataUrl || null,
                     extraMembers: [...selectedRoles.entries()].map(([userId, role]) => ({ userId, role })),
                 }),
             })
@@ -209,6 +234,26 @@ function CreateGroupDialog({ open, onClose, onCreated }: {
                     <DialogTitle>新增群組</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-4 py-2">
+                    {/* Group image */}
+                    <div className="flex flex-col items-center gap-2">
+                        <input ref={fileInputRef} type="file" accept={ACCEPTED_EXTS.join(",")} onChange={handleImageChange} className="hidden" />
+                        <button
+                            type="button"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="group relative h-20 w-20 rounded-xl overflow-hidden border-2 border-dashed border-border hover:border-primary/60 transition-colors bg-muted/30 flex items-center justify-center"
+                        >
+                            {imageDataUrl ? (
+                                <img src={imageDataUrl} className="h-full w-full object-cover" alt="群組圖片預覽" />
+                            ) : (
+                                <Users className="h-8 w-8 text-muted-foreground group-hover:text-primary/60 transition-colors" />
+                            )}
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <span className="text-white text-[10px] font-medium">更換</span>
+                            </div>
+                        </button>
+                        <p className="text-[11px] text-muted-foreground">群組圖片（選填）</p>
+                    </div>
+
                     {/* Group name */}
                     <div>
                         <label className="block text-xs font-medium text-muted-foreground mb-1">群組名稱 <span className="text-destructive">*</span></label>
@@ -232,17 +277,24 @@ function CreateGroupDialog({ open, onClose, onCreated }: {
                             <input
                                 value={search}
                                 onChange={e => setSearch(e.target.value)}
-                                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                                placeholder="輸入 Email 或名字搜尋"
+                                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+                                placeholder={usersLoading ? "載入中..." : "輸入 Email 或名字搜尋"}
                                 disabled={usersLoading}
                             />
 
+                            {/* Loading skeleton */}
+                            {usersLoading && (
+                                <div className="space-y-2 rounded-lg border border-border/60 p-2">
+                                    {[1, 2, 3].map(i => (
+                                        <div key={i} className="h-10 rounded-lg bg-muted/40 animate-pulse" style={{ animationDelay: `${(i - 1) * 150}ms` }} />
+                                    ))}
+                                </div>
+                            )}
+
                             {/* Candidate dropdown — only shown when search is non-empty */}
-                            {search.trim() && (
+                            {!usersLoading && search.trim() && (
                                 <div className="space-y-1 rounded-lg border border-border/60 p-2 max-h-48 overflow-y-auto">
-                                    {usersLoading ? (
-                                        <p className="text-xs text-muted-foreground text-center py-2">載入用戶中...</p>
-                                    ) : candidateUsers.length === 0 ? (
+                                    {candidateUsers.length === 0 ? (
                                         <p className="text-xs text-muted-foreground text-center py-2">找不到符合的使用者</p>
                                     ) : candidateUsers.map(u => (
                                         <button key={u.id} onClick={() => addMember(u.id)}

@@ -3,6 +3,7 @@ export type GroupRole = "creator" | "editor" | "member"
 export type Group = {
     id: string
     name: string
+    image?: string | null
     creatorId: string | null
     currentUserRole?: GroupRole | null
     memberCount: number

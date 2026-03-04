@@ -768,9 +768,9 @@ export function ChatInterface({
                 const file = item.getAsFile();
                 if (!file) continue;
 
-                // 這裡可以再過濾只接受 jpg/png/jpeg/gif 等
-                if (!file.type.match(/^(image\/(png|jpeg|jpg|gif|webp))$/)) {
-                    toast.error("目前僅支援 PNG / JPEG / GIF / WebP 格式的貼上圖片");
+                // 這裡可以再過濾只接受 jpg/png/jpeg 等
+                if (!file.type.match(/^(image\/(png|jpeg|jpg|webp))$/)) {
+                    toast.error("目前僅支援 PNG / JPEG / WebP 格式的貼上圖片");
                     continue;
                 }
 

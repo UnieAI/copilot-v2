@@ -55,11 +55,12 @@ export async function POST(req: NextRequest) {
     if (!isAdminSession(session)) return new Response("Forbidden", { status: 403 });
     const userId = session.user.id as string;
 
-    const { name, extraMembers } = await req.json();
+    const { name, image, extraMembers } = await req.json();
     if (!name?.trim()) return Response.json({ error: "name is required" }, { status: 400 });
 
     const [group] = await db.insert(groups).values({
         name: name.trim(),
+        image: image || null,
         creatorId: userId,
     }).returning();
 
