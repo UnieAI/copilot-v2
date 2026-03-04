@@ -1,5 +1,5 @@
 "use client"
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef, type ChangeEvent } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Trash2, Pencil, Check, X, Users, Server, BarChart3, Shield, ChevronLeft } from "lucide-react"
@@ -215,6 +215,8 @@ export function GroupDetailPage({ group: initialGroup, allUsers, isSysAdmin, ini
     const [editingName, setEditingName] = useState(false)
     const [nameValue, setNameValue] = useState(group.name)
     const [deletingGroup, setDeletingGroup] = useState(false)
+    const [savingImage, setSavingImage] = useState(false)
+    const fileInputRef = useRef<HTMLInputElement>(null)
 
     const userRole = group.currentUserRole
     const canDelete = isSysAdmin || userRole === "creator"
@@ -223,6 +225,8 @@ export function GroupDetailPage({ group: initialGroup, allUsers, isSysAdmin, ini
     const canEditProviders = isSysAdmin || userRole === "creator" || userRole === "editor"
     const canSeeQuota = isSysAdmin || userRole === "creator" || userRole === "editor"
     const canSeeUsage = isSysAdmin || userRole === "creator" || userRole === "editor"
+    const ACCEPTED_EXTS = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".tif", ".tiff"]
+    const ACCEPTED_MIMES = ["image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif", "image/tiff"]
 
     const tabs: Tab[] = ["members", "providers", ...(canSeeQuota ? ["quota" as Tab] : []), ...(canSeeUsage ? ["usage" as Tab] : [])]
 
@@ -244,6 +248,44 @@ export function GroupDetailPage({ group: initialGroup, allUsers, isSysAdmin, ini
         const updated = await res.json()
         setGroup(g => ({ ...g, name: updated.name }))
         toast.success("已更名"); setEditingName(false)
+    }
+
+    const saveGroupImage = async (image: string | null) => {
+        setSavingImage(true)
+        try {
+            const res = await fetch(`/api/admin/groups/${group.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ image }),
+            })
+            if (!res.ok) { toast.error("Failed to update group image"); return }
+            const updated = await res.json()
+            setGroup(g => ({ ...g, image: updated.image ?? null }))
+            toast.success("Group image updated")
+        } finally {
+            setSavingImage(false)
+        }
+    }
+
+    const handleImageChange = async (e: ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (!file) return
+        const ext = `.${file.name.split(".").pop()?.toLowerCase() || ""}`
+        const mime = file.type?.toLowerCase() || ""
+        if (!ACCEPTED_EXTS.includes(ext) && !ACCEPTED_MIMES.includes(mime)) {
+            toast.error("Unsupported image type. Use jpg/jpeg/png/gif/webp/heic/tif/tiff")
+            e.target.value = ""
+            return
+        }
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () => resolve(String(reader.result || ""))
+            reader.onerror = () => reject(new Error("read image failed"))
+            reader.readAsDataURL(file)
+        }).catch(() => "")
+        e.target.value = ""
+        if (!dataUrl) { toast.error("Failed to read image file"); return }
+        await saveGroupImage(dataUrl)
     }
 
     const deleteGroup = async () => {
@@ -281,6 +323,44 @@ export function GroupDetailPage({ group: initialGroup, allUsers, isSysAdmin, ini
                         <ChevronLeft className="size-4" />
                         我的群組
                     </Button>
+                    <div className="shrink-0">
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept={ACCEPTED_EXTS.join(",")}
+                            onChange={handleImageChange}
+                            className="hidden"
+                            disabled={!canEditName || savingImage}
+                        />
+                        <button
+                            type="button"
+                            onClick={() => canEditName && !savingImage && fileInputRef.current?.click()}
+                            disabled={!canEditName || savingImage}
+                            className={`group relative h-14 w-14 rounded-xl overflow-hidden border-2 ${canEditName ? "border-dashed border-border hover:border-primary/60" : "border-border/50"} transition-colors bg-muted/30 flex items-center justify-center`}
+                            title={canEditName ? "更換群組圖片" : "群組圖片"}
+                        >
+                            {group.image ? (
+                                <img src={group.image} className="h-full w-full object-cover" alt={group.name} />
+                            ) : (
+                                <Users className="h-6 w-6 text-muted-foreground group-hover:text-primary/60 transition-colors" />
+                            )}
+                            {canEditName && (
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                    <span className="text-white text-[10px] font-medium">{savingImage ? "儲存中" : "更換"}</span>
+                                </div>
+                            )}
+                        </button>
+                        {canEditName && group.image && (
+                            <button
+                                type="button"
+                                onClick={() => saveGroupImage(null)}
+                                disabled={savingImage}
+                                className="mt-1 text-[10px] text-destructive hover:underline disabled:opacity-50"
+                            >
+                                移除圖片
+                            </button>
+                        )}
+                    </div>
                     <div className="flex-1 min-w-0">
                         {editingName ? (
                             <div className="flex items-center gap-2">

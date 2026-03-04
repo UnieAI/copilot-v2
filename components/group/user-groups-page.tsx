@@ -5,6 +5,7 @@ import { Users, ChevronRight } from "lucide-react"
 type GroupItem = {
     id: string
     name: string
+    image?: string | null
     memberCount: number
     providerCount: number
     currentUserRole: string | null
@@ -36,9 +37,17 @@ export function UserGroupsPage({ groups }: { groups: GroupItem[] }) {
                     onClick={() => router.push(`/g/${g.id}`)}
                     className="w-full text-left flex items-center gap-4 px-5 py-4 rounded-xl border border-border/50 bg-background hover:border-primary/30 hover:shadow-sm transition-all group"
                 >
-                    <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-                        <Users className="h-5 w-5 text-primary" />
-                    </div>
+                    {g.image ? (
+                        <img
+                            src={g.image}
+                            alt={g.name}
+                            className="h-10 w-10 rounded-xl object-cover shrink-0 border border-border/50"
+                        />
+                    ) : (
+                        <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                            <Users className="h-5 w-5 text-primary" />
+                        </div>
+                    )}
                     <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold group-hover:text-primary transition-colors truncate">{g.name}</p>
                         <p className="text-xs text-muted-foreground mt-0.5">
