@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { globalProviderRoleModelQuotas, globalProviders, tokenUsage, users } from "@/lib/db/schema";
+import { globalProviderRoleModelQuotas, globalProviders, tokenUsage, userPhotos, users } from "@/lib/db/schema";
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { getQuotaWindow } from "@/lib/quota-window";
 
@@ -48,15 +48,16 @@ export async function GET(
     : null;
   const window = getQuotaWindow(new Date(), refillIntervalHours);
 
-  const roleUsers = await db.query.users.findMany({
-    where: eq(users.role, targetRole),
-    columns: {
-      id: true,
-      name: true,
-      image: true,
-      email: true,
-    },
-  });
+  const roleUsers = await db
+    .select({
+      id: users.id,
+      name: users.name,
+      image: userPhotos.image,
+      email: users.email,
+    })
+    .from(users)
+    .leftJoin(userPhotos, eq(userPhotos.userId, users.id))
+    .where(eq(users.role, targetRole));
 
   if (roleUsers.length === 0) {
     return Response.json({

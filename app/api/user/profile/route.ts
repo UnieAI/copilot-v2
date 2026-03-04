@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server"
 import { auth } from "@/auth"
 import { db } from "@/lib/db"
-import { users } from "@/lib/db/schema"
+import { userPhotos, users } from "@/lib/db/schema"
 import { eq } from "drizzle-orm"
 
 const ACCEPTED_AVATAR_MIME_TYPES = new Set([
@@ -24,6 +24,32 @@ const ACCEPTED_AVATAR_EXTENSIONS = new Set([
   ".tif",
   ".tiff",
 ])
+
+/** GET /api/user/profile - read current user profile */
+export async function GET() {
+  const session = await auth()
+  if (!session?.user?.id) return new Response("Unauthorized", { status: 401 })
+  const userId = session.user.id as string
+
+  const rows = await db
+    .select({
+      name: users.name,
+      email: users.email,
+      image: userPhotos.image,
+    })
+    .from(users)
+    .leftJoin(userPhotos, eq(userPhotos.userId, users.id))
+    .where(eq(users.id, userId))
+    .limit(1)
+  const dbUser = rows[0]
+  if (!dbUser) return new Response("Not found", { status: 404 })
+
+  return Response.json({
+    name: dbUser.name ?? null,
+    email: dbUser.email ?? null,
+    image: dbUser.image ?? null,
+  })
+}
 
 /** PATCH /api/user/profile - update display name and avatar */
 export async function PATCH(req: NextRequest) {
@@ -57,11 +83,24 @@ export async function PATCH(req: NextRequest) {
 
   await db
     .update(users)
-    .set({
-      name,
-      ...(sanitizedImage !== undefined ? { image: sanitizedImage } : {}),
-    })
+    .set({ name })
     .where(eq(users.id, userId))
+
+  if (sanitizedImage !== undefined) {
+    await db
+      .insert(userPhotos)
+      .values({
+        userId,
+        image: sanitizedImage,
+      })
+      .onConflictDoUpdate({
+        target: userPhotos.userId,
+        set: {
+          image: sanitizedImage,
+          updatedAt: new Date(),
+        },
+      })
+  }
 
   return Response.json({ ok: true, name, image: sanitizedImage ?? null })
 }

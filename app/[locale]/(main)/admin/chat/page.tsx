@@ -1,7 +1,7 @@
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
 import { db } from "@/lib/db"
-import { chatSessions, users } from "@/lib/db/schema"
+import { chatSessions, userPhotos, users } from "@/lib/db/schema"
 import { asc, eq, sql } from "drizzle-orm"
 import { ChatMonitorPanel } from "@/components/admin/chat-monitor-panel"
 
@@ -24,13 +24,14 @@ export default async function AdminChatPage() {
       id: users.id,
       name: users.name,
       email: users.email,
-      image: users.image,
+      image: userPhotos.image,
       role: users.role,
       chatCount: sql<number>`count(${chatSessions.id})::int`,
     })
     .from(users)
+    .leftJoin(userPhotos, eq(userPhotos.userId, users.id))
     .leftJoin(chatSessions, eq(chatSessions.userId, users.id))
-    .groupBy(users.id, users.name, users.email, users.image, users.role)
+    .groupBy(users.id, users.name, users.email, userPhotos.image, users.role)
     .orderBy(sql`count(${chatSessions.id}) desc`, asc(users.createdAt))
 
   const allUsers: ChatMonitorUser[] = rows.map((r) => ({

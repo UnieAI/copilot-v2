@@ -32,6 +32,7 @@ export function ProfileForm({ initialName, initialImage }: ProfileFormProps) {
   const [imageDataUrl, setImageDataUrl] = useState(initialImage ?? "")
   const [imageMimeType, setImageMimeType] = useState("")
   const [imageExtension, setImageExtension] = useState("")
+  const [avatarChanged, setAvatarChanged] = useState(false)
   const [saving, setSaving] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -65,6 +66,7 @@ export function ProfileForm({ initialName, initialImage }: ProfileFormProps) {
     setImageDataUrl(dataUrl)
     setImageMimeType(mime)
     setImageExtension(ext)
+    setAvatarChanged(true)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -76,20 +78,46 @@ export function ProfileForm({ initialName, initialImage }: ProfileFormProps) {
 
     setSaving(true)
     try {
+      const payload: {
+        name: string
+        image?: string | null
+        imageMimeType?: string | null
+        imageExtension?: string | null
+      } = {
+        name: name.trim(),
+      }
+
+      if (avatarChanged) {
+        payload.image = imageDataUrl || null
+        payload.imageMimeType = (imageMimeType || inferMimeFromDataUrl(imageDataUrl)) || null
+        payload.imageExtension = imageExtension || null
+      }
+
       const res = await fetch("/api/user/profile", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: name.trim(),
-          image: imageDataUrl || null,
-          imageMimeType: (imageMimeType || inferMimeFromDataUrl(imageDataUrl)) || null,
-          imageExtension: imageExtension || null,
-        }),
+        body: JSON.stringify(payload),
       })
 
       if (!res.ok) throw new Error("更新失敗")
 
-      await update({ name: name.trim(), image: imageDataUrl || null })
+      const data = await res.json().catch(() => null)
+      const updatedName = typeof data?.name === "string" ? data.name : name.trim()
+      const updatedImage = avatarChanged
+        ? data?.image === null
+          ? null
+          : typeof data?.image === "string"
+            ? data.image
+            : imageDataUrl || null
+        : imageDataUrl || null
+
+      await update({ user: { name: updatedName } } as any)
+      window.dispatchEvent(
+        new CustomEvent("user:profile-updated", {
+          detail: { name: updatedName, image: updatedImage },
+        })
+      )
+      setAvatarChanged(false)
       toast.success("個人資料已更新")
     } catch {
       toast.error("更新失敗，請稍後再試")

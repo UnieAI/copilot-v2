@@ -50,6 +50,7 @@ type ChatSession = {
     externalSessionId?: string | null;
 }
 type ChatProject = { id: string; name: string; updatedAt: string }
+type ProfileUpdateDetail = { name?: string | null; image?: string | null }
 
 function extractAgentParentSessionId(payload: any): string {
     const root = payload?.data ?? payload ?? {}
@@ -89,6 +90,8 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
     const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
     const [activeStreams, setActiveStreams] = useState<Record<string, { statusText: string }>>({})
     const [confirmDeleteProject, setConfirmDeleteProject] = useState<{ id: string; name: string } | null>(null)
+    const [liveProfile, setLiveProfile] = useState<ProfileUpdateDetail>({})
+    const [dbProfileImage, setDbProfileImage] = useState<string | null>(null)
 
     const renameInputRef = useRef<HTMLInputElement>(null)
     const renameFolderInputRef = useRef<HTMLInputElement>(null)
@@ -106,15 +109,29 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
         return () => unsubscribe()
     }, [])
 
-    useEffect(() => { setMounted(true); fetchAll() }, [pathname, searchParams?.toString()])
+    useEffect(() => { setMounted(true); fetchAll(); fetchProfileFromDb() }, [pathname])
 
     useEffect(() => {
-        const onRefresh = () => { fetchAll() }
-        window.addEventListener('sidebar:refresh', onRefresh as EventListener)
-        return () => {
-            window.removeEventListener('sidebar:refresh', onRefresh as EventListener)
+        const onProfileUpdated = (event: Event) => {
+            const detail = (event as CustomEvent<ProfileUpdateDetail>).detail
+            if (detail?.name) setLiveProfile(prev => ({ ...prev, name: detail.name }))
+            fetchProfileFromDb()
         }
+        window.addEventListener("user:profile-updated", onProfileUpdated as EventListener)
+        return () => window.removeEventListener("user:profile-updated", onProfileUpdated as EventListener)
     }, [])
+
+    const fetchProfileFromDb = async () => {
+        try {
+            const res = await fetch("/api/user/profile", { cache: "no-store" })
+            if (!res.ok) return
+            const profile = await res.json()
+            const image = typeof profile?.image === "string" ? profile.image : null
+            const name = typeof profile?.name === "string" ? profile.name : null
+            setDbProfileImage(image)
+            if (name) setLiveProfile(prev => ({ ...prev, name }))
+        } catch { }
+    }
 
     const fetchAll = async () => {
         try {
@@ -255,6 +272,8 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
 
     const unassigned = normalSessions.filter(s => !s.projectId)
     const isAdmin = (session?.user as any)?.role === 'admin' || (session?.user as any)?.role === 'super'
+    const displayName = liveProfile.name ?? session?.user?.name ?? "User"
+    const displayImage = dbProfileImage
 
     // ─── 渲染對話單元 (帶 Loading 動畫) ───────────────────────────────────
     const renderSession = (s: ChatSession) => {
@@ -540,16 +559,16 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                     <DropdownMenuTrigger asChild>
                         <button className="flex w-full items-center gap-3 p-2 rounded-2xl hover:bg-muted/60 transition-all outline-none">
                             <div className="relative shrink-0">
-                                {session?.user?.image ? (
-                                    <img src={session.user.image} alt="avatar" className="size-6 rounded-full ring-2 ring-background shadow-sm" />
+                                {displayImage ? (
+                                    <img src={displayImage} alt="avatar" className="size-6 object-cover rounded-full ring-2 ring-background shadow-sm" />
                                 ) : (
-                                    <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 text-primary flex items-center justify-center text-xs font-bold shrink-0">{session?.user?.name?.[0]?.toUpperCase()}</div>
+                                    <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 text-primary flex items-center justify-center text-xs font-bold shrink-0">{displayName?.[0]?.toUpperCase()}</div>
                                 )}
                                 <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 border-2 border-background rounded-full" />
                             </div>
                             {state === 'expanded' && (
                                 <div className="flex-1 text-left min-w-0">
-                                    <p className="text-sm font-semibold truncate text-foreground/90 leading-tight">{session?.user?.name || 'User'}</p>
+                                    <p className="text-sm font-semibold truncate text-foreground/90 leading-tight">{displayName}</p>
                                     <p className="text-[10px] text-muted-foreground truncate uppercase mt-1 tracking-tight">{(session?.user as any)?.role}</p>
                                 </div>
                             )}
@@ -560,8 +579,8 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                     <DropdownMenuContent className="w-72 p-0 rounded-3xl shadow-2xl border-border/40 mb-3" side="right" align="end" sideOffset={12}>
                         <div className="bg-muted/30 p-5 border-b border-border/40">
                             <div className="flex items-center gap-4 mb-4">
-                                <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-lg font-bold text-primary shrink-0">{session?.user?.name?.[0]?.toUpperCase()}</div>
-                                <div className="flex-1 min-w-0"><h4 className="font-bold text-base truncate">{session?.user?.name}</h4><p className="text-xs text-muted-foreground truncate">{session?.user?.email}</p></div>
+                                <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-lg font-bold text-primary shrink-0">{displayName?.[0]?.toUpperCase()}</div>
+                                <div className="flex-1 min-w-0"><h4 className="font-bold text-base truncate">{displayName}</h4><p className="text-xs text-muted-foreground truncate">{session?.user?.email}</p></div>
                             </div>
                             <div className="grid grid-cols-3 gap-1 bg-background/50 p-1 rounded-xl border border-border/40">
                                 {[{ id: 'light', icon: Sun, label: '亮色' }, { id: 'dark', icon: Moon, label: '深色' }, { id: 'system', icon: Monitor, label: '系統' }].map(t => (
