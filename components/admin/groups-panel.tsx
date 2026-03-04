@@ -1653,7 +1653,7 @@ export function GroupsPanel({ allUsers, viewerRole }: { allUsers: User[], viewer
                         <div className="px-5 py-4 border-b border-border/40 shrink-0">
                             <h2 className="text-base font-semibold">{selectedGroup.name}</h2>
                             <p className="text-xs text-muted-foreground mt-0.5">
-                                {selectedGroup.memberCount} 位成員 · {selectedGroup.providerCount} 個 Provider
+                                {selectedGroup.memberCount} 位成員
                             </p>
                         </div>
                         <GroupDetail

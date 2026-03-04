@@ -48,10 +48,11 @@ export async function GET() {
     return Response.json(result);
 }
 
-// POST /api/admin/groups — create a group (any signed-in user)
+// POST /api/admin/groups — create a group (admin/super only)
 export async function POST(req: NextRequest) {
     const session = await auth();
     if (!session?.user?.id) return new Response("Forbidden", { status: 403 });
+    if (!isAdminSession(session)) return new Response("Forbidden", { status: 403 });
     const userId = session.user.id as string;
 
     const { name } = await req.json();
