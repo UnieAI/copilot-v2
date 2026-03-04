@@ -415,22 +415,30 @@ export async function POST(req: NextRequest) {
                     // System prompt
                     let sysContent = [
                         systemPrompt || '',
-                        contextParts.length > 0 ? `\n\n以下是本次附加資料的上下文資訊：\n${contextParts.join('\n\n')}` : '',
+                        // contextParts.length > 0 ? `\n\n以下是本次附加資料的上下文資訊：\n${contextParts.join('\n\n')}` : '', // 先註解 因為最後的 user msg 有放了
                         mcpResults.length > 0 ? `\n\n以下是工具查詢結果：\n${mcpResults.join('\n\n')}` : '',
                     ].filter(Boolean).join('');
+                    const latestAttachmentEmbed = contextParts.length > 0
+                        ? `\n\n[本次附件解析內容]\n${contextParts.join('\n\n')}`
+                        : '';
 
                     // Conversation history
                     // If fileAttachmentSessionOnly is false (default), embed chatFiles parsed content
                     const fileAttachmentSessionOnly = adminConf?.fileAttachmentSessionOnly ?? false;
 
                     if (!fileAttachmentSessionOnly && attachments.length > 0) {
-                        sysContent += `\n\n 如果使用者沒有特別註明要比較或參考曾附加過的檔案資料，輸出內容請以本次附加資料的資訊為主進行回答。`
+                        sysContent += `\n\n 除非使用者有特別說明要比較或參考過往附件解析內容，否則輸出內容應以本次附加資料的資訊為主進行回答。`
                     }
 
                     // console.log(`sysContent: `, sysContent);
 
-                    if (sysContent.trim()) {
-                        finalMessages.push({ role: 'system', content: sysContent.trim() });
+                    const sysContentWithoutCurrent = [
+                        systemPrompt || '',
+                        mcpResults.length > 0 ? `\n\n以下是 MCP Tools 調用後取得的結果：\n${mcpResults.join('\n\n')}` : '',
+                    ].filter(Boolean).join('');
+
+                    if (sysContentWithoutCurrent.trim()) {
+                        finalMessages.push({ role: 'system', content: sysContentWithoutCurrent.trim() });
                     }
 
                     if (!fileAttachmentSessionOnly) {
@@ -456,20 +464,24 @@ export async function POST(req: NextRequest) {
                             }
                         }
 
-                        for (const m of messages) {
+                        for (let i = 0; i < messages.length; i++) {
+                            const m = messages[i];
                             const parts = filesByMessageId.get((m as any).id) ?? [];
-                            const embed = parts.length > 0
-                                ? `\n\n${parts.map((p) => `\n\n[曾附加的檔案]\n${p.parsedContent}`).join('\n\n')}`
+                            const historyEmbed = parts.length > 0
+                                ? `\n\n[過往附件解析內容]\n${parts.map((p) => `\n${p.parsedContent}`).join('\n\n')}`
                                 : '';
-                            finalMessages.push({ role: m.role, content: m.content + embed });
+                            const currentEmbed = (i === messages.length - 1 && m.role === 'user') ? latestAttachmentEmbed : '';
+                            finalMessages.push({ role: m.role, content: m.content + historyEmbed + currentEmbed });
                         }
                     } else {
-                        for (const m of messages) {
-                            finalMessages.push({ role: m.role, content: m.content });
+                        for (let i = 0; i < messages.length; i++) {
+                            const m = messages[i];
+                            const currentEmbed = (i === messages.length - 1 && m.role === 'user') ? latestAttachmentEmbed : '';
+                            finalMessages.push({ role: m.role, content: m.content + currentEmbed });
                         }
                     }
 
-                    console.log(`finalMessages: `, JSON.stringify(finalMessages))
+                    // console.log(`finalMessages: `, JSON.stringify(finalMessages))
 
                     // ─── 6. Quota check (group only) ────────────────────────────────
                     if (providerScope === "group" && providerGroupId) {
