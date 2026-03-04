@@ -410,20 +410,28 @@ export async function POST(req: NextRequest) {
 
                     const finalMessages: { role: string; content: string }[] = [];
 
+                    // console.log(`data: `, `\n\n以下是本次附加資料的資訊：\n${contextParts.join('\n\n')}`);
+
                     // System prompt
-                    const sysContent = [
+                    let sysContent = [
                         systemPrompt || '',
-                        contextParts.length > 0 ? `\n\n以下是附加的上下文資訊：\n${contextParts.join('\n\n')}` : '',
+                        contextParts.length > 0 ? `\n\n以下是本次附加資料的上下文資訊：\n${contextParts.join('\n\n')}` : '',
                         mcpResults.length > 0 ? `\n\n以下是工具查詢結果：\n${mcpResults.join('\n\n')}` : '',
                     ].filter(Boolean).join('');
-
-                    if (sysContent.trim()) {
-                        finalMessages.push({ role: 'system', content: sysContent.trim() });
-                    }
 
                     // Conversation history
                     // If fileAttachmentSessionOnly is false (default), embed chatFiles parsed content
                     const fileAttachmentSessionOnly = adminConf?.fileAttachmentSessionOnly ?? false;
+
+                    if (!fileAttachmentSessionOnly && attachments.length > 0) {
+                        sysContent += `\n\n 如果使用者沒有特別註明要比較或參考曾附加過的檔案資料，輸出內容請以本次附加資料的資訊為主進行回答。`
+                    }
+
+                    // console.log(`sysContent: `, sysContent);
+
+                    if (sysContent.trim()) {
+                        finalMessages.push({ role: 'system', content: sysContent.trim() });
+                    }
 
                     if (!fileAttachmentSessionOnly) {
                         // Collect DB IDs from history messages
@@ -431,23 +439,28 @@ export async function POST(req: NextRequest) {
                             .map((m: any) => m.id as string)
                             .filter((id: string) => id && UUID_RE.test(id));
 
-                        const filesByMessageId = new Map<string, string[]>();
+                        const filesByMessageId = new Map<string, { name: string; parsedContent: string }[]>();
                         if (historyMessageIds.length > 0) {
                             const files = await db.query.chatFiles.findMany({
                                 where: inArray(chatFiles.messageId, historyMessageIds),
-                                columns: { messageId: true, parsedContent: true },
+                                columns: { messageId: true, name: true, parsedContent: true },
                             });
                             for (const f of files) {
                                 if (!f.parsedContent) continue;
                                 const arr = filesByMessageId.get(f.messageId) ?? [];
-                                arr.push(f.parsedContent);
+                                arr.push({
+                                    name: f.name || 'unknown',
+                                    parsedContent: f.parsedContent,
+                                });
                                 filesByMessageId.set(f.messageId, arr);
                             }
                         }
 
                         for (const m of messages) {
                             const parts = filesByMessageId.get((m as any).id) ?? [];
-                            const embed = parts.length > 0 ? `\n\n[附件解析內容]\n${parts.join('\n\n')}` : '';
+                            const embed = parts.length > 0
+                                ? `\n\n${parts.map((p) => `[歷史對話中曾附加的檔案(${p.name})解析內容]\n${p.parsedContent}`).join('\n\n')}`
+                                : '';
                             finalMessages.push({ role: m.role, content: m.content + embed });
                         }
                     } else {
@@ -455,6 +468,8 @@ export async function POST(req: NextRequest) {
                             finalMessages.push({ role: m.role, content: m.content });
                         }
                     }
+
+                    console.log(`finalMessages: `, JSON.stringify(finalMessages))
 
                     // ─── 6. Quota check (group only) ────────────────────────────────
                     if (providerScope === "group" && providerGroupId) {
