@@ -52,6 +52,8 @@ export default async function GroupPage({ params }: { params: Promise<{ id: stri
                 allUsers={allUsers as any}
                 isSysAdmin={isSysAdmin}
                 initialMembers={initialMembers as any}
+                currentUserId={userId}
+                currentUserSysRole={(session.user as any)?.role as string || "user"}
             />
         </div>
     )

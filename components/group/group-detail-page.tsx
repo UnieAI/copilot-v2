@@ -12,21 +12,63 @@ type Tab = "members" | "providers" | "usage" | "quota"
 
 const SYS_ROLE_LABELS: Record<string, string> = { super: "超級管理員", admin: "管理員", user: "用戶", pending: "待審核" }
 
-function MembersSection({ group, allUsers, canManageMembers, members, onMembersChange }: {
-    group: Group; allUsers: User[]; canManageMembers: boolean
-    members: Member[]; onMembersChange: (members: Member[]) => void
+function MembersSection({ group, allUsers, currentUserId, currentUserSysRole, canManageMembers, members, onMembersChange }: {
+    group: Group; allUsers: User[]; currentUserId: string; currentUserSysRole: string
+    canManageMembers: boolean; members: Member[]; onMembersChange: (members: Member[]) => void
 }) {
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(members.map(m => m.id)))
     const [memberRoles, setMemberRoles] = useState<Map<string, GroupRole>>(new Map(members.map(m => [m.id, m.membershipRole])))
     const [loading, setLoading] = useState(false)
     const [saving, setSaving] = useState(false)
     const [memberSearch, setMemberSearch] = useState("")
+    const router = useRouter()
 
     // Sync when parent members change (e.g. after save)
     useEffect(() => {
         setSelectedIds(new Set(members.map(m => m.id)))
         setMemberRoles(new Map(members.map(m => [m.id, m.membershipRole])))
     }, [members])
+
+    // ── Permission context ──────────────────────────────────────────────────
+    // "full" = isSysAdmin OR groupRole=creator => existing unrestricted logic
+    // "editor" = sysRole=user AND groupRole=editor => restricted editor
+    // "member" = sysRole=user AND groupRole=member => view-only + self-leave
+    const myGroupRole = group.currentUserRole   // "creator"|"editor"|"member"|null
+    const isSysPrivileged = ["admin", "super"].includes(currentUserSysRole)
+    const permMode: "full" | "editor" | "member" =
+        isSysPrivileged || myGroupRole === "creator" ? "full"
+            : myGroupRole === "editor" ? "editor"
+                : "member"
+
+    // For a given target member row, what can the current user do?
+    function getRowPerms(targetId: string, targetMembershipRole: GroupRole) {
+        const isSelf = targetId === currentUserId
+        const isCreator = group.creatorId === targetId || targetMembershipRole === "creator"
+
+        if (permMode === "full") {
+            // Full control — existing logic
+            return {
+                canChangeRole: !isCreator,
+                canRemove: !isCreator,
+                removeLabel: isSelf ? "退出" : "移除",
+            }
+        }
+        if (permMode === "editor") {
+            // Cannot touch creators or other editors; CAN touch members; can leave self
+            const targetIsEditorOrAbove = targetMembershipRole === "editor" || isCreator
+            return {
+                canChangeRole: !isSelf && !targetIsEditorOrAbove,
+                canRemove: (!targetIsEditorOrAbove) || isSelf,
+                removeLabel: isSelf ? "退出" : "移除",
+            }
+        }
+        // "member" — view only, but self can leave
+        return {
+            canChangeRole: false,
+            canRemove: isSelf && !isCreator,
+            removeLabel: "退出",
+        }
+    }
 
     const selectedMembers = useMemo(() => [...selectedIds].map(id => allUsers.find(u => u.id === id) || { id } as User), [selectedIds, allUsers])
     const candidateMembers = useMemo(() => {
@@ -39,16 +81,42 @@ function MembersSection({ group, allUsers, canManageMembers, members, onMembersC
         setMemberRoles(prev => { const n = new Map(prev); if (!n.has(userId)) n.set(userId, "member"); return n })
         setMemberSearch("")
     }
+
+    // "Leave" for self (editor or member) — calls the dedicated leave API then redirects
+    const leaveGroup = async () => {
+        if (!confirm("確定要退出此群組？")) return
+        const res = await fetch(`/api/groups/${group.id}/leave`, { method: "DELETE" })
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}))
+            toast.error(body?.error || "退出失敗")
+            return
+        }
+        toast.success("已退出群組")
+        router.push("/group")
+    }
+
+    // "Remove" for another member (editor mode only, target must be "member")
     const removeMember = (userId: string) => {
         if (group.creatorId && userId === group.creatorId) return
         setSelectedIds(prev => { const n = new Set(prev); n.delete(userId); return n })
         setMemberRoles(prev => { const n = new Map(prev); n.delete(userId); return n })
     }
+
+    const handleRemoveOrLeave = (userId: string, targetMembershipRole: GroupRole) => {
+        const isSelf = userId === currentUserId
+        if (isSelf) {
+            leaveGroup()
+        } else {
+            removeMember(userId)
+        }
+    }
+
     const changeRole = (userId: string, role: GroupRole) => {
         if (group.creatorId && userId === group.creatorId) return
         setMemberRoles(prev => { const n = new Map(prev); n.set(userId, role); return n })
         setSelectedIds(prev => new Set(prev).add(userId))
     }
+
     const saveMembers = async () => {
         const selected = [...selectedIds]
         if (selected.length === 0) { toast.error("至少需要一位成員"); return }
@@ -58,7 +126,6 @@ function MembersSection({ group, allUsers, canManageMembers, members, onMembersC
             const res = await fetch(`/api/admin/groups/${group.id}/members`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ members: selected.map(id => ({ userId: id, role: memberRoles.get(id) || "member" })) }) })
             if (!res.ok) { toast.error("儲存成員失敗"); return }
             toast.success("成員已更新")
-            // Rebuild member list from allUsers + selected roles
             const newMembers: Member[] = selected.map(id => {
                 const u = allUsers.find(u => u.id === id) || { id, name: null, email: "", role: "user", image: null } as User
                 return { ...u, membershipRole: memberRoles.get(id) || "member" }
@@ -67,12 +134,22 @@ function MembersSection({ group, allUsers, canManageMembers, members, onMembersC
         } finally { setSaving(false) }
     }
 
+    // Whether to show the "save" button — only full/editor managing others
+    const showSaveButton = permMode === "full" || permMode === "editor"
+    // Whether to show the search/add input
+    const showAddInput = permMode === "full" || permMode === "editor"
+
+    const hintText =
+        permMode === "full" ? "輸入 Email/名字搜尋並加入成員，設定角色"
+            : permMode === "editor" ? "可搜尋加入成員；不可調整共編者或建立者"
+                : "僅檢視成員清單，可退出此群組"
+
     return (
         <div className="space-y-3">
             <div className="flex items-center justify-between">
-                <p className="text-xs text-muted-foreground">{canManageMembers ? "輸入 Email/名字搜尋並加入成員，設定角色" : "僅檢視成員清單"}</p>
+                <p className="text-xs text-muted-foreground">{hintText}</p>
             </div>
-            {canManageMembers && (
+            {showAddInput && (
                 <div className="space-y-2">
                     <input type="text" value={memberSearch} onChange={e => setMemberSearch(e.target.value)} placeholder="輸入 Email 或名字搜尋" className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring" />
                     {memberSearch.trim() && (
@@ -96,22 +173,28 @@ function MembersSection({ group, allUsers, canManageMembers, members, onMembersC
                             {selectedMembers.map(u => {
                                 const role = memberRoles.get(u.id) || "member"
                                 const isCreator = group.creatorId === u.id
+                                const { canChangeRole, canRemove, removeLabel } = getRowPerms(u.id, role as GroupRole)
                                 return (
                                     <div key={u.id} className="flex items-center gap-3 p-2 rounded-lg border border-border/60">
                                         {u.image ? <img src={u.image} className="h-8 w-8 rounded-full object-cover" alt="" /> : <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-xs font-medium">{u.name?.[0]?.toUpperCase() || (u as any).email?.[0]?.toUpperCase() || "?"}</div>}
                                         <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{u.name || "(未命名)"}</p><p className="text-xs text-muted-foreground truncate">{(u as any).email}</p></div>
-                                        <select value={role} onChange={e => changeRole(u.id, e.target.value as GroupRole)} disabled={!canManageMembers || isCreator} className="text-xs border border-border rounded-md px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-ring">
+                                        <select value={role} onChange={e => changeRole(u.id, e.target.value as GroupRole)} disabled={!canChangeRole} className="text-xs border border-border rounded-md px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 disabled:cursor-default">
                                             {isCreator && <option value="creator">創建者</option>}
                                             <option value="editor">共編者</option>
                                             <option value="member">成員</option>
                                         </select>
-                                        {canManageMembers && !isCreator && <button onClick={() => removeMember(u.id)} className="text-xs text-destructive hover:underline">移除</button>}
+                                        {canRemove && (
+                                            <button onClick={() => handleRemoveOrLeave(u.id, role as GroupRole)}
+                                                className={`text-xs hover:underline shrink-0 ${removeLabel === "退出" ? "text-amber-500" : "text-destructive"}`}>
+                                                {removeLabel}
+                                            </button>
+                                        )}
                                     </div>
                                 )
                             })}
                         </div>
                     )}
-            {canManageMembers && (
+            {showSaveButton && (
                 <button onClick={saveMembers} disabled={saving} className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors">
                     <Check className="h-4 w-4" />{saving ? "儲存中..." : "儲存成員設定"}
                 </button>
@@ -120,8 +203,10 @@ function MembersSection({ group, allUsers, canManageMembers, members, onMembersC
     )
 }
 
-export function GroupDetailPage({ group: initialGroup, allUsers, isSysAdmin, initialMembers }: {
+
+export function GroupDetailPage({ group: initialGroup, allUsers, isSysAdmin, initialMembers, currentUserId, currentUserSysRole }: {
     group: Group; allUsers: User[]; isSysAdmin: boolean; initialMembers: Member[]
+    currentUserId: string; currentUserSysRole: string
 }) {
     const router = useRouter()
     const [group, setGroup] = useState<Group>(initialGroup)
@@ -240,6 +325,8 @@ export function GroupDetailPage({ group: initialGroup, allUsers, isSysAdmin, ini
                         <MembersSection
                             group={group}
                             allUsers={allUsers}
+                            currentUserId={currentUserId}
+                            currentUserSysRole={currentUserSysRole}
                             canManageMembers={canManageMembers}
                             members={members}
                             onMembersChange={handleMembersChange}
