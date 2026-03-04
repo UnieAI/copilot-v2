@@ -43,6 +43,26 @@ type Attachment = {
     previewUrl?: string
 }
 
+type PdfJsLib = {
+    GlobalWorkerOptions: { workerSrc: string }
+    getDocument: (source: { data: Uint8Array }) => {
+        promise: Promise<{
+            numPages: number
+            getPage: (pageNumber: number) => Promise<{
+                getViewport: (opts: { scale: number }) => { width: number; height: number }
+                render: (opts: { canvasContext: CanvasRenderingContext2D; viewport: { width: number; height: number } }) => { promise: Promise<void> }
+            }>
+        }>
+        destroy?: () => void
+    }
+}
+
+declare global {
+    interface Window {
+        pdfjsLib?: PdfJsLib
+    }
+}
+
 type DBMessage = {
     id: string
     role: "user" | "assistant" | "system"
@@ -63,6 +83,42 @@ type UIMessage = {
 const ACCEPTED_IMAGE_TYPES = ".jpg,.jpeg,.png"
 const ACCEPTED_DOC_TYPES = ".pdf,.doc,.docx,.csv,.txt,.md,.json,.js,.jsx,.ts,.tsx,.html,.css,.py"
 const SYSTEM_PROMPT_STORAGE_KEY = "chat:systemPrompt"
+const PDFJS_VERSION = "3.11.174"
+const PDF_MAX_DPI_MULTIPLIER = 4
+const PDF_MAX_DEVICE_SCALE = 12
+let pdfJsLoadPromise: Promise<PdfJsLib> | null = null
+
+function loadPdfJs(): Promise<PdfJsLib> {
+    if (typeof window === "undefined") {
+        return Promise.reject(new Error("pdf.js only runs in browser"))
+    }
+    if (window.pdfjsLib) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.worker.min.js`
+        return Promise.resolve(window.pdfjsLib)
+    }
+    if (pdfJsLoadPromise) return pdfJsLoadPromise
+
+    pdfJsLoadPromise = new Promise<PdfJsLib>((resolve, reject) => {
+        const script = document.createElement("script")
+        script.src = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.min.js`
+        script.async = true
+        script.onload = () => {
+            if (!window.pdfjsLib) {
+                reject(new Error("pdf.js loaded but global was not found"))
+                return
+            }
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.worker.min.js`
+            resolve(window.pdfjsLib)
+        }
+        script.onerror = () => reject(new Error("Failed to load pdf.js"))
+        document.head.appendChild(script)
+    }).catch((err: unknown) => {
+        pdfJsLoadPromise = null
+        throw err
+    })
+
+    return pdfJsLoadPromise as Promise<PdfJsLib>
+}
 
 function fileToBase64(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -384,6 +440,121 @@ function MessageContent({ content, isStreaming }: { content: string; isStreaming
     );
 }
 
+function PdfJsPreview({
+    src,
+    title,
+    className,
+    singlePage = false,
+}: {
+    src?: string
+    title: string
+    className?: string
+    singlePage?: boolean
+}) {
+    const containerRef = useRef<HTMLDivElement>(null)
+    const [isLoading, setIsLoading] = useState(false)
+    const [error, setError] = useState<string | null>(null)
+
+    useEffect(() => {
+        let isCanceled = false
+        let loadingTask: ReturnType<PdfJsLib["getDocument"]> | null = null
+
+        const renderPdf = async () => {
+            if (!src || !containerRef.current) return
+
+            setIsLoading(true)
+            setError(null)
+            containerRef.current.innerHTML = ""
+
+            try {
+                const pdfjs = await loadPdfJs()
+                const response = await fetch(src)
+                if (!response.ok) throw new Error("Failed to load file data")
+                const bytes = new Uint8Array(await response.arrayBuffer())
+
+                loadingTask = pdfjs.getDocument({ data: bytes })
+                const pdf = await loadingTask.promise
+                const maxPage = singlePage ? 1 : pdf.numPages
+
+                for (let pageNo = 1; pageNo <= maxPage; pageNo++) {
+                    if (isCanceled || !containerRef.current) break
+                    const page = await pdf.getPage(pageNo)
+
+                    const baseViewport = page.getViewport({ scale: 1 })
+                    const targetWidth = Math.max(160, containerRef.current.clientWidth || (singlePage ? 220 : 860))
+                    const cssScale = targetWidth / baseViewport.width
+                    const deviceScale = Math.min(
+                        PDF_MAX_DEVICE_SCALE,
+                        Math.max(1, (window.devicePixelRatio || 1) * PDF_MAX_DPI_MULTIPLIER)
+                    )
+                    const renderScale = cssScale * deviceScale
+                    const viewport = page.getViewport({ scale: renderScale })
+
+                    const canvas = document.createElement("canvas")
+                    canvas.width = Math.ceil(viewport.width)
+                    canvas.height = Math.ceil(viewport.height)
+                    canvas.style.width = `${Math.ceil(baseViewport.width * cssScale)}px`
+                    canvas.style.height = `${Math.ceil(baseViewport.height * cssScale)}px`
+                    canvas.className = singlePage
+                        ? "block"
+                        : "w-full h-auto block rounded-md border border-border bg-white shadow-sm mb-3"
+
+                    const ctx = canvas.getContext("2d")
+                    if (!ctx) continue
+
+                    await page.render({ canvasContext: ctx, viewport }).promise
+
+                    if (!isCanceled && containerRef.current) {
+                        containerRef.current.appendChild(canvas)
+                    }
+                }
+            } catch (e: any) {
+                if (!isCanceled) setError(e?.message || "Unable to preview PDF")
+            } finally {
+                if (!isCanceled) setIsLoading(false)
+            }
+        }
+
+        renderPdf()
+
+        return () => {
+            isCanceled = true
+            try { loadingTask?.destroy?.() } catch { }
+            if (containerRef.current) containerRef.current.innerHTML = ""
+        }
+    }, [singlePage, src])
+
+    if (!src) {
+        return (
+            <div className={cn("flex items-center justify-center text-xs text-muted-foreground", className)}>
+                PDF source missing
+            </div>
+        )
+    }
+
+    if (error) {
+        return (
+            <div className={cn("flex items-center justify-center px-3 text-xs text-muted-foreground", className)}>
+                PDF preview failed
+            </div>
+        )
+    }
+
+    return (
+        <div className={cn("relative", className)} aria-label={title}>
+            {isLoading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-background/70">
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                </div>
+            )}
+            <div
+                ref={containerRef}
+                className={singlePage ? "w-full h-full overflow-hidden bg-white" : "w-full min-h-full bg-muted/10 p-1 rounded-md"}
+            />
+        </div>
+    )
+}
+
 // ─── Image / File Attachment Thumbnail ───────────────────────────────────
 function AttachmentThumbnail({ attachment, onRemove, onClick }: {
     attachment: Attachment
@@ -408,11 +579,11 @@ function AttachmentThumbnail({ attachment, onRemove, onClick }: {
                 <img src={imgSrc} alt="attachment" className="w-full h-full object-cover" />
             ) : isPdf && imgSrc ? (
                 <div className="w-full h-full relative bg-white overflow-hidden">
-                    <iframe
-                        src={`${imgSrc}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
-                        className="w-full h-full border-0 pointer-events-none"
-                        scrolling="no"
-                        aria-hidden
+                    <PdfJsPreview
+                        src={imgSrc}
+                        title={attachment.name}
+                        className="w-full h-full pointer-events-none"
+                        singlePage
                     />
                     <span className="absolute bottom-1 left-1.5 px-1.5 py-0.5 rounded-md bg-black/60 text-[9px] font-semibold text-white">PDF</span>
                 </div>
@@ -455,7 +626,7 @@ function FilePreviewSidebar({ attachment, onClose }: { attachment: Attachment, o
                 {isImage && imgSrc ? (
                     <img src={imgSrc} alt={attachment.name} className="max-w-full max-h-full rounded-md shadow-sm border border-border object-contain" />
                 ) : attachment.mimeType === 'application/pdf' ? (
-                    <iframe src={imgSrc} className="w-full h-full rounded-md border border-border bg-white" title={attachment.name} />
+                    <PdfJsPreview src={imgSrc} title={attachment.name} className="w-full h-full rounded-md border border-border bg-white" />
                 ) : (
                     <div className="text-center p-8 bg-background border border-border shadow-sm rounded-xl max-w-sm">
                         <FileText className="h-16 w-16 mx-auto mb-4 text-muted-foreground/50" />
