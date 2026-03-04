@@ -2,10 +2,11 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Trash2, Pencil, Check, X, Users, Server, BarChart3, Shield } from "lucide-react"
+import { Trash2, Pencil, Check, X, Users, Server, BarChart3, Shield, ChevronLeft } from "lucide-react"
 import { Group, User, Member, GroupRole } from "./group-types"
 import { ProviderSection } from "./group-provider-section"
 import { UsageSection, QuotaSection } from "./group-usage-quota-section"
+import { Button } from "../ui/button"
 
 type Tab = "members" | "providers" | "usage" | "quota"
 
@@ -185,7 +186,16 @@ export function GroupDetailPage({ group: initialGroup, allUsers, isSysAdmin, ini
             {/* Header */}
             <div className="sticky top-0 z-10 flex-shrink-0 border-b border-border/40 bg-background/95 backdrop-blur px-6 py-4 md:px-8">
                 <div className="max-w-4xl mx-auto flex items-center gap-3">
-                    <button onClick={() => router.back()} className="text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0">← 返回</button>
+                    <Button
+                        variant="outline"
+                        onClick={() => {
+                            // router.back()
+                            router.push('/group')
+                        }}
+                        className="text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0">
+                        <ChevronLeft className="size-4" />
+                        我的群組
+                    </Button>
                     <div className="flex-1 min-w-0">
                         {editingName ? (
                             <div className="flex items-center gap-2">
