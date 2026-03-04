@@ -139,12 +139,12 @@ function ProviderRow({ groupId, provider, onRefresh, canEdit }: {
     )
 }
 
-export function ProviderSection({ groupId, canEdit }: { groupId: string; canEdit: boolean }) {
+export function ProviderSection({ groupId, canEdit, onProviderCountChange }: { groupId: string; canEdit: boolean; onProviderCountChange?: (count: number) => void }) {
     const [providers, setProviders] = useState<GroupProvider[]>([])
     const [addingProvider, setAddingProvider] = useState(false)
     const fetchProviders = async () => {
         const res = await fetch(`/api/admin/groups/${groupId}/providers`)
-        if (res.ok) setProviders(await res.json())
+        if (res.ok) { const data = await res.json(); setProviders(data); onProviderCountChange?.(data.length) }
     }
     useEffect(() => { fetchProviders() }, [groupId])
     return (

@@ -9,29 +9,23 @@ import { UsageSection, QuotaSection } from "./group-usage-quota-section"
 
 type Tab = "members" | "providers" | "usage" | "quota"
 
-function MembersSection({ group, allUsers, canEdit, canManageMembers, viewerRole }: {
-    group: Group; allUsers: User[]; canEdit: boolean; canManageMembers: boolean; viewerRole: string
+const SYS_ROLE_LABELS: Record<string, string> = { super: "超級管理員", admin: "管理員", user: "用戶", pending: "待審核" }
+
+function MembersSection({ group, allUsers, canManageMembers, members, onMembersChange }: {
+    group: Group; allUsers: User[]; canManageMembers: boolean
+    members: Member[]; onMembersChange: (members: Member[]) => void
 }) {
-    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-    const [memberRoles, setMemberRoles] = useState<Map<string, GroupRole>>(new Map())
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(members.map(m => m.id)))
+    const [memberRoles, setMemberRoles] = useState<Map<string, GroupRole>>(new Map(members.map(m => [m.id, m.membershipRole])))
     const [loading, setLoading] = useState(false)
     const [saving, setSaving] = useState(false)
     const [memberSearch, setMemberSearch] = useState("")
 
-    const fetchMembers = useCallback(async () => {
-        setLoading(true)
-        try {
-            const res = await fetch(`/api/admin/groups/${group.id}/members`)
-            if (!res.ok) return
-            const data: Member[] = await res.json()
-            setSelectedIds(new Set(data.map(u => u.id)))
-            setMemberRoles(new Map(data.map(u => [u.id, u.membershipRole])))
-        } finally { setLoading(false) }
-    }, [group.id])
-
-    useEffect(() => { fetchMembers() }, [fetchMembers])
-
-    const ROLE_LABELS: Record<string, string> = { super: "超級管理員", admin: "管理員", user: "用戶", pending: "待審核" }
+    // Sync when parent members change (e.g. after save)
+    useEffect(() => {
+        setSelectedIds(new Set(members.map(m => m.id)))
+        setMemberRoles(new Map(members.map(m => [m.id, m.membershipRole])))
+    }, [members])
 
     const selectedMembers = useMemo(() => [...selectedIds].map(id => allUsers.find(u => u.id === id) || { id } as User), [selectedIds, allUsers])
     const candidateMembers = useMemo(() => {
@@ -62,7 +56,13 @@ function MembersSection({ group, allUsers, canEdit, canManageMembers, viewerRole
         try {
             const res = await fetch(`/api/admin/groups/${group.id}/members`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ members: selected.map(id => ({ userId: id, role: memberRoles.get(id) || "member" })) }) })
             if (!res.ok) { toast.error("儲存成員失敗"); return }
-            toast.success("成員已更新"); await fetchMembers()
+            toast.success("成員已更新")
+            // Rebuild member list from allUsers + selected roles
+            const newMembers: Member[] = selected.map(id => {
+                const u = allUsers.find(u => u.id === id) || { id, name: null, email: "", role: "user", image: null } as User
+                return { ...u, membershipRole: memberRoles.get(id) || "member" }
+            })
+            onMembersChange(newMembers)
         } finally { setSaving(false) }
     }
 
@@ -81,7 +81,7 @@ function MembersSection({ group, allUsers, canEdit, canManageMembers, viewerRole
                                     <button key={u.id} onClick={() => addMember(u.id)} className="w-full flex items-center gap-3 px-2 py-1.5 rounded-md hover:bg-muted/60 transition-colors text-left">
                                         {u.image ? <img src={u.image} className="h-7 w-7 rounded-full object-cover" alt="" /> : <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center text-xs font-medium">{u.name?.[0]?.toUpperCase() || u.email?.[0]?.toUpperCase() || "?"}</div>}
                                         <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{u.name || "(未命名)"}</p><p className="text-xs text-muted-foreground truncate">{u.email}</p></div>
-                                        <span className="text-[11px] text-muted-foreground shrink-0">{ROLE_LABELS[u.role] || u.role}</span>
+                                        <span className="text-[11px] text-muted-foreground shrink-0">{SYS_ROLE_LABELS[u.role] || u.role}</span>
                                     </button>
                                 ))}
                         </div>
@@ -119,11 +119,12 @@ function MembersSection({ group, allUsers, canEdit, canManageMembers, viewerRole
     )
 }
 
-export function GroupDetailPage({ group: initialGroup, allUsers, isSysAdmin }: {
-    group: Group; allUsers: User[]; isSysAdmin: boolean
+export function GroupDetailPage({ group: initialGroup, allUsers, isSysAdmin, initialMembers }: {
+    group: Group; allUsers: User[]; isSysAdmin: boolean; initialMembers: Member[]
 }) {
     const router = useRouter()
     const [group, setGroup] = useState<Group>(initialGroup)
+    const [members, setMembers] = useState<Member[]>(initialMembers)
     const [tab, setTab] = useState<Tab>("members")
     const [editingName, setEditingName] = useState(false)
     const [nameValue, setNameValue] = useState(group.name)
@@ -133,12 +134,22 @@ export function GroupDetailPage({ group: initialGroup, allUsers, isSysAdmin }: {
     const canDelete = isSysAdmin || userRole === "creator"
     const canEditName = isSysAdmin || userRole === "creator" || userRole === "editor"
     const canManageMembers = isSysAdmin || userRole === "creator" || userRole === "editor"
-    const canSeeProviders = true // all members can see, but only editors can edit
     const canEditProviders = isSysAdmin || userRole === "creator" || userRole === "editor"
     const canSeeQuota = isSysAdmin || userRole === "creator" || userRole === "editor"
     const canSeeUsage = isSysAdmin || userRole === "creator" || userRole === "editor"
 
     const tabs: Tab[] = ["members", "providers", ...(canSeeQuota ? ["quota" as Tab] : []), ...(canSeeUsage ? ["usage" as Tab] : [])]
+
+    // When members change, update memberCount in group state
+    const handleMembersChange = useCallback((newMembers: Member[]) => {
+        setMembers(newMembers)
+        setGroup(g => ({ ...g, memberCount: newMembers.length }))
+    }, [])
+
+    // When provider count changes (callback from ProviderSection)
+    const handleProviderCountChange = useCallback((count: number) => {
+        setGroup(g => ({ ...g, providerCount: count }))
+    }, [])
 
     const renameGroup = async () => {
         if (!nameValue.trim()) return
@@ -167,10 +178,7 @@ export function GroupDetailPage({ group: initialGroup, allUsers, isSysAdmin }: {
     }
     const TAB_LABELS: Record<Tab, string> = { members: "成員管理", providers: "Provider 設定", usage: "用量", quota: "額度" }
 
-    const membersList = useMemo(() => {
-        // Build list from allUsers that are in this group (will be fetched inside MembersSection)
-        return allUsers
-    }, [allUsers])
+    const roleLabel = userRole === "creator" ? "創建者" : userRole === "editor" ? "共編者" : userRole === "member" ? "成員" : null
 
     return (
         <div className="flex flex-col h-full">
@@ -191,7 +199,9 @@ export function GroupDetailPage({ group: initialGroup, allUsers, isSysAdmin }: {
                                 {canEditName && <button onClick={() => { setNameValue(group.name); setEditingName(true) }} className="p-1 rounded hover:bg-muted text-muted-foreground transition-colors shrink-0"><Pencil className="h-4 w-4" /></button>}
                             </div>
                         )}
-                        <p className="text-sm text-muted-foreground mt-0.5">{group.memberCount} 位成員 · {group.providerCount} 個 Provider · {userRole ? `你的角色：${userRole === "creator" ? "創建者" : userRole === "editor" ? "共編者" : "成員"}` : ""}</p>
+                        <p className="text-sm text-muted-foreground mt-0.5">
+                            {group.memberCount} 位成員 · {group.providerCount} 個 Provider{roleLabel ? ` · 你的角色：${roleLabel}` : ""}
+                        </p>
                     </div>
                     {canDelete && (
                         <button onClick={deleteGroup} disabled={deletingGroup} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-destructive/40 text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50 shrink-0">
@@ -216,9 +226,22 @@ export function GroupDetailPage({ group: initialGroup, allUsers, isSysAdmin }: {
             {/* Content */}
             <div className="flex-1 overflow-y-auto px-6 py-6 md:px-8">
                 <div className="max-w-4xl mx-auto">
-                    {tab === "members" && <MembersSection group={group} allUsers={allUsers} canEdit={canManageMembers} canManageMembers={canManageMembers} viewerRole={userRole || ""} />}
-                    {tab === "providers" && <ProviderSection groupId={group.id} canEdit={canEditProviders} />}
-                    {tab === "quota" && canSeeQuota && <QuotaSection group={group} members={membersList} />}
+                    {tab === "members" && (
+                        <MembersSection
+                            group={group}
+                            allUsers={allUsers}
+                            canManageMembers={canManageMembers}
+                            members={members}
+                            onMembersChange={handleMembersChange}
+                        />
+                    )}
+                    {tab === "providers" && (
+                        <ProviderSection groupId={group.id} canEdit={canEditProviders} onProviderCountChange={handleProviderCountChange} />
+                    )}
+                    {tab === "quota" && canSeeQuota && (
+                        // Only pass actual current members (not allUsers) so quota list stays in sync
+                        <QuotaSection group={group} members={members as unknown as User[]} />
+                    )}
                     {tab === "usage" && canSeeUsage && <UsageSection group={group} />}
                 </div>
             </div>

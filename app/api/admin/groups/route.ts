@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
     if (!isAdminSession(session)) return new Response("Forbidden", { status: 403 });
     const userId = session.user.id as string;
 
-    const { name } = await req.json();
+    const { name, extraMembers } = await req.json();
     if (!name?.trim()) return Response.json({ error: "name is required" }, { status: 400 });
 
     const [group] = await db.insert(groups).values({
@@ -69,6 +69,16 @@ export async function POST(req: NextRequest) {
         groupId: group.id,
         role: "creator",
     }).onConflictDoNothing();
+
+    // Add extra members from the create dialog
+    if (Array.isArray(extraMembers) && extraMembers.length > 0) {
+        const toInsert = extraMembers
+            .filter((m: any) => m.userId && m.userId !== userId)
+            .map((m: any) => ({ userId: m.userId, groupId: group.id, role: m.role || "member" as const }));
+        if (toInsert.length > 0) {
+            await db.insert(userGroups).values(toInsert).onConflictDoNothing();
+        }
+    }
 
     return Response.json(group, { status: 201 });
 }

@@ -14,11 +14,9 @@ export default async function GroupPage({ params }: { params: Promise<{ id: stri
     const userId = session.user.id as string
     const isSysAdmin = isAdminSession(session)
 
-    // Check access: must be a group member OR sysAdmin
     const membership = await getGroupMembership(userId, id)
     if (!isSysAdmin && !membership) redirect("/")
 
-    // Fetch group info
     const group = await db.query.groups.findFirst({ where: eq(groups.id, id) })
     if (!group) redirect("/")
 
@@ -30,6 +28,15 @@ export default async function GroupPage({ params }: { params: Promise<{ id: stri
         .from(users)
         .leftJoin(userPhotos, eq(userPhotos.userId, users.id))
         .orderBy(users.createdAt)
+
+    // Fetch current group members with their roles for the initial state
+    const groupMemberships = await db.query.userGroups.findMany({
+        where: eq(userGroups.groupId, id),
+    })
+    const initialMembers = groupMemberships.map(gm => {
+        const u = allUsers.find(u => u.id === gm.userId) || { id: gm.userId, name: null, email: "", role: "user", image: null }
+        return { ...u, membershipRole: gm.role }
+    })
 
     const groupWithMeta = {
         ...group,
@@ -44,6 +51,7 @@ export default async function GroupPage({ params }: { params: Promise<{ id: stri
                 group={groupWithMeta as any}
                 allUsers={allUsers as any}
                 isSysAdmin={isSysAdmin}
+                initialMembers={initialMembers as any}
             />
         </div>
     )
