@@ -38,6 +38,506 @@ import { ChatComposer } from "@/components/chat/chat-composer"
 import { useChatSend } from "@/hooks/use-chat-send"
 import { useModelPicker } from "@/hooks/use-model-picker"
 import { useAgentChatActions } from "@/hooks/use-agent-chat-actions"
+// ─── Types ─────────────────────────────────────────────────────────────
+type Attachment = {
+    name: string
+    mimeType: string
+    base64: string
+    previewUrl?: string
+}
+
+type DBMessage = {
+    id: string
+    role: "user" | "assistant" | "system"
+    content: string
+    attachments?: { name: string; mimeType: string; base64?: string }[]
+    createdAt: string
+}
+
+type UIMessage = {
+    id: string
+    dbId?: string
+    role: "user" | "assistant" | "system"
+    content: string
+    attachments?: { name: string; mimeType: string; base64?: string }[]
+    isStreaming?: boolean
+}
+
+const ACCEPTED_IMAGE_TYPES = ".jpg,.jpeg,.png"
+const ACCEPTED_DOC_TYPES = ".pdf,.doc,.docx,.csv,.txt,.md,.json,.js,.jsx,.ts,.tsx,.html,.css,.py"
+
+function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.readAsDataURL(file)
+        reader.onload = () => resolve((reader.result as string).split(',')[1])
+        reader.onerror = reject
+    })
+}
+
+function base64ToBlobUrl(base64: string, mimeType: string): string {
+    const bin = atob(base64)
+    const len = bin.length
+    const bytes = new Uint8Array(len)
+    for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i)
+    return URL.createObjectURL(new Blob([bytes], { type: mimeType }))
+}
+
+function useAttachmentPreviewSrc(attachment: Attachment): string | undefined {
+    const [blobUrl, setBlobUrl] = useState<string | undefined>(undefined)
+
+    useEffect(() => {
+        if (attachment.previewUrl) {
+            setBlobUrl(undefined)
+            return
+        }
+        if (!attachment.base64 || attachment.mimeType !== 'application/pdf') {
+            setBlobUrl(undefined)
+            return
+        }
+
+        let url: string | undefined
+        try {
+            url = base64ToBlobUrl(attachment.base64, attachment.mimeType)
+            setBlobUrl(url)
+        } catch {
+            setBlobUrl(undefined)
+        }
+
+        return () => {
+            if (url) URL.revokeObjectURL(url)
+        }
+    }, [attachment.base64, attachment.mimeType, attachment.previewUrl])
+
+    if (attachment.previewUrl) return attachment.previewUrl
+    if (blobUrl) return blobUrl
+    if (attachment.base64) return `data:${attachment.mimeType};base64,${attachment.base64}`
+    return undefined
+}
+
+// ─── Model Item Component ─────────────────────────────────────────────
+const ModelItem = ({
+    model,
+    isSelected,
+    onSelect
+}: {
+    model: any;
+    isSelected: boolean;
+    onSelect: (value: string) => void
+}) => {
+    const [isHovered, setIsHovered] = useState(false);
+
+    return (
+        <DropdownMenuItem
+            onSelect={() => onSelect(model.value)}
+            asChild // 關鍵：讓 DropdownMenuItem 渲染成你自定義的按鈕樣式
+        >
+            <button
+                onMouseEnter={() => setIsHovered(true)}
+                onMouseLeave={() => setIsHovered(false)}
+                className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg transition-all text-left group outline-none ${isSelected
+                    ? "bg-primary/10 text-primary font-semibold"
+                    : "hover:bg-muted/60 text-foreground/90 hover:text-foreground"
+                    }`}
+            >
+                <div className="flex flex-col gap-0.5 overflow-hidden">
+                    <span className="text-sm truncate leading-tight">{model.label}</span>
+                    <span className={`text-[10px] font-medium uppercase tracking-wider leading-tight ${isSelected
+                        ? "text-primary/80"
+                        : "text-muted-foreground group-hover:text-muted-foreground/80"
+                        }`}>
+                        {model.providerName}
+                    </span>
+                </div>
+                {isSelected ? (
+                    <Check className="h-4 w-4 opacity-100 shrink-0" />
+                ) : (
+                    // <ChevronsUpDown className={`h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ${isHovered ? "opacity-100" : ""
+                    //     }`} />
+                    <></>
+                )}
+            </button>
+        </DropdownMenuItem>
+    );
+};
+
+// ─── Think Tag Parser ──────────────────────────────────────────────────
+function ThinkBlock({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
+    const [userExpanded, setUserExpanded] = useState<boolean | null>(null)
+    const expanded = userExpanded !== null ? userExpanded : !!isStreaming
+
+    return (
+        <div className="my-3 flex flex-col gap-2">
+            <button
+                onClick={() => setUserExpanded(!expanded)}
+                className="w-fit flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors group"
+            >
+                {isStreaming ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground/70" />
+                ) : (
+                    <Brain className="h-3.5 w-3.5 text-muted-foreground/70 group-hover:text-foreground transition-colors" />
+                )}
+                <span>思考過程</span>
+                {expanded ? <ChevronUp className="h-3 w-3 opacity-50" /> : <ChevronDown className="h-3 w-3 opacity-50" />}
+            </button>
+            {expanded && (
+                <div className="pl-4 ml-[7px] border-l-2 border-border/60 text-[13px] text-muted-foreground whitespace-pre-wrap font-mono leading-relaxed animate-in fade-in slide-in-from-top-1 duration-300">
+                    {content.trim()}
+                </div>
+            )}
+        </div>
+    )
+}
+
+// ─── Gemini Style Markdown Components ────────────────────────────────
+export const MarkdownComponents: any = {
+    // 標題：稍微加粗，帶有層次感
+    h1: ({ children }: any) => <h1 className="text-xl font-bold mt-6 mb-2 text-foreground">{children}</h1>,
+    h2: ({ children }: any) => <h2 className="text-lg font-semibold mt-5 mb-2 text-foreground/90">{children}</h2>,
+    h3: ({ children }: any) => <h3 className="text-base font-semibold mt-4 mb-1 text-foreground/80">{children}</h3>,
+
+    // 段落：增加行高，讓閱讀不吃力
+    p: ({ children }: any) => <p className="leading-7 mb-4 last:mb-0 text-foreground/90">{children}</p>,
+
+    // 清單：Gemini 風格的間距
+    ul: ({ children }: any) => <ul className="list-disc pl-6 mb-4 space-y-2 text-foreground/90">{children}</ul>,
+    ol: ({ children }: any) => <ol className="list-decimal pl-6 mb-4 space-y-2 text-foreground/90">{children}</ol>,
+    li: ({ children }: any) => <li className="leading-7">{children}</li>,
+
+    // 引用：左側紫色/藍色漸層條
+    blockquote: ({ children }: any) => (
+        <blockquote className="border-l-4 border-primary/30 pl-4 py-1 my-4 italic bg-primary/5 rounded-r-lg text-muted-foreground">
+            {children}
+        </blockquote>
+    ),
+
+    // 表格：這是最難搞的部分，幫你做成 Gemini 的簡潔風
+    table: ({ children }: any) => (
+        <div className="my-6 overflow-x-auto rounded-xl border border-border/40 shadow-sm">
+            <table className="w-full border-collapse text-sm text-left">
+                {children}
+            </table>
+        </div>
+    ),
+    thead: ({ children }: any) => <thead className="bg-muted/50 border-b border-border/40">{children}</thead>,
+    th: ({ children }: any) => <th className="px-4 py-3 font-semibold text-foreground/80">{children}</th>,
+    td: ({ children }: any) => <td className="px-4 py-3 border-b border-border/20 last:border-0">{children}</td>,
+
+    // 連結
+    a: ({ href, children }: any) => {
+        // 判斷是否為 YouTube 連結
+        const isYouTube = href && (
+            href.includes('youtube.com/watch') ||
+            href.includes('youtu.be/')
+        );
+
+        if (isYouTube) {
+            // 從各種常見 YouTube URL 格式提取 video ID
+            let videoId = '';
+
+            // 標準格式：https://www.youtube.com/watch?v=VIDEO_ID
+            const url = new URL(href);
+            if (url.hostname.includes('youtube.com')) {
+                videoId = url.searchParams.get('v') || '';
+            }
+            // 短網址：https://youtu.be/VIDEO_ID
+            else if (url.hostname === 'youtu.be') {
+                videoId = url.pathname.slice(1);
+            }
+
+            if (videoId) {
+                // 保留 ?si=... 或其他參數（可選）
+                const embedUrl = `https://www.youtube.com/embed/${videoId}${url.search ? url.search : ''}`;
+
+                return (
+                    <div className="my-4 aspect-video w-full max-w-3xl mx-auto rounded-xl overflow-hidden border border-border shadow-sm">
+                        <iframe
+                            width="100%"
+                            height="100%"
+                            src={embedUrl}
+                            title="YouTube video player"
+                            frameBorder="0"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                            referrerPolicy="strict-origin-when-cross-origin"
+                            allowFullScreen
+                        ></iframe>
+                    </div>
+                );
+            }
+        }
+
+        // 不是 YouTube 就照原樣渲染一般連結
+        return (
+            <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary font-medium underline underline-offset-4 hover:text-primary/80 transition-colors"
+            >
+                {children}
+            </a>
+        );
+    },
+
+    // 行內程式碼：淡色背景與圓角
+    code: ({ node, inline, className, children, ...props }: any) => {
+        // 核心邏輯：將內容轉為字串並檢查是否有換行符
+        const content = String(children).replace(/\n$/, "");
+        const hasNewline = content.includes("\n");
+        const language = className?.replace(/language-/, "");
+
+        // 如果沒有換行符，且不是明確的語言標籤開頭，則判定為 Inline Code
+        if (!hasNewline && !language) {
+            return (
+                <code
+                    className="
+                        mx-1 rounded-md px-1.5 py-0.5 
+                        bg-muted/80 dark:bg-white/10 
+                        text-primary dark:text-primary-foreground 
+                        font-mono text-[0.85em] font-bold
+                        border border-border/40
+                        break-all
+                    "
+                    {...props}
+                >
+                    {content}
+                </code>
+            );
+        }
+
+        // 否則，渲染為整塊的代碼卡片 (Block Code)
+        return (
+            <MarkdownCode
+                className={className}
+                language={language}
+                codeText={content}
+                {...props}
+            />
+        );
+    }
+};
+
+function MessageContent({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
+    // 使用 useMemo 解析內容，確保只有內容變動時才重新計算 parts
+    const parts = useMemo(() => {
+        const res: { type: 'text' | 'think'; content: string; unfinished?: boolean }[] = [];
+        let buffer = content;
+        let inThink = false;
+        let thinkStartIndex = -1;
+
+        // 先找第一個 <think> 或 </think>
+        const firstThinkOpen = buffer.indexOf('<think>');
+        const firstThinkClose = buffer.indexOf('</think>');
+
+        if (firstThinkOpen === -1 && firstThinkClose === -1) {
+            // 完全沒有 think 標籤 → 全當 text
+            res.push({ type: 'text', content: buffer });
+            return res;
+        }
+
+        // 情況1：有 <think> 開頭 → 走原本邏輯（已能處理）
+        if (firstThinkOpen !== -1 && (firstThinkOpen < firstThinkClose || firstThinkClose === -1)) {
+            // 使用原本的 regex 方式處理多個成對的 <think>...</think>
+            const thinkRegex = /<think>([\s\S]*?)<\/think>/g;
+            let lastIndex = 0;
+            let match;
+
+            while ((match = thinkRegex.exec(buffer)) !== null) {
+                if (match.index > lastIndex) {
+                    res.push({ type: 'text', content: buffer.slice(lastIndex, match.index) });
+                }
+                res.push({ type: 'think', content: match[1] });
+                lastIndex = match.index + match[0].length;
+            }
+
+            const remaining = buffer.slice(lastIndex);
+            const openThinkIndex = remaining.indexOf('<think>');
+
+            if (openThinkIndex !== -1) {
+                if (openThinkIndex > 0) {
+                    res.push({ type: 'text', content: remaining.slice(0, openThinkIndex) });
+                }
+                res.push({
+                    type: 'think',
+                    content: remaining.slice(openThinkIndex + 7),
+                    unfinished: true,
+                });
+            } else if (remaining) {
+                res.push({ type: 'text', content: remaining });
+            }
+
+            return res;
+        }
+
+        // 情況2：沒有 <think> 但有 </think> → 把 </think> 之前全部當 think
+        if (firstThinkOpen === -1 && firstThinkClose !== -1) {
+            const thinkContent = buffer.slice(0, firstThinkClose);
+            const afterThink = buffer.slice(firstThinkClose + 8); // 跳過 </think>
+
+            if (thinkContent.trim()) {
+                res.push({ type: 'think', content: thinkContent });
+            }
+
+            if (afterThink.trim()) {
+                res.push({ type: 'text', content: afterThink });
+            }
+
+            return res;
+        }
+
+        // 其他混合情況（理論上已被上面兩個分支涵蓋，但保留防呆）
+        res.push({ type: 'text', content: buffer });
+        return res;
+    }, [content]);
+
+    return (
+        <div className="flex flex-col gap-3 overflow-anchor-auto min-h-[1.5em]">
+            {parts.map((p, i) => {
+                const isLast = i === parts.length - 1;
+                return (
+                    <div
+                        key={`${p.type}-${i}`}
+                        className={cn(
+                            "transition-opacity duration-300",
+                            isStreaming && isLast ? "opacity-100" : "opacity-100"
+                        )}
+                    >
+                        {p.type === 'think' ? (
+                            <ThinkBlock content={p.content} isStreaming={p.unfinished && isStreaming} />
+                        ) : (
+                            <div className="prose-container relative">
+                                <ReactMarkdown
+                                    remarkPlugins={[remarkGfm, remarkMath]}
+                                    rehypePlugins={[rehypeKatex]}
+                                    components={MarkdownComponents}
+                                >
+                                    {p.content}
+                                </ReactMarkdown>
+                                {/* 流式游標 (Gemini Style) */}
+                                {isStreaming && isLast && (
+                                    <span className="inline-block w-1.5 h-4 ml-1 bg-primary/60 rounded-full animate-pulse vertical-middle" />
+                                )}
+                            </div>
+                        )}
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+// ─── Image / File Attachment Thumbnail ───────────────────────────────────
+function AttachmentThumbnail({ attachment, onRemove, onClick }: {
+    attachment: Attachment
+    onRemove?: () => void
+    onClick?: () => void
+}) {
+    const isImage = attachment.mimeType.startsWith('image/')
+    const isPdf = attachment.mimeType === 'application/pdf'
+    const imgSrc = useAttachmentPreviewSrc(attachment)
+
+    // Extract simple extension (.pdf, .csv, string)
+    let ext = ''
+    try {
+        const parts = attachment.name.split('.')
+        ext = parts.length > 1 ? parts[parts.length - 1].toUpperCase() : 'DOC'
+    } catch { ext = 'FILE' }
+
+    return (
+        <div className="group relative h-16 w-16 md:h-20 md:w-20 shrink-0 rounded-2xl border border-border bg-muted overflow-hidden cursor-pointer hover:ring-2 hover:ring-ring transition-all"
+            onClick={onClick}>
+            {isImage && imgSrc ? (
+                <img src={imgSrc} alt="attachment" className="w-full h-full object-cover" />
+            ) : isPdf && imgSrc ? (
+                <div className="w-full h-full relative bg-white overflow-hidden">
+                    <iframe
+                        src={`${imgSrc}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+                        className="w-full h-full border-0 pointer-events-none"
+                        scrolling="no"
+                        aria-hidden
+                    />
+                    <span className="absolute bottom-1 left-1.5 px-1.5 py-0.5 rounded-md bg-black/60 text-[9px] font-semibold text-white">PDF</span>
+                </div>
+            ) : (
+                <div className="flex flex-col items-center justify-center w-full h-full p-2 text-muted-foreground bg-card">
+                    <FileText className="h-6 w-6 md:h-8 md:w-8 mb-1 opacity-80" />
+                    <span className="text-[9px] font-bold tracking-wider">{ext}</span>
+                </div>
+            )}
+
+            {onRemove && (
+                <button
+                    onClick={(e) => { e.stopPropagation(); onRemove() }}
+                    className="absolute -top-1 -right-1 h-5 w-5 bg-background border border-border rounded-full flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                >
+                    <X className="h-3 w-3" />
+                </button>
+            )}
+        </div>
+    )
+}
+
+// ─── Split Right Sidebar for File Previews ──────────────────────────────
+function FilePreviewSidebar({ attachment, onClose }: { attachment: Attachment, onClose: () => void }) {
+    const isImage = attachment.mimeType.startsWith('image/')
+    const imgSrc = useAttachmentPreviewSrc(attachment)
+
+    return (
+        <div className="w-1/2 min-w-[300px] border-l border-border bg-card flex flex-col h-full animate-in slide-in-from-right-8 duration-300 relative z-20 shadow-xl">
+            <div className="flex items-center justify-between p-4 border-b border-border bg-background">
+                <div className="flex flex-col overflow-hidden px-2">
+                    <p className="text-sm font-semibold truncate" title={attachment.name}>{attachment.name}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-widest">{attachment.mimeType}</p>
+                </div>
+                <button onClick={onClose} className="p-2 rounded-md hover:bg-muted text-muted-foreground transition-colors shrink-0">
+                    <X className="h-4 w-4" />
+                </button>
+            </div>
+            <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-muted/20">
+                {isImage && imgSrc ? (
+                    <img src={imgSrc} alt={attachment.name} className="max-w-full max-h-full rounded-md shadow-sm border border-border object-contain" />
+                ) : attachment.mimeType === 'application/pdf' ? (
+                    <iframe src={imgSrc} className="w-full h-full rounded-md border border-border bg-white" title={attachment.name} />
+                ) : (
+                    <div className="text-center p-8 bg-background border border-border shadow-sm rounded-xl max-w-sm">
+                        <FileText className="h-16 w-16 mx-auto mb-4 text-muted-foreground/50" />
+                        <h3 className="text-sm font-medium mb-1 truncate">{attachment.name}</h3>
+                        <p className="text-xs text-muted-foreground mb-4">無法在瀏覽器中直接預覽此格式 ({attachment.mimeType})</p>
+                        {imgSrc && (
+                            <a href={imgSrc} download={attachment.name} className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium transition-colors bg-primary text-primary-foreground rounded-md shadow hover:bg-primary/90">
+                                下載檔案
+                            </a>
+                        )}
+                    </div>
+                )}
+            </div>
+        </div>
+    )
+}
+
+// ─── Status Badge ───────────────────────────────────────────────────────
+function StatusBadge({ text }: { text: string }) {
+    if (!text) return null
+    return (
+        <div className="flex items-center justify-center gap-2 py-2">
+            <div className="flex items-center gap-2 bg-muted/80 backdrop-blur border border-border rounded-full px-4 py-1.5 text-xs text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                <span>{text}</span>
+            </div>
+        </div>
+    )
+}
+
+// ─── Model Type ─────────────────────────────────────────────────────────
+type AvailableModel = {
+    value: string      // "{prefix}-{modelId}"
+    label: string      // modelId only
+    providerName: string
+    providerPrefix: string
+    source?: 'user' | 'group' | 'global'
+    groupId?: string
+    groupName?: string
+}
 
 // ─── Main Chat Interface ─────────────────────────────────────────────────
 export function ChatInterface({
@@ -45,6 +545,7 @@ export function ChatInterface({
     sessionId: initialSessionId,
     availableModels,
     initialSelectedModel,
+    initialSystemPrompt,
     initialQuery,
     initialMessages = [],
     initialMode = "normal",
@@ -56,6 +557,7 @@ export function ChatInterface({
     sessionId?: string
     availableModels: AvailableModel[]
     initialSelectedModel?: string
+    initialSystemPrompt?: string | null
     initialQuery?: string
     initialMessages?: DBMessage[]
     initialMode?: "normal" | "agent"
@@ -107,7 +609,7 @@ export function ChatInterface({
     )
     const [input, setInput] = useState("")
     const [selectedModel, setSelectedModel] = useState(initialSelectedModel || availableModels[0]?.value || "")
-    const [systemPrompt, setSystemPrompt] = useState("")
+    const [systemPrompt, setSystemPrompt] = useState(initialSystemPrompt ?? "")
     const [showSystemPrompt, setShowSystemPrompt] = useState(false)
     const [isGenerating, setIsGenerating] = useState(false)
     const [isSetupBlocked, setIsSetupBlocked] = useState(false)
@@ -451,7 +953,7 @@ export function ChatInterface({
                         setStatusText("")
                     }
                 })
-                .catch(() => {})
+                .catch(() => { })
         }
 
         const poll = async () => {
@@ -692,9 +1194,9 @@ export function ChatInterface({
                 const file = item.getAsFile();
                 if (!file) continue;
 
-                // 這裡可以再過濾只接受 jpg/png/jpeg/gif 等
-                if (!file.type.match(/^(image\/(png|jpeg|jpg|gif|webp))$/)) {
-                    toast.error("目前僅支援 PNG / JPEG / GIF / WebP 格式的貼上圖片");
+                // 這裡可以再過濾只接受 jpg/png/jpeg 等
+                if (!file.type.match(/^(image\/(png|jpeg|jpg|webp))$/)) {
+                    toast.error("目前僅支援 PNG / JPEG / WebP 格式的貼上圖片");
                     continue;
                 }
 
@@ -1033,7 +1535,7 @@ export function ChatInterface({
     const switchToNormalMode = useCallback(() => {
         setSubAgentSessionId(null)
         deactivateAgent()
-        agentFetch("/api/agent/providers/clear", { method: "POST" }).catch(() => {})
+        agentFetch("/api/agent/providers/clear", { method: "POST" }).catch(() => { })
         // Always open a new chat when leaving agent mode
         const newChatHref = projectId ? `${localePrefix}/p/${projectId}` : `${localePrefix}/chat`
         router.push(newChatHref)

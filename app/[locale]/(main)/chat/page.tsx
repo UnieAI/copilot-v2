@@ -61,10 +61,17 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
         }
     }
 
-    // Load messages for the current session (if provided)
+    // Load messages and system prompt for the current session (if provided)
     let initialMessages: any[] = []
+    let initialSystemPrompt = ""
     if (sessionId) {
-        const targetSession = await db.query.chatSessions.findFirst({
+        const chatSession = await db.query.chatSessions.findFirst({
+            where: and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)),
+            columns: { systemPrompt: true },
+        })
+        initialSystemPrompt = chatSession?.systemPrompt ?? ""
+
+        initialMessages = await db.query.chatMessages.findMany({
             where: and(
                 eq(chatSessions.id, sessionId),
                 eq(chatSessions.userId, userId),
@@ -91,6 +98,7 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
             sessionId={sessionId}
             availableModels={availableModels}
             initialSelectedModel={initialSelectedModel}
+            initialSystemPrompt={initialSystemPrompt}
             initialMessages={initialMessages}
             initialQuery={initialQuery as string | undefined}
             initialMode={initialMode}

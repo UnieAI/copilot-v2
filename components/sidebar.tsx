@@ -92,6 +92,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
     const [confirmDeleteProject, setConfirmDeleteProject] = useState<{ id: string; name: string } | null>(null)
     const [liveProfile, setLiveProfile] = useState<ProfileUpdateDetail>({})
     const [dbProfileImage, setDbProfileImage] = useState<string | null>(null)
+    const [myGroupCount, setMyGroupCount] = useState(0)
 
     const renameInputRef = useRef<HTMLInputElement>(null)
     const renameFolderInputRef = useRef<HTMLInputElement>(null)
@@ -138,6 +139,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
             const [sessRes, projRes] = await Promise.all([
                 fetch('/api/chat/sessions?mode=all'),
                 fetch('/api/chat/projects'),
+                fetch('/api/groups/my'),
             ])
             if (sessRes.ok) {
                 const rawSessions = await sessRes.json()
@@ -163,6 +165,10 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                 setSessions(sessionWithFlags.filter(Boolean) as ChatSession[])
             }
             if (projRes.ok) setProjects(await projRes.json())
+            if (groupRes.ok) {
+                const g = await groupRes.json()
+                setMyGroupCount(Array.isArray(g) ? g.length : 0)
+            }
         } catch { }
     }
 
@@ -367,7 +373,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
 
     return (<>
         <ShadcnSidebar collapsible="icon" className="border-r border-border/30 bg-muted/20 backdrop-blur-sm" {...props}>
-            {/* Header: 修復後的 Logo 佈局 */}
+            {/* Header */}
             <SidebarHeader className={cn(
                 "h-16 flex flex-row items-center",
                 state === 'collapsed' ? "justify-center" : "justify-between"
@@ -397,9 +403,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
 
             <SidebarContent className="px-1 pb-4 space-y-6 scrollbar-hide overflow-x-hidden">
                 {/* 新對話與建立專案 膠囊 */}
-                <div className={cn(
-                    state === 'expanded' ? "px-2 pt-2" : ""
-                )}>
+                <div className={cn(state === 'expanded' ? "px-2 pt-2" : "")}>
                     <div className={cn(
                         "group flex items-center bg-background shadow-sm rounded-[20px] border border-border/50 hover:border-primary/30 transition-all duration-300 overflow-hidden",
                         state === 'collapsed' ? "p-1.5 h-8 w-8 mx-auto justify-center" : "h-11 px-1.5 "
@@ -590,13 +594,16 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                         </div>
                         <div className="p-2 space-y-1">
                             <Link href="/settings"><DropdownMenuItem className="rounded-xl px-3 py-2.5 gap-3 cursor-pointer"><Settings className="h-4 w-4 opacity-70" /> 帳戶與隱私設定</DropdownMenuItem></Link>
+                            {myGroupCount > 0 && (
+                                <Link href="/group"><DropdownMenuItem className="rounded-xl px-3 py-2.5 gap-3 cursor-pointer"><Users2 className="h-4 w-4 opacity-70" /> 群組列表</DropdownMenuItem></Link>
+                            )}
                             {isAdmin && (
                                 <DropdownMenuSub>
                                     <DropdownMenuSubTrigger className="rounded-xl px-3 py-2.5 gap-3 cursor-pointer"><Shield className="h-4 w-4 opacity-70 text-amber-500" /> 管理員工具箱</DropdownMenuSubTrigger>
                                     <DropdownMenuPortal>
                                         <DropdownMenuSubContent className="w-56 rounded-2xl p-2 ml-1 shadow-2xl">
                                             <Link href="/admin/users"><DropdownMenuItem className="rounded-lg gap-2">使用者中心</DropdownMenuItem></Link>
-                                            <Link href="/admin/groups"><DropdownMenuItem className="rounded-lg gap-2">群組資源</DropdownMenuItem></Link>
+                                            <Link href="/admin/groups"><DropdownMenuItem className="rounded-lg gap-2">群組管理</DropdownMenuItem></Link>
                                             <Link href="/admin/usage"><DropdownMenuItem className="rounded-lg gap-2">用量監控</DropdownMenuItem></Link>
                                             <Link href="/admin/chat"><DropdownMenuItem className="rounded-lg gap-2">聊天監控</DropdownMenuItem></Link>
                                             <DropdownMenuSeparator /><Link href="/admin/settings"><DropdownMenuItem className="rounded-lg gap-2 text-primary font-bold">核心系統設定</DropdownMenuItem></Link>
