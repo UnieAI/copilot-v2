@@ -18,7 +18,7 @@ import {
   X,
 } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
-import { TextGenerateEffect } from "@/components/ui/text-generate-effect"
+import { MessageContent } from "@/components/chat/markdown-components"
 import { useInstanceStore } from "@/hooks/use-instance-store"
 import { appendInstanceParams } from "@/lib/opencode/client-utils"
 import { InstanceSelector } from "@/components/agent/instance-selector"
@@ -432,21 +432,21 @@ function normalizeQuestions(payload: any): QuestionRequest[] {
       sessionID: String(item?.sessionID || ""),
       questions: Array.isArray(item?.questions)
         ? item.questions
-            .map((question: any) => ({
-              question: String(question?.question || ""),
-              header: question?.header ? String(question.header) : undefined,
-              options: Array.isArray(question?.options)
-                ? question.options
-                    .map((option: any) => ({
-                      label: String(option?.label || ""),
-                      description: option?.description ? String(option.description) : undefined,
-                    }))
-                    .filter((option: QuestionOption) => option.label)
-                : [],
-              multiple: !!question?.multiple,
-              custom: question?.custom !== false,
-            }))
-            .filter((question: QuestionInfo) => question.question)
+          .map((question: any) => ({
+            question: String(question?.question || ""),
+            header: question?.header ? String(question.header) : undefined,
+            options: Array.isArray(question?.options)
+              ? question.options
+                .map((option: any) => ({
+                  label: String(option?.label || ""),
+                  description: option?.description ? String(option.description) : undefined,
+                }))
+                .filter((option: QuestionOption) => option.label)
+              : [],
+            multiple: !!question?.multiple,
+            custom: question?.custom !== false,
+          }))
+          .filter((question: QuestionInfo) => question.question)
         : [],
     }))
     .filter((item: QuestionRequest) => item.id && item.sessionID && item.questions.length > 0)
@@ -868,7 +868,7 @@ export function AgentChatInterface({
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ providerPrefix: selectedModel.providerID, modelID: selectedModel.modelID }),
-          }).catch(() => {})
+          }).catch(() => { })
         }
         const res = await agentFetch(`/api/agent/session/${sessionId}/prompt`, {
           method: "POST",
@@ -1083,9 +1083,9 @@ export function AgentChatInterface({
           customEnabled: multiple
             ? current.customEnabled
             : {
-                ...current.customEnabled,
-                [questionIndex]: false,
-              },
+              ...current.customEnabled,
+              [questionIndex]: false,
+            },
         },
       }
     })
@@ -1280,17 +1280,10 @@ export function AgentChatInterface({
                           }
                         >
                           {isAssistant ? (
-                            shouldAnimateGeneratedText(text) ? (
-                              <TextGenerateEffect
-                                words={text}
-                                className="whitespace-pre-wrap leading-7 text-foreground/90"
-                                wordClassName="text-foreground/90"
-                                duration={0.18}
-                              />
-                            ) : (
-                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
-                            )
-                          ) : text}
+                            <MessageContent content={text} />
+                          ) : (
+                            <div className="whitespace-pre-wrap">{text}</div>
+                          )}
                         </div>
                       )}
 
@@ -1447,11 +1440,10 @@ export function AgentChatInterface({
                               onClick={() =>
                                 updateQuestionOption(activeQuestion.id, questionIndex, option.label, multiple)
                               }
-                              className={`rounded-md border px-2.5 py-2 text-left text-xs transition-colors ${
-                                picked
+                              className={`rounded-md border px-2.5 py-2 text-left text-xs transition-colors ${picked
                                   ? "border-primary bg-primary/10 text-foreground"
                                   : "border-border hover:bg-muted"
-                              }`}
+                                }`}
                               disabled={respondingQuestionId === activeQuestion.id}
                             >
                               <div className="font-medium">{option.label}</div>
