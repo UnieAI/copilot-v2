@@ -494,7 +494,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                                     <DropdownMenuPortal>
                                         <DropdownMenuSubContent className="w-56 rounded-2xl p-2 ml-1 shadow-2xl">
                                             <Link href="/admin/users"><DropdownMenuItem className="rounded-lg gap-2">使用者中心</DropdownMenuItem></Link>
-                                            <Link href="/admin/groups"><DropdownMenuItem className="rounded-lg gap-2">群組監控</DropdownMenuItem></Link>
+                                            <Link href="/admin/groups"><DropdownMenuItem className="rounded-lg gap-2">群組管理</DropdownMenuItem></Link>
                                             <Link href="/admin/usage"><DropdownMenuItem className="rounded-lg gap-2">用量監控</DropdownMenuItem></Link>
                                             <Link href="/admin/chat"><DropdownMenuItem className="rounded-lg gap-2">聊天監控</DropdownMenuItem></Link>
                                             <DropdownMenuSeparator /><Link href="/admin/settings"><DropdownMenuItem className="rounded-lg gap-2 text-primary font-bold">核心系統設定</DropdownMenuItem></Link>
