@@ -44,7 +44,11 @@ export default async function ChatSessionPage({ params }: { params: Promise<{ id
     let chatSession
     for (let i = 0; i < 3; i++) {
         chatSession = await db.query.chatSessions.findFirst({
-            where: and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)),
+            where: and(
+                eq(chatSessions.id, sessionId),
+                eq(chatSessions.userId, userId),
+                eq(chatSessions.mode, "normal")
+            ),
         })
         if (chatSession) break
         // Wait 300ms before retrying

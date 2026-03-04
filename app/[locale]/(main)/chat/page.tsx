@@ -1,7 +1,7 @@
 import { db } from "@/lib/db"
 import { auth } from "@/auth"
 import { redirect } from "next/navigation"
-import { userProviders, userPreferences, chatMessages } from "@/lib/db/schema"
+import { userProviders, userPreferences, chatMessages, chatSessions } from "@/lib/db/schema"
 import { eq, and } from "drizzle-orm"
 import { ChatInterface } from "@/components/chat/chat-interface"
 import { getGroupModels } from "@/lib/get-group-models"
@@ -13,7 +13,13 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
 
     const userId = session.user.id as string
     const params = await searchParams
-    const sessionId = params.id as string | undefined
+    const modeRaw = params.mode
+    const mode = Array.isArray(modeRaw) ? modeRaw[0] : modeRaw
+    const initialMode: "normal" | "agent" = mode === "agent" ? "agent" : "normal"
+    const idRaw = params.id
+    const requestedId = Array.isArray(idRaw) ? idRaw[0] : idRaw
+    const sessionId = initialMode === "normal" ? requestedId : undefined
+    const initialAgentSessionId = initialMode === "agent" ? requestedId : undefined
     const initialQuery = params.q as string | undefined
     const freshKey = (params.fresh as string | undefined) || (params.new as string | undefined) || ''
 
@@ -58,13 +64,24 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
     // Load messages for the current session (if provided)
     let initialMessages: any[] = []
     if (sessionId) {
-        initialMessages = await db.query.chatMessages.findMany({
+        const targetSession = await db.query.chatSessions.findFirst({
             where: and(
-                eq(chatMessages.sessionId, sessionId),
-                eq(chatMessages.userId, userId)
+                eq(chatSessions.id, sessionId),
+                eq(chatSessions.userId, userId),
+                eq(chatSessions.mode, "normal")
             ),
-            orderBy: (m, { asc }) => [asc(m.createdAt)]
+            columns: { id: true }
         })
+
+        if (targetSession) {
+            initialMessages = await db.query.chatMessages.findMany({
+                where: and(
+                    eq(chatMessages.sessionId, sessionId),
+                    eq(chatMessages.userId, userId)
+                ),
+                orderBy: (m, { asc }) => [asc(m.createdAt)]
+            })
+        }
     }
 
     return (
@@ -76,6 +93,8 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
             initialSelectedModel={initialSelectedModel}
             initialMessages={initialMessages}
             initialQuery={initialQuery as string | undefined}
+            initialMode={initialMode}
+            initialAgentSessionId={initialAgentSessionId}
         />
     )
 }

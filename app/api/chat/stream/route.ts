@@ -68,12 +68,29 @@ export async function POST(req: NextRequest) {
                     const providerPrefix = dashIdx > -1 ? (selectedModel as string).slice(0, dashIdx) : '';
                     const realModelName = dashIdx > -1 ? (selectedModel as string).slice(dashIdx + 1) : (selectedModel as string);
 
+                    if (currentSessionId) {
+                        const existingSession = await db.query.chatSessions.findFirst({
+                            where: and(
+                                eq(chatSessions.id, currentSessionId),
+                                eq(chatSessions.userId, userId),
+                                eq(chatSessions.mode, 'normal'),
+                            ),
+                            columns: { id: true },
+                        });
+                        if (!existingSession) {
+                            send({ type: 'error', data: '找不到一般對話 Session，請重新建立對話。' });
+                            controller.close();
+                            return;
+                        }
+                    }
+
                     if (!currentSessionId) {
                         const [newSession] = await db.insert(chatSessions).values({
                             userId,
                             modelName: realModelName || selectedModel || 'default',
                             providerPrefix: providerPrefix || null,
                             title: 'New Chat',
+                            mode: 'normal',
                             projectId: projectId || null,
                         }).returning({ id: chatSessions.id });
                         currentSessionId = newSession.id;

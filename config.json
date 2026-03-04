@@ -1,0 +1,100 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "disabled_providers": [
+    "UNIE"
+  ],
+  "mode": {
+    "title": {
+      "model": "unieai/MiniMax-M2",
+      "options": {},
+      "permission": {}
+    },
+    "summary": {
+      "model": "unieai/MiniMax-M2",
+      "options": {},
+      "permission": {}
+    },
+    "default": {
+      "model": "UNIE/Case_Index_",
+      "options": {},
+      "permission": {}
+    }
+  },
+  "provider": {
+    "UNIE": {
+      "name": "UnieAI",
+      "npm": "@ai-sdk/openai-compatible",
+      "models": {
+        "Qwen3-30B-A3B-Instruct-2507": {
+          "name": "Qwen3-30B-A3B-Instruct-2507"
+        },
+        "Qwen3.5-27B": {
+          "name": "Qwen3.5-27B"
+        },
+        "MiniMax-M2": {
+          "name": "MiniMax-M2"
+        },
+        "Case_Index_": {
+          "name": "Case_Index_"
+        },
+        "MiniMax-M2-20260206-de8b6930": {
+          "name": "MiniMax-M2-20260206-de8b6930"
+        },
+        "Qwen3-30B-A3B-Thinking-2507": {
+          "name": "Qwen3-30B-A3B-Thinking-2507"
+        },
+        "Qwen3-30B-A3B-Instruct-2507-20260215-5807fff4": {
+          "name": "Qwen3-30B-A3B-Instruct-2507-20260215-5807fff4"
+        },
+        "sale-ai": {
+          "name": "sale-ai"
+        },
+        "gemma-3-12b-it": {
+          "name": "gemma-3-12b-it"
+        },
+        "unieai-coder": {
+          "name": "unieai-coder"
+        },
+        "royGPT": {
+          "name": "royGPT"
+        },
+        "trash-ai": {
+          "name": "trash-ai"
+        },
+        "MiniMax-M2-20260204-0d8ddd2a": {
+          "name": "MiniMax-M2-20260204-0d8ddd2a"
+        }
+      },
+      "options": {
+        "apiKey": "sk-FKYGe0iyuCSUQIPbwRqk14eN6TYJCDgfpP5QPwQ46FW6jveA",
+        "baseURL": "https://api.unieai.com/v1"
+      }
+    },
+    "test-provider": {
+      "name": "Test",
+      "npm": "@ai-sdk/openai-compatible",
+      "models": {
+        "gpt-4o": {
+          "name": "GPT-4o"
+        }
+      },
+      "options": {
+        "apiKey": "sk-test",
+        "baseURL": "https://api.openai.com/v1"
+      }
+    },
+    "UNAI": {
+      "name": "UnieAI",
+      "npm": "@ai-sdk/openai-compatible",
+      "models": {
+        "Qwen3-30B-A3B-Instruct-2507": {
+          "name": "Qwen3-30B"
+        }
+      },
+      "options": {
+        "apiKey": "sk-test",
+        "baseURL": "https://api.unieai.com/v1"
+      }
+    }
+  }
+}

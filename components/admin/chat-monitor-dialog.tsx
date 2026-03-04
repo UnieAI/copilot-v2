@@ -9,8 +9,8 @@ import remarkMath from "remark-math"
 import rehypeKatex from "rehype-katex"
 import "katex/dist/katex.min.css"
 import { MarkdownCode } from "@/components/chat/markdown-code"
+import { MarkdownComponents } from "@/components/chat/markdown-components"
 import { cn } from "@/lib/utils"
-import { MarkdownComponents } from "../chat/chat-interface"
 
 type ChatSessionItem = {
   id: string
@@ -399,4 +399,3 @@ export function ChatMonitorDialog({
     </Dialog>
   )
 }
-

@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { signOut, useSession } from "next-auth/react"
 import { useState, useEffect, useRef, useMemo } from "react"
 import {
@@ -9,7 +9,7 @@ import {
     Plus, Trash2, LogOut, Sun, Moon, Monitor,
     PanelLeftClose, Pencil, ChevronRight, ChevronDown,
     MoreHorizontal, FolderInput, FolderOutput, Folder, FolderPlus,
-    Users2, Loader2, Check, ChevronUp
+    Users2, Loader2, Check, ChevronUp, Bot
 } from "lucide-react"
 import { useTheme } from "next-themes"
 import { toast } from "sonner"
@@ -18,6 +18,8 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { streamStore } from "@/lib/stream-store"
 import { UnieAIIcon } from "@/components/sidebar/unieai-logo"
 import { motion, AnimatePresence } from "framer-motion"
+import { useInstanceStore } from "@/hooks/use-instance-store"
+import { appendInstanceParams } from "@/lib/opencode/client-utils"
 
 import {
     Sidebar as ShadcnSidebar,
@@ -38,15 +40,44 @@ import {
     DropdownMenuPortal,
 } from "@/components/ui/dropdown-menu"
 
-type ChatSession = { id: string; title: string; updatedAt: string; projectId: string | null }
+type ChatSession = {
+    id: string;
+    title: string;
+    createdAt: string;
+    updatedAt: string;
+    projectId: string | null;
+    mode?: "normal" | "agent";
+    externalSessionId?: string | null;
+}
 type ChatProject = { id: string; name: string; updatedAt: string }
+
+function extractAgentParentSessionId(payload: any): string {
+    const root = payload?.data ?? payload ?? {}
+    const candidates = [
+        root?.parentID,
+        root?.parentId,
+        root?.info?.parentID,
+        root?.info?.parentId,
+        root?.session?.parentID,
+        root?.session?.parentId,
+        root?.data?.parentID,
+        root?.data?.parentId,
+    ]
+
+    for (const candidate of candidates) {
+        if (typeof candidate === "string" && candidate) return candidate
+    }
+    return ""
+}
 
 export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>) {
     const pathname = usePathname()
+    const searchParams = useSearchParams()
     const router = useRouter()
     const { data: session } = useSession()
     const { theme, setTheme } = useTheme()
     const { state, setOpen, isMobile, setOpenMobile } = useSidebar()
+    const { instance } = useInstanceStore()
 
     const [sessions, setSessions] = useState<ChatSession[]>([])
     const [projects, setProjects] = useState<ChatProject[]>([])
@@ -62,6 +93,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
     const renameInputRef = useRef<HTMLInputElement>(null)
     const renameFolderInputRef = useRef<HTMLInputElement>(null)
     const currentSessionId = pathname?.split('/c/')?.[1]?.split('/')?.[0] || ''
+    const currentAgentSessionId = searchParams?.get("mode") === "agent" ? (searchParams?.get("id") || "") : ""
     const localePrefix = pathname?.split('/')[1]?.length <= 5 ? `/${pathname?.split('/')[1]}` : ''
 
     // ─── 串流監聽 ────────────────────────────────────────────────────────
@@ -74,22 +106,57 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
         return () => unsubscribe()
     }, [])
 
-    useEffect(() => { setMounted(true); fetchAll() }, [pathname])
+    useEffect(() => { setMounted(true); fetchAll() }, [pathname, searchParams?.toString()])
+
+    useEffect(() => {
+        const onRefresh = () => { fetchAll() }
+        window.addEventListener('sidebar:refresh', onRefresh as EventListener)
+        return () => {
+            window.removeEventListener('sidebar:refresh', onRefresh as EventListener)
+        }
+    }, [])
 
     const fetchAll = async () => {
         try {
             const [sessRes, projRes] = await Promise.all([
-                fetch('/api/chat/sessions'),
+                fetch('/api/chat/sessions?mode=all'),
                 fetch('/api/chat/projects'),
             ])
-            if (sessRes.ok) setSessions(await sessRes.json())
+            if (sessRes.ok) {
+                const rawSessions = await sessRes.json()
+                const sessionList = Array.isArray(rawSessions) ? rawSessions : []
+
+                // Hide child subagent sessions from sidebar (show only top-level agent sessions).
+                const sessionWithFlags = await Promise.all(sessionList.map(async (item: ChatSession) => {
+                    if ((item.mode || "normal") !== "agent") return item
+                    const targetId = item.externalSessionId || item.id
+                    if (!targetId) return item
+                    try {
+                        const res = await fetch(appendInstanceParams(`/api/agent/session/${encodeURIComponent(targetId)}`, instance), { cache: "no-store" })
+                        if (!res.ok) return item
+                        const payload = await res.json()
+                        const parentId = extractAgentParentSessionId(payload)
+                        if (parentId) return null
+                        return item
+                    } catch {
+                        return item
+                    }
+                }))
+
+                setSessions(sessionWithFlags.filter(Boolean) as ChatSession[])
+            }
             if (projRes.ok) setProjects(await projRes.json())
         } catch { }
     }
 
     // ─── 動作處理 ────────────────────────────────────────────────────────
     const startNewChat = () => {
-        router.push(`${localePrefix}/chat?fresh=${Date.now()}`)
+        const query = new URLSearchParams()
+        query.set("fresh", String(Date.now()))
+        if (searchParams?.get("mode") === "agent") {
+            query.set("mode", "agent")
+        }
+        router.push(`${localePrefix}/chat?${query.toString()}`)
         if (isMobile) setOpenMobile(false)
     }
 
@@ -108,12 +175,30 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
         } catch { toast.error("建立失敗") }
     }
 
-    const deleteSession = async (id: string, e: React.MouseEvent) => {
+    const deleteSession = async (sessionItem: ChatSession, e: React.MouseEvent) => {
         e.preventDefault(); e.stopPropagation()
         try {
-            await fetch(`/api/chat/${id}`, { method: 'DELETE' })
-            setSessions(prev => prev.filter(s => s.id !== id))
-            if (pathname?.includes(id)) router.push(`${localePrefix}/chat`)
+            const isAgent = (sessionItem.mode || "normal") === "agent"
+            const agentTargetId = sessionItem.externalSessionId || sessionItem.id
+            const rawEndpoint = isAgent
+                ? `/api/agent/session/${encodeURIComponent(agentTargetId)}`
+                : `/api/chat/${sessionItem.id}`
+            const endpoint = isAgent ? appendInstanceParams(rawEndpoint, instance) : rawEndpoint
+
+            const res = await fetch(endpoint, { method: 'DELETE' })
+            if (!res.ok) throw new Error("delete failed")
+
+            setSessions(prev => prev.filter(s => s.id !== sessionItem.id))
+
+            if (isAgent) {
+                if (currentAgentSessionId === agentTargetId) {
+                    router.push(`${localePrefix}/chat?mode=agent`)
+                }
+                toast.success("Agent 對話已刪除")
+                return
+            }
+
+            if (pathname?.includes(sessionItem.id)) router.push(`${localePrefix}/chat`)
             toast.success("對話已刪除")
         } catch { toast.error("刪除失敗") }
     }
@@ -153,35 +238,50 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
     }
 
     // ─── 資料整理 ────────────────────────────────────────────────────────
+    const normalSessions = sessions.filter(s => (s.mode || "normal") !== "agent")
+    // Sort agent sessions by createdAt descending (newest first)
+    const agentSessions = useMemo(() =>
+        sessions.filter(s => s.mode === "agent").sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+        [sessions]
+    )
+
     const projectsWithLatest = useMemo(() => {
         return projects.map(p => {
-            const chats = sessions.filter(s => s.projectId === p.id)
+            const chats = normalSessions.filter(s => s.projectId === p.id)
             const latest = chats.reduce((a, b) => a.updatedAt > b.updatedAt ? a : b, { updatedAt: p.updatedAt } as any)
             return { ...p, latestAt: latest.updatedAt }
         }).sort((a, b) => b.latestAt.localeCompare(a.latestAt))
-    }, [projects, sessions])
+    }, [projects, normalSessions])
 
-    const unassigned = sessions.filter(s => !s.projectId)
+    const unassigned = normalSessions.filter(s => !s.projectId)
     const isAdmin = (session?.user as any)?.role === 'admin' || (session?.user as any)?.role === 'super'
 
     // ─── 渲染對話單元 (帶 Loading 動畫) ───────────────────────────────────
     const renderSession = (s: ChatSession) => {
         const isGenerating = !!activeStreams[s.id];
+        const isAgent = s.mode === "agent"
+        const agentTargetId = s.externalSessionId || s.id
+        const isActive = isAgent ? currentAgentSessionId === agentTargetId : currentSessionId === s.id
+        const targetHref = isAgent
+            ? `${localePrefix}/chat?mode=agent&id=${encodeURIComponent(agentTargetId)}`
+            : (s.projectId ? `${localePrefix}/p/${s.projectId}/c/${s.id}` : `${localePrefix}/c/${s.id}`)
         return (
             <div
                 key={s.id}
                 className={cn(
                     "group relative flex items-center gap-2.5 rounded-xl px-3 py-2 cursor-pointer transition-all duration-200 text-[13px]",
-                    currentSessionId === s.id
+                    isActive
                         ? "bg-primary/5 text-primary font-semibold shadow-[inset_0_0_0_1px_rgba(var(--primary),0.05)]"
                         : "hover:bg-muted/60 text-muted-foreground hover:text-foreground"
                 )}
-                onClick={() => { if (renamingId !== s.id) router.push(s.projectId ? `/p/${s.projectId}/c/${s.id}` : `/c/${s.id}`) }}
+                onClick={() => { if (renamingId !== s.id) router.push(targetHref) }}
             >
                 {isGenerating ? (
                     <Loader2 className="h-3.5 w-3.5 shrink-0 text-primary animate-spin" />
                 ) : (
-                    <MessageSquare className={cn("h-3.5 w-3.5 shrink-0 opacity-40", currentSessionId === s.id && "opacity-100")} />
+                    isAgent
+                        ? <Bot className={cn("h-3.5 w-3.5 shrink-0 opacity-40", isActive && "opacity-100")} />
+                        : <MessageSquare className={cn("h-3.5 w-3.5 shrink-0 opacity-40", isActive && "opacity-100")} />
                 )}
 
                 {renamingId === s.id ? (
@@ -211,7 +311,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                                 <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setRenamingId(s.id); setRenameValue(s.title) }} className="gap-2 rounded-lg py-2">
                                     <Pencil className="h-3.5 w-3.5" /> 重命名
                                 </DropdownMenuItem>
-                                {(projects.length > 0 || s.projectId) && (
+                                {!isAgent && (projects.length > 0 || s.projectId) && (
                                     <DropdownMenuSub>
                                         <DropdownMenuSubTrigger className="gap-2 rounded-lg py-2">
                                             <FolderInput className="h-3.5 w-3.5" /> 移至專案
@@ -235,7 +335,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                                     </DropdownMenuSub>
                                 )}
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={(e) => deleteSession(s.id, e)} className="gap-2 rounded-lg py-2 text-destructive focus:bg-destructive/5">
+                                <DropdownMenuItem onClick={(e) => deleteSession(s, e)} className="gap-2 rounded-lg py-2 text-destructive focus:bg-destructive/5">
                                     <Trash2 className="h-3.5 w-3.5" /> 刪除
                                 </DropdownMenuItem>
                             </DropdownMenuContent>
@@ -320,7 +420,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                     )}
 
                     {state === 'expanded' && projectsWithLatest.map(p => {
-                        const folderSessions = sessions.filter(s => s.projectId === p.id);
+                        const folderSessions = normalSessions.filter(s => s.projectId === p.id);
                         const isOpen = !collapsedFolders.has(p.id);
                         const isProjectActive = pathname?.includes(`/p/${p.id}`);
                         const isFolderGenerating = folderSessions.some(s => activeStreams[s.id]);
@@ -402,13 +502,30 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                             {state === 'expanded' && <p className="px-4 text-[10px] font-bold text-muted-foreground/40 uppercase tracking-[0.2em] mb-2">最近對話</p>}
                             <div className="space-y-0.5">
                                 {unassigned.map(s => state === 'collapsed' ? (
-                                    <button key={s.id} onClick={() => router.push(`/c/${s.id}`)} className="w-10 h-10 mx-auto flex items-center justify-center rounded-xl hover:bg-muted/50 mb-1 relative border border-transparent hover:border-border/50">
+                                    <button key={s.id} onClick={() => router.push(`${localePrefix}/c/${s.id}`)} className="w-10 h-10 mx-auto flex items-center justify-center rounded-xl hover:bg-muted/50 mb-1 relative border border-transparent hover:border-border/50">
                                         {activeStreams[s.id] ? (
                                             <Loader2 className="h-4 w-4 text-primary animate-spin" />
                                         ) : (
                                             <MessageSquare className="h-4 w-4 text-muted-foreground/50" />
                                         )}
                                         {activeStreams[s.id] && <div className="absolute top-1 right-1 w-2 h-2 bg-primary rounded-full animate-pulse shadow-[0_0_8px_rgba(var(--primary),0.5)]" />}
+                                    </button>
+                                ) : renderSession(s))}
+                            </div>
+                        </div>
+                    )}
+
+                    {agentSessions.length > 0 && (
+                        <div className="pt-2">
+                            {state === 'expanded' && <p className="px-4 text-[10px] font-bold text-muted-foreground/40 uppercase tracking-[0.2em] mb-2">Agent 對話</p>}
+                            <div className="space-y-0.5">
+                                {agentSessions.map(s => state === 'collapsed' ? (
+                                    <button
+                                        key={s.id}
+                                        onClick={() => router.push(`${localePrefix}/chat?mode=agent&id=${encodeURIComponent(s.externalSessionId || s.id)}`)}
+                                        className="w-10 h-10 mx-auto flex items-center justify-center rounded-xl hover:bg-muted/50 mb-1 relative border border-transparent hover:border-border/50"
+                                    >
+                                        <Bot className="h-4 w-4 text-muted-foreground/50" />
                                     </button>
                                 ) : renderSession(s))}
                             </div>

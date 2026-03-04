@@ -39,7 +39,13 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ p
     if (!project) return new Response("Not found", { status: 404 });
 
     // Delete all chat sessions belonging to this project (cascade)
-    await db.delete(chatSessions).where(and(eq(chatSessions.projectId, projectId), eq(chatSessions.userId, userId)));
+    await db.delete(chatSessions).where(
+        and(
+            eq(chatSessions.projectId, projectId),
+            eq(chatSessions.userId, userId),
+            eq(chatSessions.mode, "normal")
+        )
+    );
 
     // Then delete the project itself
     await db.delete(chatProjects).where(eq(chatProjects.id, projectId));

@@ -22,7 +22,14 @@ export function MarkdownCode({ className, codeText, language, ...props }: any) {
 
   const prismTheme = resolvedTheme === "dark" ? themes.vsDark : themes.vsLight
   const displayLanguage = language || "code"
-  const isMermaid = language?.toLowerCase() === "mermaid"
+  const normalizedLanguage = language?.toLowerCase().trim().split(/\s+/)[0] || ""
+  const isMermaid = normalizedLanguage === "mermaid"
+
+  // When streamed/edited code changes, retry Mermaid rendering automatically
+  useEffect(() => {
+    if (!isMermaid) return
+    setMermaidError(false)
+  }, [codeText, isMermaid])
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(codeText)
@@ -49,18 +56,22 @@ export function MarkdownCode({ className, codeText, language, ...props }: any) {
           )}
           style={{ ...style, backgroundColor: 'transparent' }}
         >
-          {tokens.map((line, i) => (
-            <div key={i} {...getLineProps({ line, key: i })} className="table-row">
-              <span className="table-cell pr-5 text-muted-foreground/20 text-right select-none text-[10px] w-10 font-sans border-r border-white/5 whitespace-nowrap">
-                {i + 1}
-              </span>
-              <span className="table-cell pl-4 whitespace-pre">
-                {line.map((token, key) => (
-                  <span key={key} {...getTokenProps({ token, key })} />
-                ))}
-              </span>
-            </div>
-          ))}
+          {tokens.map((line, i) => {
+            const { key: _lineKey, ...lineProps } = getLineProps({ line, key: i }) as any
+            return (
+              <div key={i} {...lineProps} className="table-row">
+                <span className="table-cell pr-5 text-muted-foreground/20 text-right select-none text-[10px] w-10 font-sans border-r border-white/5 whitespace-nowrap">
+                  {i + 1}
+                </span>
+                <span className="table-cell pl-4 whitespace-pre">
+                  {line.map((token, key) => {
+                    const { key: _tokenKey, ...tokenProps } = getTokenProps({ token, key }) as any
+                    return <span key={key} {...tokenProps} />
+                  })}
+                </span>
+              </div>
+            )
+          })}
         </pre>
       )}
     </Highlight>
@@ -106,7 +117,10 @@ export function MarkdownCode({ className, codeText, language, ...props }: any) {
             <div className="flex items-center gap-0.5 bg-muted/50 rounded-full p-0.5 border border-border/50">
               {/* 圖表模式按鈕 */}
               <button
-                onClick={() => setShowSource(false)}
+                onClick={() => {
+                  setMermaidError(false)
+                  setShowSource(false)
+                }}
                 className={cn(
                   "h-7 w-7 flex items-center justify-center rounded-full transition-colors",
                   !showSource && !mermaidError

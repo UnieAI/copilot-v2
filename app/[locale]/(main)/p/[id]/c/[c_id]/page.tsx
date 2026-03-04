@@ -31,7 +31,8 @@ export default async function ProjectChatPage({
             where: and(
                 eq(chatSessions.id, chatId),
                 eq(chatSessions.userId, userId),
-                eq(chatSessions.projectId, projectId)
+                eq(chatSessions.projectId, projectId),
+                eq(chatSessions.mode, "normal")
             ),
         })
         if (chatSession) break
@@ -45,7 +46,11 @@ export default async function ProjectChatPage({
 
     // Get all chats in this project
     const projectSessions = await db.query.chatSessions.findMany({
-        where: and(eq(chatSessions.projectId, projectId), eq(chatSessions.userId, userId)),
+        where: and(
+            eq(chatSessions.projectId, projectId),
+            eq(chatSessions.userId, userId),
+            eq(chatSessions.mode, "normal")
+        ),
         orderBy: (s, { desc }) => [desc(s.updatedAt)],
     })
 

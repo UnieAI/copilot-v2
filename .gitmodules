@@ -4,3 +4,9 @@
 [submodule "submodules/daytona"]
 	path = submodules/daytona
 	url = https://github.com/daytonaio/daytona.git
+[submodule "submodules/nextjs-opencode-frontend"]
+	path = submodules/nextjs-opencode-frontend
+	url = https://github.com/UnieAI/nextjs-opencode-frontend.git
+[submodule "submodules/opencode"]
+	path = submodules/opencode
+	url = https://github.com/anomalyco/opencode.git

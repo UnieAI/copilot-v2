@@ -269,6 +269,8 @@ export const chatSessions = pgTable('chat_sessions', {
         .references(() => chatProjects.id, { onDelete: 'set null' }),
 
     title: text('title').notNull().default('New Chat'),
+    mode: varchar('mode', { length: 20 }).notNull().default('normal'), // 'normal' | 'agent'
+    externalSessionId: text('external_session_id'), // OpenCode session id for agent mode
     systemPrompt: text('system_prompt'),
     modelName: text('model_name').notNull(), // the model user selected for this chat
     providerPrefix: text('provider_prefix'), // prefix of the provider this model belongs to
@@ -288,6 +290,7 @@ export const chatMessages = pgTable('chat_messages', {
 
     role: varchar('role', { length: 50 }).notNull(), // 'user', 'assistant', 'system'
     content: text('content').notNull(),
+    externalMessageId: text('external_message_id'), // OpenCode message id for agent mode sync
 
     // store pre-processed text from docs/images, or metadata about the generation
     attachments: json('attachments').default('[]'),

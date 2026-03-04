@@ -1,501 +1,42 @@
 "use client"
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react"
-import { useRouter, usePathname } from "next/navigation"
-import remarkGfm from "remark-gfm"
-import ReactMarkdown from "react-markdown"
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
-import {
-    Send, Paperclip, X, RefreshCw, Edit2,
-    ChevronDown, ChevronUp, Loader2, Check, Settings2,
-    Brain, FileText, Bot, User, ChevronsUpDown,
-    Search
-} from "lucide-react"
+import Link from "next/link"
+import { useRouter, usePathname, useSearchParams } from "next/navigation"
+import { Paperclip } from "lucide-react"
 import { toast } from "sonner"
 import { streamStore } from "@/lib/stream-store"
 import { useTranslations } from "next-intl"
-import { DynamicGreeting } from "@/components/ui/dynamic-greeting"
-import { MarkdownCode } from "@/components/chat/markdown-code"
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuGroup,
-    DropdownMenuItem,
-    DropdownMenuPortal,
-    DropdownMenuSeparator,
-    DropdownMenuSub,
-    DropdownMenuSubContent,
-    DropdownMenuSubTrigger,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { useAgentGlow } from "@/components/agent/GlowFlowWrapper"
+import { Drawer, DrawerContent, DrawerTitle } from "@/components/ui/drawer"
 import { cn } from "@/lib/utils"
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
 import { SetupChecker } from "../setup-checker"
 import { Session } from "next-auth"
+import { useAgentStore } from "@/hooks/use-agent-store"
+import { useInstanceStore } from "@/hooks/use-instance-store"
+import { appendInstanceParams } from "@/lib/opencode/client-utils"
+import type { AgentPart } from "@/lib/agent/types"
 
-// ─── Types ─────────────────────────────────────────────────────────────
-type Attachment = {
-    name: string
-    mimeType: string
-    base64: string
-    previewUrl?: string
-}
-
-type DBMessage = {
-    id: string
-    role: "user" | "assistant" | "system"
-    content: string
-    attachments?: { name: string; mimeType: string; base64?: string }[]
-    createdAt: string
-}
-
-type UIMessage = {
-    id: string
-    dbId?: string
-    role: "user" | "assistant" | "system"
-    content: string
-    attachments?: { name: string; mimeType: string; base64?: string }[]
-    isStreaming?: boolean
-}
-
-const ACCEPTED_IMAGE_TYPES = ".jpg,.jpeg,.png"
-const ACCEPTED_DOC_TYPES = ".pdf,.doc,.docx,.csv,.txt,.md,.json,.js,.jsx,.ts,.tsx,.html,.css,.py"
-const SYSTEM_PROMPT_STORAGE_KEY = "chat:systemPrompt"
-
-function fileToBase64(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader()
-        reader.readAsDataURL(file)
-        reader.onload = () => resolve((reader.result as string).split(',')[1])
-        reader.onerror = reject
-    })
-}
-
-// ─── Model Item Component ─────────────────────────────────────────────
-const ModelItem = ({
-    model,
-    isSelected,
-    onSelect
-}: {
-    model: any;
-    isSelected: boolean;
-    onSelect: (value: string) => void
-}) => {
-    const [isHovered, setIsHovered] = useState(false);
-
-    return (
-        <DropdownMenuItem
-            onSelect={() => onSelect(model.value)}
-            asChild // 關鍵：讓 DropdownMenuItem 渲染成你自定義的按鈕樣式
-        >
-            <button
-                onMouseEnter={() => setIsHovered(true)}
-                onMouseLeave={() => setIsHovered(false)}
-                className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg transition-all text-left group outline-none ${isSelected
-                    ? "bg-primary/10 text-primary font-semibold"
-                    : "hover:bg-muted/60 text-foreground/90 hover:text-foreground"
-                    }`}
-            >
-                <div className="flex flex-col gap-0.5 overflow-hidden">
-                    <span className="text-sm truncate leading-tight">{model.label}</span>
-                    <span className={`text-[10px] font-medium uppercase tracking-wider leading-tight ${isSelected
-                        ? "text-primary/80"
-                        : "text-muted-foreground group-hover:text-muted-foreground/80"
-                        }`}>
-                        {model.providerName}
-                    </span>
-                </div>
-                {isSelected ? (
-                    <Check className="h-4 w-4 opacity-100 shrink-0" />
-                ) : (
-                    // <ChevronsUpDown className={`h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ${isHovered ? "opacity-100" : ""
-                    //     }`} />
-                    <></>
-                )}
-            </button>
-        </DropdownMenuItem>
-    );
-};
-
-// ─── Think Tag Parser ──────────────────────────────────────────────────
-function ThinkBlock({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
-    const [userExpanded, setUserExpanded] = useState<boolean | null>(null)
-    const expanded = userExpanded !== null ? userExpanded : !!isStreaming
-
-    return (
-        <div className="my-3 flex flex-col gap-2">
-            <button
-                onClick={() => setUserExpanded(!expanded)}
-                className="w-fit flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors group"
-            >
-                {isStreaming ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground/70" />
-                ) : (
-                    <Brain className="h-3.5 w-3.5 text-muted-foreground/70 group-hover:text-foreground transition-colors" />
-                )}
-                <span>思考過程</span>
-                {expanded ? <ChevronUp className="h-3 w-3 opacity-50" /> : <ChevronDown className="h-3 w-3 opacity-50" />}
-            </button>
-            {expanded && (
-                <div className="pl-4 ml-[7px] border-l-2 border-border/60 text-[13px] text-muted-foreground whitespace-pre-wrap font-mono leading-relaxed animate-in fade-in slide-in-from-top-1 duration-300">
-                    {content.trim()}
-                </div>
-            )}
-        </div>
-    )
-}
-
-// ─── Gemini Style Markdown Components ────────────────────────────────
-export const MarkdownComponents: any = {
-    // 標題：稍微加粗，帶有層次感
-    h1: ({ children }: any) => <h1 className="text-xl font-bold mt-6 mb-2 text-foreground">{children}</h1>,
-    h2: ({ children }: any) => <h2 className="text-lg font-semibold mt-5 mb-2 text-foreground/90">{children}</h2>,
-    h3: ({ children }: any) => <h3 className="text-base font-semibold mt-4 mb-1 text-foreground/80">{children}</h3>,
-
-    // 段落：增加行高，讓閱讀不吃力
-    p: ({ children }: any) => <p className="leading-7 mb-4 last:mb-0 text-foreground/90">{children}</p>,
-
-    // 清單：Gemini 風格的間距
-    ul: ({ children }: any) => <ul className="list-disc pl-6 mb-4 space-y-2 text-foreground/90">{children}</ul>,
-    ol: ({ children }: any) => <ol className="list-decimal pl-6 mb-4 space-y-2 text-foreground/90">{children}</ol>,
-    li: ({ children }: any) => <li className="leading-7">{children}</li>,
-
-    // 引用：左側紫色/藍色漸層條
-    blockquote: ({ children }: any) => (
-        <blockquote className="border-l-4 border-primary/30 pl-4 py-1 my-4 italic bg-primary/5 rounded-r-lg text-muted-foreground">
-            {children}
-        </blockquote>
-    ),
-
-    // 表格：這是最難搞的部分，幫你做成 Gemini 的簡潔風
-    table: ({ children }: any) => (
-        <div className="my-6 overflow-x-auto rounded-xl border border-border/40 shadow-sm">
-            <table className="w-full border-collapse text-sm text-left">
-                {children}
-            </table>
-        </div>
-    ),
-    thead: ({ children }: any) => <thead className="bg-muted/50 border-b border-border/40">{children}</thead>,
-    th: ({ children }: any) => <th className="px-4 py-3 font-semibold text-foreground/80">{children}</th>,
-    td: ({ children }: any) => <td className="px-4 py-3 border-b border-border/20 last:border-0">{children}</td>,
-
-    // 連結
-    a: ({ href, children }: any) => {
-        // 判斷是否為 YouTube 連結
-        const isYouTube = href && (
-            href.includes('youtube.com/watch') ||
-            href.includes('youtu.be/')
-        );
-
-        if (isYouTube) {
-            // 從各種常見 YouTube URL 格式提取 video ID
-            let videoId = '';
-
-            // 標準格式：https://www.youtube.com/watch?v=VIDEO_ID
-            const url = new URL(href);
-            if (url.hostname.includes('youtube.com')) {
-                videoId = url.searchParams.get('v') || '';
-            }
-            // 短網址：https://youtu.be/VIDEO_ID
-            else if (url.hostname === 'youtu.be') {
-                videoId = url.pathname.slice(1);
-            }
-
-            if (videoId) {
-                // 保留 ?si=... 或其他參數（可選）
-                const embedUrl = `https://www.youtube.com/embed/${videoId}${url.search ? url.search : ''}`;
-
-                return (
-                    <div className="my-4 aspect-video w-full max-w-3xl mx-auto rounded-xl overflow-hidden border border-border shadow-sm">
-                        <iframe
-                            width="100%"
-                            height="100%"
-                            src={embedUrl}
-                            title="YouTube video player"
-                            frameBorder="0"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                            referrerPolicy="strict-origin-when-cross-origin"
-                            allowFullScreen
-                        ></iframe>
-                    </div>
-                );
-            }
-        }
-
-        // 不是 YouTube 就照原樣渲染一般連結
-        return (
-            <a
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary font-medium underline underline-offset-4 hover:text-primary/80 transition-colors"
-            >
-                {children}
-            </a>
-        );
-    },
-
-    // 行內程式碼：淡色背景與圓角
-    code: ({ node, inline, className, children, ...props }: any) => {
-        // 核心邏輯：將內容轉為字串並檢查是否有換行符
-        const content = String(children).replace(/\n$/, "");
-        const hasNewline = content.includes("\n");
-        const language = className?.replace(/language-/, "");
-
-        // 如果沒有換行符，且不是明確的語言標籤開頭，則判定為 Inline Code
-        if (!hasNewline && !language) {
-            return (
-                <code
-                    className="
-                        mx-1 rounded-md px-1.5 py-0.5 
-                        bg-muted/80 dark:bg-white/10 
-                        text-primary dark:text-primary-foreground 
-                        font-mono text-[0.85em] font-bold
-                        border border-border/40
-                        break-all
-                    "
-                    {...props}
-                >
-                    {content}
-                </code>
-            );
-        }
-
-        // 否則，渲染為整塊的代碼卡片 (Block Code)
-        return (
-            <MarkdownCode
-                className={className}
-                language={language}
-                codeText={content}
-                {...props}
-            />
-        );
-    }
-};
-
-function MessageContent({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
-    // 使用 useMemo 解析內容，確保只有內容變動時才重新計算 parts
-    const parts = useMemo(() => {
-        const res: { type: 'text' | 'think'; content: string; unfinished?: boolean }[] = [];
-        let buffer = content;
-        let inThink = false;
-        let thinkStartIndex = -1;
-
-        // 先找第一個 <think> 或 </think>
-        const firstThinkOpen = buffer.indexOf('<think>');
-        const firstThinkClose = buffer.indexOf('</think>');
-
-        if (firstThinkOpen === -1 && firstThinkClose === -1) {
-            // 完全沒有 think 標籤 → 全當 text
-            res.push({ type: 'text', content: buffer });
-            return res;
-        }
-
-        // 情況1：有 <think> 開頭 → 走原本邏輯（已能處理）
-        if (firstThinkOpen !== -1 && (firstThinkOpen < firstThinkClose || firstThinkClose === -1)) {
-            // 使用原本的 regex 方式處理多個成對的 <think>...</think>
-            const thinkRegex = /<think>([\s\S]*?)<\/think>/g;
-            let lastIndex = 0;
-            let match;
-
-            while ((match = thinkRegex.exec(buffer)) !== null) {
-                if (match.index > lastIndex) {
-                    res.push({ type: 'text', content: buffer.slice(lastIndex, match.index) });
-                }
-                res.push({ type: 'think', content: match[1] });
-                lastIndex = match.index + match[0].length;
-            }
-
-            const remaining = buffer.slice(lastIndex);
-            const openThinkIndex = remaining.indexOf('<think>');
-
-            if (openThinkIndex !== -1) {
-                if (openThinkIndex > 0) {
-                    res.push({ type: 'text', content: remaining.slice(0, openThinkIndex) });
-                }
-                res.push({
-                    type: 'think',
-                    content: remaining.slice(openThinkIndex + 7),
-                    unfinished: true,
-                });
-            } else if (remaining) {
-                res.push({ type: 'text', content: remaining });
-            }
-
-            return res;
-        }
-
-        // 情況2：沒有 <think> 但有 </think> → 把 </think> 之前全部當 think
-        if (firstThinkOpen === -1 && firstThinkClose !== -1) {
-            const thinkContent = buffer.slice(0, firstThinkClose);
-            const afterThink = buffer.slice(firstThinkClose + 8); // 跳過 </think>
-
-            if (thinkContent.trim()) {
-                res.push({ type: 'think', content: thinkContent });
-            }
-
-            if (afterThink.trim()) {
-                res.push({ type: 'text', content: afterThink });
-            }
-
-            return res;
-        }
-
-        // 其他混合情況（理論上已被上面兩個分支涵蓋，但保留防呆）
-        res.push({ type: 'text', content: buffer });
-        return res;
-    }, [content]);
-
-    return (
-        <div className="flex flex-col gap-3 overflow-anchor-auto min-h-[1.5em]">
-            {parts.map((p, i) => {
-                const isLast = i === parts.length - 1;
-                return (
-                    <div
-                        key={`${p.type}-${i}`}
-                        className={cn(
-                            "transition-opacity duration-300",
-                            isStreaming && isLast ? "opacity-100" : "opacity-100"
-                        )}
-                    >
-                        {p.type === 'think' ? (
-                            <ThinkBlock content={p.content} isStreaming={p.unfinished && isStreaming} />
-                        ) : (
-                            <div className="prose-container relative">
-                                <ReactMarkdown
-                                    remarkPlugins={[remarkGfm, remarkMath]}
-                                    rehypePlugins={[rehypeKatex]}
-                                    components={MarkdownComponents}
-                                >
-                                    {p.content}
-                                </ReactMarkdown>
-                                {/* 流式游標 (Gemini Style) */}
-                                {isStreaming && isLast && (
-                                    <span className="inline-block w-1.5 h-4 ml-1 bg-primary/60 rounded-full animate-pulse vertical-middle" />
-                                )}
-                            </div>
-                        )}
-                    </div>
-                );
-            })}
-        </div>
-    );
-}
-
-// ─── Image / File Attachment Thumbnail ───────────────────────────────────
-function AttachmentThumbnail({ attachment, onRemove, onClick }: {
-    attachment: Attachment
-    onRemove?: () => void
-    onClick?: () => void
-}) {
-    const isImage = attachment.mimeType.startsWith('image/')
-    const isPdf = attachment.mimeType === 'application/pdf'
-    const imgSrc = attachment.previewUrl || (attachment.base64 ? `data:${attachment.mimeType};base64,${attachment.base64}` : undefined)
-
-    // Extract simple extension (.pdf, .csv, string)
-    let ext = ''
-    try {
-        const parts = attachment.name.split('.')
-        ext = parts.length > 1 ? parts[parts.length - 1].toUpperCase() : 'DOC'
-    } catch { ext = 'FILE' }
-
-    return (
-        <div className="group relative h-16 w-16 md:h-20 md:w-20 shrink-0 rounded-2xl border border-border bg-muted overflow-hidden cursor-pointer hover:ring-2 hover:ring-ring transition-all"
-            onClick={onClick}>
-            {isImage && imgSrc ? (
-                <img src={imgSrc} alt="attachment" className="w-full h-full object-cover" />
-            ) : isPdf && imgSrc ? (
-                <div className="w-full h-full relative bg-white overflow-hidden">
-                    <iframe
-                        src={`${imgSrc}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
-                        className="w-full h-full border-0 pointer-events-none"
-                        scrolling="no"
-                        aria-hidden
-                    />
-                    <span className="absolute bottom-1 left-1.5 px-1.5 py-0.5 rounded-md bg-black/60 text-[9px] font-semibold text-white">PDF</span>
-                </div>
-            ) : (
-                <div className="flex flex-col items-center justify-center w-full h-full p-2 text-muted-foreground bg-card">
-                    <FileText className="h-6 w-6 md:h-8 md:w-8 mb-1 opacity-80" />
-                    <span className="text-[9px] font-bold tracking-wider">{ext}</span>
-                </div>
-            )}
-
-            {onRemove && (
-                <button
-                    onClick={(e) => { e.stopPropagation(); onRemove() }}
-                    className="absolute -top-1 -right-1 h-5 w-5 bg-background border border-border rounded-full flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-                >
-                    <X className="h-3 w-3" />
-                </button>
-            )}
-        </div>
-    )
-}
-
-// ─── Split Right Sidebar for File Previews ──────────────────────────────
-function FilePreviewSidebar({ attachment, onClose }: { attachment: Attachment, onClose: () => void }) {
-    const isImage = attachment.mimeType.startsWith('image/')
-    const imgSrc = attachment.previewUrl || (attachment.base64 ? `data:${attachment.mimeType};base64,${attachment.base64}` : undefined)
-
-    return (
-        <div className="w-1/2 min-w-[300px] border-l border-border bg-card flex flex-col h-full animate-in slide-in-from-right-8 duration-300 relative z-20 shadow-xl">
-            <div className="flex items-center justify-between p-4 border-b border-border bg-background">
-                <div className="flex flex-col overflow-hidden px-2">
-                    <p className="text-sm font-semibold truncate" title={attachment.name}>{attachment.name}</p>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-widest">{attachment.mimeType}</p>
-                </div>
-                <button onClick={onClose} className="p-2 rounded-md hover:bg-muted text-muted-foreground transition-colors shrink-0">
-                    <X className="h-4 w-4" />
-                </button>
-            </div>
-            <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-muted/20">
-                {isImage && imgSrc ? (
-                    <img src={imgSrc} alt={attachment.name} className="max-w-full max-h-full rounded-md shadow-sm border border-border object-contain" />
-                ) : attachment.mimeType === 'application/pdf' ? (
-                    <iframe src={imgSrc} className="w-full h-full rounded-md border border-border bg-white" title={attachment.name} />
-                ) : (
-                    <div className="text-center p-8 bg-background border border-border shadow-sm rounded-xl max-w-sm">
-                        <FileText className="h-16 w-16 mx-auto mb-4 text-muted-foreground/50" />
-                        <h3 className="text-sm font-medium mb-1 truncate">{attachment.name}</h3>
-                        <p className="text-xs text-muted-foreground mb-4">無法在瀏覽器中直接預覽此格式 ({attachment.mimeType})</p>
-                        {imgSrc && (
-                            <a href={imgSrc} download={attachment.name} className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium transition-colors bg-primary text-primary-foreground rounded-md shadow hover:bg-primary/90">
-                                下載檔案
-                            </a>
-                        )}
-                    </div>
-                )}
-            </div>
-        </div>
-    )
-}
-
-// ─── Status Badge ───────────────────────────────────────────────────────
-function StatusBadge({ text }: { text: string }) {
-    if (!text) return null
-    return (
-        <div className="flex items-center justify-center gap-2 py-2">
-            <div className="flex items-center gap-2 bg-muted/80 backdrop-blur border border-border rounded-full px-4 py-1.5 text-xs text-muted-foreground">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                <span>{text}</span>
-            </div>
-        </div>
-    )
-}
-
-// ─── Model Type ─────────────────────────────────────────────────────────
-type AvailableModel = {
-    value: string      // "{prefix}-{modelId}"
-    label: string      // modelId only
-    providerName: string
-    providerPrefix: string
-    source?: 'user' | 'group' | 'global'
-    groupId?: string
-    groupName?: string
-}
+import {
+    Attachment, DBMessage, UIMessage, AgentTextPart, AgentReasoningPart,
+    AgentToolPart, AgentMessage, AgentToolCall, AgentSelectedModel,
+    AgentModelOption, TodoItem, AvailableModel
+} from "@/components/chat/types"
+import {
+    SYSTEM_PROMPT_STORAGE_KEY,
+    AGENT_MODEL_STORAGE_KEY, toRecord, toAgentMessages, normalizeAgentProviders,
+    readAgentModelStorage, saveAgentModelStorage, getToolStatus, stringifyValue,
+    extractSessionIdFromTaskOutput, extractAgentToolCall, parseTodoJson,
+    resolveTodoItems, buildActiveToolLabel, toUIAgentMessages, fileToBase64
+} from "@/components/chat/utils"
+import { FilePreviewDrawer, AgentToolFlowSidebar, SubAgentSidebar } from "@/components/chat/sidebars"
+import { ChatHeader } from "@/components/chat/chat-header"
+import { ChatMessagesPanel } from "@/components/chat/chat-messages-panel"
+import { ChatComposer } from "@/components/chat/chat-composer"
+import { useChatSend } from "@/hooks/use-chat-send"
+import { useModelPicker } from "@/hooks/use-model-picker"
+import { useAgentChatActions } from "@/hooks/use-agent-chat-actions"
 
 // ─── Main Chat Interface ─────────────────────────────────────────────────
 export function ChatInterface({
@@ -505,6 +46,8 @@ export function ChatInterface({
     initialSelectedModel,
     initialQuery,
     initialMessages = [],
+    initialMode = "normal",
+    initialAgentSessionId,
     projectId,
     onSessionCreated,
 }: {
@@ -514,19 +57,43 @@ export function ChatInterface({
     initialSelectedModel?: string
     initialQuery?: string
     initialMessages?: DBMessage[]
+    initialMode?: "normal" | "agent"
+    initialAgentSessionId?: string
     projectId?: string          // if set, new sessions are placed in this project
     onSessionCreated?: (id: string, title: string) => void  // called when a new session is created
 }) {
     const router = useRouter()
     const pathname = usePathname()
     const userRole = (session.user as any).role as string ?? "user"
+    const searchParams = useSearchParams()
     const segments = pathname?.split('/').filter(Boolean) || []
     const localePrefix = segments.length && segments[0].length <= 5 ? `/${segments[0]}` : ''
     const t = useTranslations('Home')
+    const { triggerGlow } = useAgentGlow()
+    const { instance } = useInstanceStore()
     const [sessionId, setSessionId] = useState(initialSessionId)
+    const [chatMode, setChatMode] = useState<"normal" | "agent">(initialMode)
+    const agentFetch = useCallback(
+        (url: string, init?: RequestInit) => fetch(appendInstanceParams(url, instance), init),
+        [instance]
+    )
+    const [agentSessionId, setAgentSessionId] = useState<string | undefined>(initialAgentSessionId)
+    const [agentName, setAgentName] = useState<string>("")
+    // ── Agent Store ──
+    const agentStore = useAgentStore(agentSessionId)
+    const [agentModels, setAgentModels] = useState<AgentModelOption[]>([])
+    const [agentSelectedModel, setAgentSelectedModel] = useState<AgentSelectedModel | null>(null)
+    const [agentModelPickerOpen, setAgentModelPickerOpen] = useState(false)
+    const [agentModelSearch, setAgentModelSearch] = useState("")
+    const [agentLocalBusy, setAgentLocalBusy] = useState(false) // bridges gap between send and first polling result
+    const agentLocalBusyRef = useRef(false)
+    const [agentPaused, setAgentPaused] = useState(false)
+    const agentPausedRef = useRef(false)
+    const agentManualStopRef = useRef(false)
     // Track whether we have an active stream registered in the module store
     const storeKeyRef = useRef<string | null>(null)
     const abortControllerRef = useRef<AbortController | null>(null)
+    const agentSwitchTimerRef = useRef<number | null>(null)
     const [messages, setMessages] = useState<UIMessage[]>(
         initialMessages.map(m => ({
             id: m.id,
@@ -542,17 +109,18 @@ export function ChatInterface({
     const [showSystemPrompt, setShowSystemPrompt] = useState(false)
     const [isGenerating, setIsGenerating] = useState(false)
     const [isSetupBlocked, setIsSetupBlocked] = useState(false)
+    const [isSyncingModels, setIsSyncingModels] = useState(false)
     const [statusText, setStatusText] = useState("")
     const [attachments, setAttachments] = useState<Attachment[]>([])
     const [editingId, setEditingId] = useState<string | null>(null)
     const [editContent, setEditContent] = useState("")
     const [editAttachments, setEditAttachments] = useState<Attachment[]>([])
     const [editKeepAttachments, setEditKeepAttachments] = useState<Attachment[]>([])
-
     // Split view state
     const [selectedPreviewAttachment, setSelectedPreviewAttachment] = useState<Attachment | null>(null)
+    const [selectedToolFlowMessageId, setSelectedToolFlowMessageId] = useState<string | null>(null)
+    const [subAgentSessionId, setSubAgentSessionId] = useState<string | null>(null)
     const [isDragging, setIsDragging] = useState(false)
-    const [modelSearch, setModelSearch] = useState("")
 
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -566,6 +134,140 @@ export function ChatInterface({
     const isAutoScrollingRef = useRef(isAutoScrolling)
     useEffect(() => { isAutoScrollingRef.current = isAutoScrolling }, [isAutoScrolling])
     const [showScrollButton, setShowScrollButton] = useState(false)
+    const [isMobileSubAgentDrawer, setIsMobileSubAgentDrawer] = useState(true)
+
+    useEffect(() => {
+        agentLocalBusyRef.current = agentLocalBusy
+    }, [agentLocalBusy])
+
+    useEffect(() => {
+        if (typeof window === "undefined") return
+        const update = () => setIsMobileSubAgentDrawer(window.innerWidth <= 768)
+        update()
+        window.addEventListener("resize", update)
+        window.addEventListener("orientationchange", update)
+        return () => {
+            window.removeEventListener("resize", update)
+            window.removeEventListener("orientationchange", update)
+        }
+    }, [])
+
+    useEffect(() => {
+        agentPausedRef.current = agentPaused
+    }, [agentPaused])
+
+    // ── Load agent messages (shared by polling and send) ──
+    const loadAgentMessages = useCallback(async (targetSessionId?: string) => {
+        const id = targetSessionId || agentSessionId
+        if (!id) return false
+        const res = await agentFetch(`/api/agent/session/${id}/messages`, { cache: "no-store" })
+        const payload = await res.json()
+        if (!res.ok) {
+            throw new Error(payload?.error || "Failed to fetch agent messages")
+        }
+
+        // Populate agent store with full message data
+        const raw = toAgentMessages(payload)
+        const storeMessages: import("@/lib/agent/types").AgentMessage[] = []
+        const storeParts: Record<string, AgentPart[]> = {}
+
+        raw.forEach((m: any) => {
+            const info = m.info || m
+            const msgId = String(info.id || m.id || "")
+            if (!msgId) return
+            const role = String(info.role || m.role || "assistant")
+            storeMessages.push({
+                id: msgId,
+                sessionID: id,
+                role: role === "user" ? "user" : "assistant",
+                finish: info.finish || m.finish || "",
+                time: info.time || m.time,
+            })
+            const parts = Array.isArray(m.parts) ? m.parts : []
+            storeParts[msgId] = parts
+                .filter((p: any) => p?.type)
+                .map((p: any, idx: number) => ({
+                    ...p,
+                    id: p.id || `${msgId}-part-${idx}`,
+                } as AgentPart))
+        })
+
+        agentStore.dispatch({
+            type: "BULK_LOAD",
+            sessionID: id,
+            messages: storeMessages,
+            parts: storeParts,
+        })
+
+        if (agentPausedRef.current || agentManualStopRef.current) return false
+
+        // Return whether the agent is still busy (has unfinished assistant messages)
+        const lastMessage = storeMessages[storeMessages.length - 1]
+        if (!lastMessage) return false
+        const lastAssistant = [...storeMessages].reverse().find(m => m.role === "assistant")
+        const hasUnfinishedAssistant = !!lastAssistant && !lastAssistant.finish && !(typeof lastAssistant.time === "object" && lastAssistant.time?.completed)
+        if (hasUnfinishedAssistant) return true
+        if (lastMessage.role === "user" && !agentManualStopRef.current) return true
+        return false
+    }, [agentFetch, agentSessionId, agentStore.dispatch])
+
+    const loadAgentPendingRequests = useCallback(async (targetSessionId?: string) => {
+        const id = targetSessionId || agentSessionId
+        if (!id) return
+        const [permRes, qRes] = await Promise.all([
+            agentFetch(`/api/agent/permission?sessionId=${id}`, { cache: "no-store" }),
+            agentFetch(`/api/agent/question?sessionId=${id}`, { cache: "no-store" }),
+        ])
+        const perms = permRes.ok ? await permRes.json() : []
+        const qs = qRes.ok ? await qRes.json() : []
+        agentStore.dispatch({
+            type: "SET_PENDING_REQUESTS",
+            sessionID: id,
+            permissions: Array.isArray(perms) ? perms : [],
+            questions: Array.isArray(qs) ? qs : [],
+        })
+    }, [agentFetch, agentSessionId, agentStore.dispatch])
+
+    // Derive busy state for agent mode
+    const agentIsBusy = agentStore.isBusy
+
+    // Derive agent UI messages from store + merge optimistic messages
+    const agentUIMessages = useMemo((): UIMessage[] => {
+        if (chatMode !== "agent") return []
+        const storeMessages: UIMessage[] = agentStore.messages.map((msg) => {
+            const parts = agentStore.partsFor(msg.id)
+            const textBlocks = parts
+                .filter((p): p is { type: "text"; id: string; text: string } => p.type === "text")
+                .map(p => p.text)
+                .filter(Boolean)
+            const hasToolParts = parts.some(p => p.type === "tool")
+            const hasRunningTool = parts.some(p =>
+                p.type === "tool" && (p.state?.status === "running" || p.state?.status === "pending")
+            )
+            const isFinished = !!msg.finish
+            const hasContent = textBlocks.length > 0 || hasToolParts
+            const busy = !agentPaused && (agentIsBusy || agentLocalBusy)
+
+            return {
+                id: msg.id,
+                dbId: msg.id,
+                role: msg.role === "user" ? "user" as const : "assistant" as const,
+                content: textBlocks.join("\n\n"),
+                isStreaming: msg.role === "assistant" ? (!agentPaused && (hasRunningTool || (hasContent && !isFinished && busy))) : false,
+                agentToolCalls: [], // We render via AgentPartsRenderer instead
+            }
+        })
+
+        // Merge optimistic messages — but drop agent-user-* once the store has real user messages
+        // (the store gets populated by polling/full sync, which returns the real user message from OpenCode)
+        const storeHasUserMsg = storeMessages.some(m => m.role === "user")
+        const optimistic = messages.filter(m => {
+            if (m.id.startsWith("agent-user-")) return !storeHasUserMsg
+            if (m.id.startsWith("agent-error-") || m.id.startsWith("agent-wait-") || m.id.startsWith("agent-regen-wait-")) return true
+            return false
+        })
+        return [...storeMessages, ...optimistic]
+    }, [chatMode, agentStore.messages, agentStore.partsFor, agentIsBusy, agentLocalBusy, agentPaused, messages])
 
     // IntersectionObserver: show/hide the scroll button based on messagesEndRef visibility
     useEffect(() => {
@@ -678,6 +380,181 @@ export function ChatInterface({
         }
         window.sessionStorage.setItem(SYSTEM_PROMPT_STORAGE_KEY, systemPrompt)
     }, [systemPrompt])
+    useEffect(() => {
+        const mode = searchParams?.get("mode") === "agent" ? "agent" : "normal"
+        setChatMode(mode)
+        if (mode === "agent") {
+            const id = searchParams?.get("id") || undefined
+            setAgentSessionId(id)
+        }
+    }, [searchParams])
+
+    const agentChatHref = useCallback((id?: string) => {
+        const query = new URLSearchParams()
+        query.set("mode", "agent")
+        if (id) query.set("id", id)
+        return `${localePrefix}/chat?${query.toString()}`
+    }, [localePrefix])
+
+    const ensureAgentSession = useCallback(async () => {
+        if (agentSessionId) return agentSessionId
+        const res = await agentFetch("/api/agent/session", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+        })
+        const payload = await res.json()
+        if (!res.ok) {
+            throw new Error(payload?.error || "Failed to create agent session")
+        }
+        const id = String(payload?.id || payload?.info?.id || payload?.sessionID || "")
+        if (!id) {
+            throw new Error("OpenCode returned an invalid session id")
+        }
+        setAgentSessionId(id)
+        router.replace(agentChatHref(id))
+        return id
+    }, [agentSessionId, agentChatHref, router])
+
+    const agentPollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+    // ── Agent sync (polling only) ──
+    useEffect(() => {
+        if (chatMode !== "agent" || !agentSessionId) {
+            if (agentPollRef.current) { clearTimeout(agentPollRef.current); agentPollRef.current = null }
+            return
+        }
+
+        let cancelled = false
+        const scheduleNext = (stillBusy: boolean) => {
+            if (cancelled) return
+            const delay = stillBusy ? 450 : 1800
+            agentPollRef.current = setTimeout(poll, delay)
+        }
+
+        const poll = async () => {
+            if (cancelled) return
+            let stillBusy = agentLocalBusyRef.current
+            try {
+                const [pollBusy] = await Promise.all([
+                    loadAgentMessages(agentSessionId),
+                    loadAgentPendingRequests(agentSessionId),
+                ])
+                const nextBusy = Boolean(pollBusy)
+                if (!cancelled) {
+                    setAgentLocalBusy(nextBusy)
+                }
+                stillBusy = nextBusy
+            } catch {
+                // silent — polling will retry next interval
+            }
+            scheduleNext(stillBusy)
+        }
+
+        // Initial sync immediately
+        poll()
+
+        return () => {
+            cancelled = true
+            if (agentPollRef.current) { clearTimeout(agentPollRef.current); agentPollRef.current = null }
+        }
+    }, [chatMode, agentSessionId, loadAgentMessages, loadAgentPendingRequests])
+
+    useEffect(() => {
+        if (chatMode !== "agent") return
+        if (agentPaused || agentManualStopRef.current) {
+            setIsGenerating(false)
+            setStatusText("")
+            return
+        }
+        const busy = agentIsBusy || agentLocalBusy
+        setIsGenerating(busy)
+        setStatusText(busy ? "Agent 思考中..." : "")
+    }, [chatMode, agentIsBusy, agentLocalBusy, agentPaused])
+
+    useEffect(() => {
+        if (chatMode !== "agent") return
+        agentFetch("/api/agent/agents", { cache: "no-store" })
+            .then(async (res) => {
+                if (!res.ok) return []
+                const payload = await res.json()
+                if (Array.isArray(payload)) return payload
+                if (Array.isArray(payload?.data)) return payload.data
+                if (Array.isArray(payload?.agents)) return payload.agents
+                return []
+            })
+            .then((list) => {
+                const names = list
+                    .map((item: any) => String(item?.name || ""))
+                    .filter(Boolean)
+                if (names.length === 0) return
+                const preferred =
+                    names.find((name: string) => name === "build") ||
+                    names.find((name: string) => name === "plan") ||
+                    names[0]
+                setAgentName(preferred)
+            })
+            .catch(() => { })
+    }, [chatMode])
+
+    // ── Fetch agent providers/models when entering agent mode ──
+    useEffect(() => {
+        if (chatMode !== "agent") return
+        setIsSyncingModels(true)
+        agentFetch("/api/agent/providers/sync", { method: "POST", cache: "no-store" })
+            .then(async (res) => {
+                if (!res.ok) return
+                const payload = await res.json()
+                const { models, defaultModel } = normalizeAgentProviders(payload)
+                setAgentModels(models)
+                // Restore from localStorage or use server default
+                const stored = readAgentModelStorage()
+                if (stored && models.some(m => m.providerID === stored.providerID && m.modelID === stored.modelID)) {
+                    setAgentSelectedModel(stored)
+                } else if (defaultModel) {
+                    setAgentSelectedModel(defaultModel)
+                } else if (models.length > 0) {
+                    setAgentSelectedModel({ providerID: models[0].providerID, modelID: models[0].modelID })
+                }
+            })
+            .catch(() => { })
+            .finally(() => setIsSyncingModels(false))
+
+        return () => {
+            // Clear API keys from opencode when unmounting or leaving agent mode
+            agentFetch("/api/agent/providers/clear", { method: "POST" }).catch(() => { })
+        }
+    }, [chatMode, agentFetch])
+
+    useEffect(() => {
+        if (chatMode !== "agent") {
+            setSubAgentSessionId(null)
+            return
+        }
+        setMessages([])
+        setAttachments([])
+        setEditingId(null)
+        setSelectedPreviewAttachment(null)
+        setSelectedToolFlowMessageId(null)
+        setSubAgentSessionId(null)
+        agentManualStopRef.current = false
+        setAgentPaused(false)
+        setAgentLocalBusy(false)
+        agentStore.dispatch({ type: "RESET" })
+    }, [chatMode])
+
+    useEffect(() => {
+        setSubAgentSessionId(null)
+    }, [agentSessionId])
+
+    useEffect(() => {
+        return () => {
+            if (agentSwitchTimerRef.current !== null) {
+                window.clearTimeout(agentSwitchTimerRef.current)
+                agentSwitchTimerRef.current = null
+            }
+        }
+    }, [])
 
     // ── Mount: reconnect to live stream if it exists ──
     useEffect(() => {
@@ -820,239 +697,127 @@ export function ChatInterface({
 
     }, [input, setAttachments]);
 
-    // UUID regex — only real UUIDs are safe to use as editMessageId
-    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-    const sendMessage = useCallback(async (
+    const sendAgentMessage = useCallback(async (
         content: string,
         atts: Attachment[],
-        msgEditId?: string,
+        _msgEditId?: string,
         keptAtts: Attachment[] = []
     ) => {
         const allAtts = [...keptAtts, ...atts]
         if (!content.trim() && allAtts.length === 0) return
         if (isGenerating) return
-        if (!selectedModel) {
-            toast.error("請先在設定頁面配置並選擇一個模型。")
+        if (allAtts.length > 0) {
+            toast.error("Agent 模式暫不支援附加檔案")
             return
         }
 
-        // Save model preference (optimistic, non-blocking)
-        const selModelObj = availableModels.find(m => m.value === selectedModel)
-        if (selModelObj) {
-            fetch('/api/user/preference', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    selectedModel: selModelObj.label,
-                    selectedProviderPrefix: selModelObj.providerPrefix,
-                }),
-            }).catch(() => { })
-        }
+        const userMessageId = `agent-user-${Date.now()}`
+        const userMsg: UIMessage = { id: userMessageId, role: "user", content }
 
-        setIsGenerating(true)
-        setStatusText("正在連線...")
-
-        const userMsg: UIMessage = {
-            id: `user-${Date.now()}`,
-            role: "user",
-            content,
-            attachments: allAtts.map(a => ({ name: a.name, mimeType: a.mimeType, base64: a.base64 }))
-        }
-
-        // Only use editMessageId if it's a real DB UUID
-        const safeEditId = msgEditId && UUID_RE.test(msgEditId) ? msgEditId : undefined
-
-        let historyMessages: UIMessage[]
-        if (safeEditId) {
-            const cutIdx = messages.findIndex(m => m.dbId === safeEditId)
-            historyMessages = cutIdx >= 0 ? messages.slice(0, cutIdx) : messages
-        } else {
-            historyMessages = messages
-        }
-
-        const aiMsgId = `ai-${Date.now()}`
-        setMessages([...historyMessages, userMsg, { id: aiMsgId, role: "assistant", content: "", isStreaming: true }])
+        setSubAgentSessionId(null)
+        setMessages((prev) => [...prev, userMsg])
         setInput("")
         setAttachments([])
-
-        const conversationHistory = historyMessages.map(m => ({ id: m.dbId, role: m.role, content: m.content }))
-        conversationHistory.push({ id: undefined, role: 'user' as const, content })
-
-        const failActiveStream = (errorText?: string) => {
-            const fallback = errorText || '產生回應失敗，請稍後再試。'
-            setMessages(prev => prev.map(m => {
-                if (m.id === aiMsgId) {
-                    return { ...m, isStreaming: false, content: m.content || fallback }
-                }
-                return m
-            }))
-            const activeKey = storeKeyRef.current
-            if (activeKey) {
-                streamStore.update(activeKey, e => {
-                    e.isGenerating = false
-                    e.statusText = ''
-                    e.messages = e.messages.map(m => m.id === aiMsgId ? { ...m, isStreaming: false, content: m.content || fallback } : m)
-                })
-                streamStore.finish(activeKey)
-                window.dispatchEvent(new CustomEvent('chat:active', { detail: null }))
-                storeKeyRef.current = null
-            }
-            setIsGenerating(false)
-            setStatusText('')
-            abortControllerRef.current?.abort()
-            abortControllerRef.current = null
-        }
+        setAgentPaused(false)
+        agentManualStopRef.current = false
+        setIsGenerating(true)
+        setAgentLocalBusy(true)
+        setStatusText("Agent 思考中...")
 
         try {
-            // Create AbortController for this stream
-            const ac = new AbortController()
-            abortControllerRef.current = ac
-
-            // Use a temporary key for the store before we know the real sessionId
-            const tempKey = sessionId || `pending-${Date.now()}`
-            const initialStoreMessages: UIMessage[] = [
-                ...historyMessages,
-                userMsg,
-                { id: aiMsgId, role: 'assistant' as const, content: '', isStreaming: true }
-            ]
-            streamStore.register(tempKey, initialStoreMessages as any, ac)
-            storeKeyRef.current = tempKey
-            window.dispatchEvent(new CustomEvent('chat:active', { detail: tempKey }))
-
-            const res = await fetch("/api/chat/stream", {
+            const sid = await ensureAgentSession()
+            const promptBody: Record<string, unknown> = {
+                text: content,
+                agent: agentName || undefined,
+            }
+            // Pass selected model if available (works with agent + model)
+            if (agentSelectedModel) {
+                promptBody.model = {
+                    providerID: agentSelectedModel.providerID,
+                    modelID: agentSelectedModel.modelID,
+                }
+            }
+            const res = await agentFetch(`/api/agent/session/${sid}/prompt`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                signal: ac.signal,
-                body: JSON.stringify({
-                    messages: conversationHistory,
-                    sessionId: sessionId || null,
-                    selectedModel,
-                    systemPrompt: systemPrompt || null,
-                    attachments: allAtts,
-                    editMessageId: safeEditId || null,
-                    projectId: projectId || null,
-                })
+                body: JSON.stringify(promptBody),
             })
-
-            if (!res.ok || !res.body) {
-                const errMsg = "請求失敗: " + res.statusText
-                toast.error(errMsg)
-                failActiveStream(errMsg)
-                return
+            const payload = await res.json()
+            if (!res.ok) {
+                throw new Error(payload?.error || "Failed to send agent prompt")
             }
 
-            const reader = res.body.getReader()
-            const decoder = new TextDecoder()
-            let aiMsgDbId: string | undefined
-            let userMsgDbId: string | undefined
-            const tempUserMsgId = userMsg.id   // capture before closure changes
-            let buffer = ""
-            let streamErrored = false
-
-            while (true) {
-                const { value, done } = await reader.read()
-                if (done) break
-                buffer += decoder.decode(value, { stream: true })
-                const lines = buffer.split('\n')
-                buffer = lines.pop() || ''
-
-                for (const line of lines) {
-                    if (!line.startsWith('data: ')) continue
-                    const dataStr = line.slice(6).trim()
-                    if (!dataStr) continue
-                    try {
-                        const ev = JSON.parse(dataStr)
-                        if (ev.type === 'session_id') {
-                            const realId = ev.data as string
-                            // Rekey the store entry from temp key to real session ID
-                            if (storeKeyRef.current && storeKeyRef.current !== realId) {
-                                streamStore.rekey(storeKeyRef.current, realId)
-                                storeKeyRef.current = realId
-                                window.dispatchEvent(new CustomEvent('chat:active', { detail: realId }))
-                            }
-                            setSessionId(realId)
-                            const targetPath = projectId ? `${localePrefix}/p/${projectId}/c/${realId}` : `${localePrefix}/c/${realId}`
-                            router.replace(targetPath)
-                            onSessionCreated?.(realId, '')
-                        } else if (ev.type === 'status') {
-                            setStatusText(ev.data)
-                            if (storeKeyRef.current) streamStore.update(storeKeyRef.current, e => { e.statusText = ev.data })
-                        } else if (ev.type === 'chunk') {
-                            setMessages(prev => prev.map(m =>
-                                m.id === aiMsgId ? { ...m, content: m.content + ev.data } : m
-                            ))
-                            if (storeKeyRef.current) streamStore.update(storeKeyRef.current, e => {
-                                const msg = e.messages.find(m => m.id === aiMsgId)
-                                if (msg) msg.content += ev.data
-                            })
-                        } else if (ev.type === 'error') {
-                            toast.error(ev.data)
-                            failActiveStream(ev.data)
-                            streamErrored = true
-                            break
-                        } else if (ev.type === 'title_updated') {
-                            window.dispatchEvent(new CustomEvent('sidebar:refresh'))
-                            if (ev.data?.sessionId && ev.data?.title) {
-                                onSessionCreated?.(ev.data.sessionId, ev.data.title)
-                            }
-                        } else if (ev.type === 'done') {
-                            aiMsgDbId = ev.data?.messageId
-                            userMsgDbId = ev.data?.userMessageId
-                            setMessages(prev => prev.map(m => {
-                                if (m.id === aiMsgId) return { ...m, isStreaming: false, dbId: aiMsgDbId }
-                                if (m.id === tempUserMsgId) return { ...m, dbId: userMsgDbId }
-                                return m
-                            }))
-                            setIsGenerating(false)
-                            setStatusText('')
-                            // Update store messages to mark done
-                            if (storeKeyRef.current) streamStore.update(storeKeyRef.current, e => {
-                                const aiMsg = e.messages.find(m => m.id === aiMsgId)
-                                if (aiMsg) { aiMsg.isStreaming = false; aiMsg.dbId = aiMsgDbId }
-                                const usrMsg = e.messages.find(m => m.id === tempUserMsgId)
-                                if (usrMsg) usrMsg.dbId = userMsgDbId
-                                e.isGenerating = false
-                                e.statusText = ''
-                            })
-                        }
-                    } catch { }
-                }
-                if (streamErrored) break
-            }
-            if (streamErrored) return
-            // Stream fully closed — clean up store and refresh only if we have a real session id
-            const finishedKey = storeKeyRef.current
-            if (finishedKey) {
-                streamStore.finish(finishedKey)
-                window.dispatchEvent(new CustomEvent('chat:active', { detail: null }))
-                storeKeyRef.current = null
-                abortControllerRef.current = null
-                if (!finishedKey.startsWith('pending-')) {
-                    router.refresh()
-                }
-            }
-
-        } catch (e: any) {
-            if (e.name === 'AbortError') {
-                // User navigated away — clean up silently
-                setIsGenerating(false)
-                setStatusText('')
-                abortControllerRef.current = null
-                if (storeKeyRef.current) {
-                    streamStore.abort(storeKeyRef.current)
-                    window.dispatchEvent(new CustomEvent('chat:active', { detail: null }))
-                    storeKeyRef.current = null
-                }
-                return
-            }
-            toast.error('串流連線失敗: ' + e.message)
-            failActiveStream()
-        } finally {
+            // Polling handles updates — do a quick load for initial state
+            await loadAgentMessages(sid)
+        } catch (error: any) {
+            setMessages((prev) =>
+                [...prev, {
+                    id: `agent-error-${Date.now()}`,
+                    role: "assistant",
+                    content: error?.message || "Agent 回覆失敗，請稍後再試",
+                    isStreaming: false,
+                }]
+            )
             setIsGenerating(false)
-            setStatusText('')
+            setAgentLocalBusy(false)
+            setStatusText("")
+            toast.error(error?.message || "Agent 回覆失敗")
         }
-    }, [isGenerating, messages, sessionId, selectedModel, systemPrompt, router])
+    }, [agentName, agentSelectedModel, ensureAgentSession, isGenerating, loadAgentMessages])
+
+    const { handleAgentStopGeneration, handleAgentRegenerate } = useAgentChatActions({
+        agentSessionId,
+        agentFetch,
+        agentStoreDispatch: agentStore.dispatch,
+        agentStoreMessages: agentStore.messages,
+        agentStorePartsFor: agentStore.partsFor,
+        agentName,
+        agentSelectedModel,
+        isGenerating,
+        loadAgentMessages,
+        setSubAgentSessionId,
+        setSelectedToolFlowMessageId,
+        setAgentPaused,
+        agentManualStopRef,
+        setIsGenerating,
+        setAgentLocalBusy,
+        setStatusText,
+        setMessages,
+    })
+
+    const {
+        isValidUuid,
+        sendMessage,
+        handleSubmit,
+        handleStopGeneration,
+        handleRegenerate,
+    } = useChatSend({
+        chatMode,
+        isGenerating,
+        isSetupBlocked,
+        input,
+        attachments,
+        messages,
+        setMessages,
+        setIsGenerating,
+        setStatusText,
+        setInput,
+        setAttachments,
+        selectedModel,
+        availableModels,
+        systemPrompt,
+        sessionId,
+        setSessionId,
+        projectId,
+        localePrefix,
+        router,
+        onSessionCreated,
+        storeKeyRef,
+        abortControllerRef,
+        sendAgentMessage,
+        onStopAgentGeneration: handleAgentStopGeneration,
+        onRegenerateAgentMessage: handleAgentRegenerate,
+    })
 
     // Handle auto-starting chat from home page query
     useEffect(() => {
@@ -1067,120 +832,8 @@ export function ChatInterface({
         }
     }, [initialQuery, messages.length, selectedModel, sendMessage]);
 
-    const handleSubmit = (e?: React.FormEvent) => {
-        e?.preventDefault()
-        if (isSetupBlocked || isGenerating) return
-        sendMessage(input, attachments)
-    }
-
-    const handleRegenerate = async (msgId: string) => {
-        const idx = messages.findIndex(m => m.id === msgId || m.dbId === msgId)
-        if (idx <= 0) return
-        const userMsg = messages[idx - 1]
-        if (userMsg.role !== 'user') return
-
-        // Use the USER message's dbId as cutoff: deletes user+assistant, then re-inserts both cleanly
-        const regenEditId = userMsg.dbId && UUID_RE.test(userMsg.dbId) ? userMsg.dbId : undefined
-
-        const prevMessages = messages.slice(0, idx - 1)
-        const aiMsgId = `ai-regen-${Date.now()}`
-        setMessages([...prevMessages, userMsg, { id: aiMsgId, role: 'assistant', content: '', isStreaming: true }])
-        setIsGenerating(true)
-        setStatusText("正在重新生成...")
-
-        const markRegenFailed = (errorText?: string) => {
-            const fallback = errorText || '重新生成失敗，請稍後再試。'
-            setMessages(prev => prev.map(m => m.id === aiMsgId ? { ...m, isStreaming: false, content: m.content || fallback } : m))
-        }
-
-        const history = [...prevMessages.map(m => ({ id: m.dbId, role: m.role, content: m.content })), { role: 'user', content: userMsg.content }]
-
-        // Carry over the user message's attachments for context
-        const userAtts = (userMsg.attachments || []).map(a => ({
-            name: a.name,
-            mimeType: a.mimeType,
-            base64: a.base64 || '',
-        }))
-
-        try {
-            const res = await fetch("/api/chat/stream", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    messages: history,
-                    sessionId,
-                    selectedModel,
-                    systemPrompt: systemPrompt || null,
-                    attachments: userAtts,
-                    editMessageId: regenEditId || null,
-                })
-            })
-            if (!res.ok || !res.body) {
-                const errMsg = '重新生成失敗: ' + res.statusText
-                toast.error(errMsg)
-                markRegenFailed(errMsg)
-                setIsGenerating(false)
-                setStatusText("")
-                return
-            }
-
-            const reader = res.body.getReader()
-            const decoder = new TextDecoder()
-            let buffer = ""
-            let aiMsgDbId: string | undefined
-            let newUserMsgDbId: string | undefined
-            const existingUserMsgId = userMsg.id   // capture before async
-            let streamErrored = false
-
-            while (true) {
-                const { value, done } = await reader.read()
-                if (done) break
-                buffer += decoder.decode(value, { stream: true })
-                const lines = buffer.split('\n')
-                buffer = lines.pop() || ''
-                for (const line of lines) {
-                    if (!line.startsWith('data: ')) continue
-                    try {
-                        const ev = JSON.parse(line.slice(6).trim())
-                        if (ev.type === 'status') setStatusText(ev.data)
-                        else if (ev.type === 'chunk') {
-                            setMessages(prev => prev.map(m => m.id === aiMsgId ? { ...m, content: m.content + ev.data } : m))
-                        } else if (ev.type === 'title_updated') {
-                            window.dispatchEvent(new CustomEvent('sidebar:refresh'))
-                        } else if (ev.type === 'error') {
-                            toast.error(ev.data)
-                            markRegenFailed(ev.data)
-                            streamErrored = true
-                            break
-                        } else if (ev.type === 'done') {
-                            aiMsgDbId = ev.data?.messageId
-                            newUserMsgDbId = ev.data?.userMessageId
-                            // Unlock UI immediately (title generation still pending on server)
-                            setMessages(prev => prev.map(m => {
-                                if (m.id === aiMsgId) return { ...m, isStreaming: false, dbId: aiMsgDbId }
-                                // Update user message dbId — server deleted+reinserted it with new UUID
-                                if (m.id === existingUserMsgId) return { ...m, dbId: newUserMsgDbId }
-                                return m
-                            }))
-                            setIsGenerating(false)
-                            setStatusText("")
-                        }
-                    } catch { }
-                }
-                if (streamErrored) break
-            }
-            if (streamErrored) return
-            if (sessionId) router.refresh()
-        } catch (e: any) {
-            toast.error('重新生成失敗: ' + (e?.message || ''))
-            markRegenFailed()
-        } finally {
-            setIsGenerating(false)
-            setStatusText("")
-        }
-    }
-
     const startEdit = (msg: UIMessage) => {
+        if (chatMode === "agent") return
         setEditingId(msg.id)
         setEditContent(msg.content)
         setEditAttachments([])
@@ -1199,7 +852,7 @@ export function ChatInterface({
     const commitEdit = (msg: UIMessage) => {
         if (msg.role === 'user') {
             // Only pass dbId if it's a real UUID; otherwise send without editMessageId
-            const safeEditId = msg.dbId && UUID_RE.test(msg.dbId) ? msg.dbId : undefined
+            const safeEditId = isValidUuid(msg.dbId) ? msg.dbId : undefined
             sendMessage(editContent, editAttachments, safeEditId, editKeepAttachments)
         } else {
             setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, content: editContent } : m))
@@ -1214,41 +867,24 @@ export function ChatInterface({
         }
     }
 
-    const [modelPickerOpen, setModelPickerOpen] = useState(false)
-    // Derived: selected model display label
-    const selectedModelObj = availableModels.find(m => m.value === selectedModel)
-    const selectedModelLabel = selectedModelObj ? `${selectedModelObj.label}` : (selectedModel || "未選擇模型")
-
-    // Called when user picks a model from the dropdown
-    const handleModelChange = (modelValue: string) => {
-        setSelectedModel(modelValue)
-        setModelPickerOpen(false)
-
-        const modelObj = availableModels.find(m => m.value === modelValue)
-        if (!modelObj) return
-
-        // Persist user global preference (non-blocking)
-        fetch('/api/user/preference', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                selectedModel: modelObj.label,
-                selectedProviderPrefix: modelObj.providerPrefix,
-            }),
-        }).catch(() => { })
-
-        // If in an existing session, also update the session's model record
-        if (sessionId) {
-            fetch(`/api/chat/${sessionId}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    modelName: modelObj.label,
-                    providerPrefix: modelObj.providerPrefix,
-                }),
-            }).catch(() => { })
-        }
-    }
+    const {
+        modelPickerOpen,
+        setModelPickerOpen,
+        modelSearch,
+        setModelSearch,
+        selectedModelObj,
+        selectedModelLabel,
+        handleModelChange,
+        filteredUserModels,
+        filteredGlobalModels,
+        groupEntries,
+        hasAnyMatch,
+    } = useModelPicker({
+        availableModels,
+        selectedModel,
+        setSelectedModel,
+        sessionId,
+    })
 
     const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault()
@@ -1281,45 +917,95 @@ export function ChatInterface({
         setIsDragging(false)
     }
 
-    // Model picker filtering
-    const searchTerm = modelSearch.trim().toLowerCase()
-    const matchesSearch = (text?: string) => text?.toLowerCase().includes(searchTerm)
+    const normalChatHref = useMemo(() => {
+        if (projectId) {
+            return sessionId
+                ? `${localePrefix}/p/${projectId}/c/${sessionId}`
+                : `${localePrefix}/p/${projectId}`
+        }
+        return sessionId ? `${localePrefix}/c/${sessionId}` : `${localePrefix}/chat`
+    }, [localePrefix, projectId, sessionId])
 
-    const userModels = availableModels.filter(m => !m.source || m.source === 'user')
-    const filteredUserModels = searchTerm
-        ? userModels.filter(m =>
-            matchesSearch(m.label) ||
-            matchesSearch(m.providerName)
+    const selectedToolFlowMessage = useMemo(() => {
+        if (!selectedToolFlowMessageId) return null
+        return messages.find((message) => message.id === selectedToolFlowMessageId) || null
+    }, [messages, selectedToolFlowMessageId])
+
+    const hasRightPanel = !!selectedPreviewAttachment || !!selectedToolFlowMessage
+
+    useEffect(() => {
+        if (!selectedToolFlowMessageId) return
+        const exists = messages.some((message) => message.id === selectedToolFlowMessageId)
+        if (!exists) setSelectedToolFlowMessageId(null)
+    }, [messages, selectedToolFlowMessageId])
+
+    const openAttachmentPreview = useCallback((attachment: Attachment) => {
+        setSelectedToolFlowMessageId(null)
+        setSelectedPreviewAttachment(attachment)
+    }, [])
+
+    const openToolFlow = useCallback((messageId: string) => {
+        setSelectedPreviewAttachment(null)
+        setSubAgentSessionId(null)
+        setSelectedToolFlowMessageId(messageId)
+    }, [])
+
+    const openSubAgent = useCallback((childSessionId: string) => {
+        setSelectedPreviewAttachment(null)
+        setSelectedToolFlowMessageId(null)
+        setSubAgentSessionId(childSessionId)
+    }, [])
+
+    const switchToAgentMode = useCallback(() => {
+        if (isGenerating) return
+        router.push(agentChatHref(agentSessionId))
+    }, [agentChatHref, agentSessionId, isGenerating, router])
+
+    const switchToAgentModeWithGlow = useCallback(() => {
+        if (isGenerating) return
+        triggerGlow({
+            color: "rgba(129, 140, 248, 0.96)",
+            secondaryColor: "rgba(59, 130, 246, 0.92)",
+            holdMs: 1000,
+            borderRadius: 32,
+        })
+        if (agentSwitchTimerRef.current !== null) {
+            window.clearTimeout(agentSwitchTimerRef.current)
+        }
+        agentSwitchTimerRef.current = window.setTimeout(() => {
+            agentSwitchTimerRef.current = null
+            switchToAgentMode()
+        }, 90)
+    }, [isGenerating, switchToAgentMode, triggerGlow])
+
+    const switchToNormalMode = useCallback(() => {
+        setSubAgentSessionId(null)
+        router.push(normalChatHref)
+    }, [normalChatHref, router])
+
+    const handleAgentModelSelect = useCallback((providerID: string, modelID: string) => {
+        const model = { providerID, modelID }
+        setAgentSelectedModel(model)
+        saveAgentModelStorage(model)
+        setAgentModelPickerOpen(false)
+    }, [])
+
+    // Agent model picker: filtered models
+    const agentModelSearchTerm = agentModelSearch.trim().toLowerCase()
+    const filteredAgentModels = agentModelSearchTerm
+        ? agentModels.filter(m =>
+            m.modelName.toLowerCase().includes(agentModelSearchTerm) ||
+            m.providerName.toLowerCase().includes(agentModelSearchTerm) ||
+            m.modelID.toLowerCase().includes(agentModelSearchTerm)
         )
-        : userModels
+        : agentModels
 
-    const groupModels = availableModels.filter(m => m.source === 'group')
-    const groupMap = new Map<string, AvailableModel[]>()
-    groupModels.forEach(m => {
-        const name = m.groupName || '群組'
-        if (!groupMap.has(name)) groupMap.set(name, [])
-        groupMap.get(name)!.push(m)
-    })
-    const groupEntries = [...groupMap.entries()].map(([gName, gModels]) => {
-        const filtered = searchTerm
-            ? gModels.filter(m =>
-                matchesSearch(m.label) ||
-                matchesSearch(m.providerName) ||
-                matchesSearch(gName)
-            )
-            : gModels
-        return { gName, filtered, total: gModels.length }
-    }).filter(({ filtered, gName }) => filtered.length > 0 || matchesSearch(gName))
-    const globalModels = availableModels.filter(m => m.source === 'global')
-    const filteredGlobalModels = searchTerm
-        ? globalModels.filter(m =>
-            matchesSearch(m.label) ||
-            matchesSearch(m.providerName) ||
-            matchesSearch('global providers')
-        )
-        : globalModels
-
-    const hasAnyMatch = filteredUserModels.length > 0 || filteredGlobalModels.length > 0 || groupEntries.length > 0
+    const agentSelectedModelLabel = agentSelectedModel
+        ? agentModels.find(m => m.providerID === agentSelectedModel.providerID && m.modelID === agentSelectedModel.modelID)?.modelName || agentSelectedModel.modelID
+        : "Select Model"
+    const agentSelectedModelProvider = agentSelectedModel
+        ? agentModels.find(m => m.providerID === agentSelectedModel.providerID && m.modelID === agentSelectedModel.modelID)?.providerName || agentSelectedModel.providerID
+        : ""
 
     return (
         <div
@@ -1342,461 +1028,146 @@ export function ChatInterface({
                 </div>
             )}
 
-            <div className={`relative flex flex-col h-full bg-background transition-all duration-300 ease-in-out ${selectedPreviewAttachment ? 'w-1/2 min-w-0 border-r border-border' : 'w-full'} `}>
-                {/* Header */}
-                <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 bg-background/80 backdrop-blur sticky top-0 z-10 shrink-0">
+            <div className={`relative flex flex-col h-full bg-background transition-all duration-300 ease-in-out ${hasRightPanel ? 'flex-1 min-w-0 border-r border-border' : 'w-full'} `}>
+                <ChatHeader
+                    chatMode={chatMode}
+                    showSystemPrompt={showSystemPrompt}
+                    onToggleSystemPrompt={() => setShowSystemPrompt((v) => !v)}
+                    systemPrompt={systemPrompt}
+                    onSystemPromptChange={setSystemPrompt}
+                    agentModelPickerOpen={agentModelPickerOpen}
+                    onAgentModelPickerOpenChange={setAgentModelPickerOpen}
+                    agentModelSearch={agentModelSearch}
+                    onAgentModelSearchChange={setAgentModelSearch}
+                    filteredAgentModels={filteredAgentModels}
+                    agentModels={agentModels}
+                    agentSelectedModel={agentSelectedModel}
+                    agentSelectedModelLabel={agentSelectedModelLabel}
+                    agentSelectedModelProvider={agentSelectedModelProvider}
+                    onAgentModelSelect={handleAgentModelSelect}
+                    modelPickerOpen={modelPickerOpen}
+                    onModelPickerOpenChange={setModelPickerOpen}
+                    modelSearch={modelSearch}
+                    onModelSearchChange={setModelSearch}
+                    selectedModel={selectedModel}
+                    selectedModelObj={selectedModelObj}
+                    selectedModelLabel={selectedModelLabel}
+                    filteredUserModels={filteredUserModels}
+                    filteredGlobalModels={filteredGlobalModels}
+                    groupEntries={groupEntries}
+                    hasAnyMatch={hasAnyMatch}
+                    onNormalModelSelect={handleModelChange}
+                    isSyncingModels={isSyncingModels}
+                />
 
-                    {/* Dropdown model selector with hoverable submenus */}
-                    <DropdownMenu
-                        open={modelPickerOpen}
-                        onOpenChange={(open) => {
-                            setModelPickerOpen(open);
-                            if (!open) setModelSearch("");
-                        }}
-                    >
-                        {/* --- 觸發按鈕 (Gemini Style) --- */}
-                        <DropdownMenuTrigger asChild>
-                            <button className="
-            flex items-center justify-between gap-3 px-4 py-2 
-            min-w-[160px] max-w-[240px] 
-            rounded-full border border-border/40 
-            bg-background/50 hover:bg-muted/50 
-            transition-all duration-300 group outline-none
-        ">
-                                <div className="flex flex-col items-start text-left overflow-hidden">
-                                    <span className="text-[13px] font-semibold text-foreground/90 group-hover:text-primary truncate w-full transition-colors leading-tight">
-                                        {selectedModelLabel}
-                                    </span>
-                                    {selectedModelObj && (
-                                        <span className="text-[9px] font-medium text-muted-foreground/60 uppercase tracking-widest truncate w-full">
-                                            {selectedModelObj.providerName}
-                                        </span>
-                                    )}
-                                </div>
-                                <ChevronDown className="h-4 w-4 text-muted-foreground/50 group-hover:text-foreground transition-all duration-300 group-data-[state=open]:rotate-180" />
-                            </button>
-                        </DropdownMenuTrigger>
+                <ChatMessagesPanel
+                    scrollContainerRef={scrollContainerRef}
+                    messagesEndRef={messagesEndRef}
+                    hasRightPanel={hasRightPanel}
+                    chatMode={chatMode}
+                    localePrefix={localePrefix}
+                    messages={messages}
+                    agentUIMessages={agentUIMessages}
+                    isGenerating={isGenerating}
+                    agentSessionId={agentSessionId}
+                    greetingSubtitle={t('subtitle') || '今天我能幫你處理什麼？'}
+                    statusText={statusText}
+                    showScrollButton={showScrollButton}
+                    onScrollToBottom={() => {
+                        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+                        setTimeout(() => setIsAutoScrolling(true), 500)
+                    }}
+                    editingId={editingId}
+                    editContent={editContent}
+                    onEditContentChange={setEditContent}
+                    editKeepAttachments={editKeepAttachments}
+                    setEditKeepAttachments={setEditKeepAttachments}
+                    editAttachments={editAttachments}
+                    setEditAttachments={setEditAttachments}
+                    editFileInputRef={editFileInputRef}
+                    onHandleFileSelect={handleFileSelect}
+                    onCancelEdit={cancelEdit}
+                    onCommitEdit={commitEdit}
+                    onStartEdit={startEdit}
+                    onRegenerate={handleRegenerate}
+                    onOpenAttachmentPreview={openAttachmentPreview}
+                    getAgentPartsForMessage={agentStore.partsFor}
+                    onOpenSubAgent={openSubAgent}
+                    permissions={agentStore.permissions}
+                    questions={agentStore.questions}
+                    isSyncingModels={isSyncingModels}
+                />
 
-                        {/* --- 下拉內容 (Gemini Style) --- */}
-                        <DropdownMenuContent
-                            align="start"
-                            sideOffset={10}
-                            className="
-            w-80 p-2 
-            rounded-[24px] border-border/40 
-            bg-background/80 backdrop-blur-2xl 
-            shadow-[0_8px_32px_rgba(0,0,0,0.12)] 
-            animate-in fade-in zoom-in-95 duration-200
-        "
-                        >
-                            {/* 搜尋框區塊：更簡潔的底色 */}
-                            <div className="relative mb-2 px-1">
-                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/40" />
-                                <input
-                                    autoFocus
-                                    className="
-                    w-full pl-10 pr-4 py-2.5 text-sm 
-                    bg-muted/30 hover:bg-muted/50 focus:bg-background 
-                    rounded-2xl border-none ring-1 ring-border/20 
-                    focus:ring-2 focus:ring-primary/30 
-                    outline-none transition-all
-                "
-                                    placeholder="搜尋 AI 模型..."
-                                    value={modelSearch}
-                                    onChange={(e) => setModelSearch(e.target.value)}
-                                />
-                            </div>
-
-                            <div className="max-h-[420px] overflow-y-auto px-1 custom-scrollbar">
-                                {/* 最近使用 */}
-                                {filteredUserModels.length > 0 && (
-                                    <DropdownMenuGroup>
-                                        <div className="px-3 py-2 text-[11px] font-bold text-muted-foreground/50 uppercase tracking-[0.1em]">
-                                            MY MODELS
-                                        </div>
-                                        <div className="space-y-0.5">
-                                            {filteredUserModels.map(m => (
-                                                <ModelItem
-                                                    key={m.value}
-                                                    model={m}
-                                                    isSelected={selectedModel === m.value}
-                                                    onSelect={(val) => {
-                                                        handleModelChange(val);
-                                                        setModelPickerOpen(false);
-                                                    }}
-                                                />
-                                            ))}
-                                        </div>
-                                    </DropdownMenuGroup>
-                                )}
-
-                                {/* 分隔線：更淡的處理 */}
-                                {filteredUserModels.length > 0 && (filteredGlobalModels.length > 0 || groupEntries.length > 0) && (
-                                    <DropdownMenuSeparator className="my-2 bg-border/30 mx-2" />
-                                )}
-
-                                {/* Global Providers */}
-                                {filteredGlobalModels.length > 0 && (
-                                    <DropdownMenuGroup>
-                                        <div className="px-3 py-2 text-[11px] font-bold text-muted-foreground/50 uppercase tracking-[0.1em]">
-                                            GLOBAL PROVIDERS
-                                        </div>
-                                        <DropdownMenuSub>
-                                            <DropdownMenuSubTrigger className="
-                                    rounded-xl py-2.5 px-3 
-                                    hover:bg-muted/50 focus:bg-muted/50 
-                                    data-[state=open]:bg-muted/50
-                                    transition-colors cursor-pointer
-                                ">
-                                                <div className="flex flex-col gap-0.5 text-left">
-                                                    <span className="text-[13px] font-medium">All Global Models</span>
-                                                    <span className="text-[10px] text-muted-foreground/60">{filteredGlobalModels.length} Models</span>
-                                                </div>
-                                            </DropdownMenuSubTrigger>
-                                            <DropdownMenuPortal>
-                                                <DropdownMenuSubContent
-                                                    sideOffset={8}
-                                                    className="
-                                            w-64 p-2 rounded-[20px] 
-                                            bg-background/90 backdrop-blur-xl 
-                                            shadow-xl border-border/40
-                                        "
-                                                >
-                                                    <div className="max-h-[300px] overflow-y-auto space-y-0.5">
-                                                        {filteredGlobalModels.map(m => (
-                                                            <ModelItem
-                                                                key={m.value}
-                                                                model={m}
-                                                                isSelected={selectedModel === m.value}
-                                                                onSelect={(val) => {
-                                                                    handleModelChange(val);
-                                                                    setModelPickerOpen(false);
-                                                                }}
-                                                            />
-                                                        ))}
-                                                    </div>
-                                                </DropdownMenuSubContent>
-                                            </DropdownMenuPortal>
-                                        </DropdownMenuSub>
-                                    </DropdownMenuGroup>
-                                )}
-
-                                {filteredGlobalModels.length > 0 && groupEntries.length > 0 && (
-                                    <DropdownMenuSeparator className="my-2 bg-border/30 mx-2" />
-                                )}
-
-                                {/* 模型群組 */}
-                                {groupEntries.length > 0 && (
-                                    <DropdownMenuGroup>
-                                        <div className="px-3 py-2 text-[11px] font-bold text-muted-foreground/50 uppercase tracking-[0.1em]">
-                                            GROUPS
-                                        </div>
-                                        <div className="space-y-0.5">
-                                            {groupEntries.map(({ gName, filtered, total }) => (
-                                                <DropdownMenuSub key={gName}>
-                                                    <DropdownMenuSubTrigger className="
-                                    rounded-xl py-2.5 px-3 
-                                    hover:bg-muted/50 focus:bg-muted/50 
-                                    data-[state=open]:bg-muted/50
-                                    transition-colors cursor-pointer
-                                ">
-                                                        <div className="flex flex-col gap-0.5 text-left">
-                                                            <span className="text-[13px] font-medium">{gName}</span>
-                                                            <span className="text-[10px] text-muted-foreground/60">{filtered.length} Models</span>
-                                                        </div>
-                                                    </DropdownMenuSubTrigger>
-                                                    <DropdownMenuPortal>
-                                                        <DropdownMenuSubContent
-                                                            sideOffset={8}
-                                                            className="
-                                            w-64 p-2 rounded-[20px] 
-                                            bg-background/90 backdrop-blur-xl 
-                                            shadow-xl border-border/40
-                                        "
-                                                        >
-                                                            <div className="max-h-[300px] overflow-y-auto space-y-0.5">
-                                                                {filtered.map(m => (
-                                                                    <ModelItem
-                                                                        key={m.value}
-                                                                        model={m}
-                                                                        isSelected={selectedModel === m.value}
-                                                                        onSelect={(val) => {
-                                                                            handleModelChange(val);
-                                                                            setModelPickerOpen(false);
-                                                                        }}
-                                                                    />
-                                                                ))}
-                                                            </div>
-                                                        </DropdownMenuSubContent>
-                                                    </DropdownMenuPortal>
-                                                </DropdownMenuSub>
-                                            ))}
-                                        </div>
-                                    </DropdownMenuGroup>
-                                )}
-
-                                {/* 空狀態 */}
-                                {!hasAnyMatch && (
-                                    <div className="py-16 text-center animate-in fade-in slide-in-from-bottom-2">
-                                        <div className="inline-flex p-3 rounded-full bg-muted/30 mb-3">
-                                            <Search className="h-5 w-5 text-muted-foreground/30" />
-                                        </div>
-                                        <p className="text-xs text-muted-foreground font-medium">找不到相關模型</p>
-                                    </div>
-                                )}
-                            </div>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
-
-                    {/* Settings Toggles */}
-                    <button
-                        onClick={() => setShowSystemPrompt(v => !v)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors"
-                    >
-                        <Settings2 className="h-4 w-4" />
-                        Prompt 設定
-                    </button>
-                </div>
-
-                {/* System Prompt Panel */}
-                {showSystemPrompt && (
-                    <div className="px-4 py-3 border-b border-border bg-muted/30 shrink-0">
-                        <textarea
-                            value={systemPrompt}
-                            onChange={e => setSystemPrompt(e.target.value)}
-                            placeholder="輸入 System Prompt（留空則不使用）..."
-                            rows={3}
-                            className="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                        />
-                    </div>
-                )}
-
-                {/* Messages Container */}
-                <div
-                    ref={scrollContainerRef}
-                    className="flex-1 overflow-y-auto w-full relative [scrollbar-color:auto_transparent] [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:bg-transparent"
-                >
-                    <div className={`mx-auto w-full space-y-8 py-8 ${selectedPreviewAttachment ? 'px-6 max-w-full' : 'px-4 max-w-3xl'}`}>
-                        {messages.length === 0 && !isGenerating && (
-                            <div className="flex flex-col items-center justify-center min-h-[30vh] text-center animate-in fade-in slide-in-from-bottom-4 duration-1000">
-                                {/* <div className="relative mb-6">
-                                    <div className="absolute inset-0 blur-3xl bg-gradient-to-tr from-blue-500/10 via-purple-500/10 to-pink-500/10 rounded-full" />
-                                    <div className="relative w-20 h-20 rounded-2xl bg-gradient-to-br from-background to-muted border border-border flex items-center justify-center shadow-2xl">
-                                        <Brain className="h-10 w-10 text-primary animate-pulse" />
-                                    </div>
-                                </div> */}
-                                <h1 className="mt-52 text-4xl font-semibold tracking-tight mb-3 bg-gradient-to-r from-foreground via-foreground/80 to-muted-foreground bg-clip-text">
-                                    <DynamicGreeting />
-                                </h1>
-                                <p className="text-lg text-muted-foreground max-w-md leading-relaxed">
-                                    {t('subtitle') || '今天我能幫你處理什麼？'}
-                                </p>
-                            </div>
-                        )}
-
-                        {messages.map((msg, index) => (
-                            <div key={msg.id} className={`flex w-full group ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-
-                                {/* Assistant Avatar */}
-                                {/* {msg.role === 'assistant' && (
-                                    <div className="flex-shrink-0 mr-4 h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center mt-1 outline outline-1 outline-border">
-                                        <Bot className="h-5 w-5 text-primary" />
-                                    </div>
-                                )} */}
-
-                                <div className={`flex flex-col gap-2 max-w-[85%] ${msg.role === 'user' ? 'items-end' : 'items-start w-full'}`}>
-
-                                    {/* Edit Mode vs Render Mode */}
-                                    {editingId === msg.id ? (
-                                        <div className="w-full space-y-3 bg-card p-4 rounded-xl border border-border shadow-sm">
-                                            <textarea
-                                                value={editContent}
-                                                onChange={e => setEditContent(e.target.value)}
-                                                rows={4}
-                                                autoFocus
-                                                className="w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary shadow-inner"
-                                            />
-                                            {msg.role === 'user' && (
-                                                <div className="space-y-2">
-                                                    <div className="flex flex-wrap gap-2">
-                                                        {editKeepAttachments.map((att, i) => (
-                                                            <AttachmentThumbnail key={`keep-${i}`} attachment={att} onRemove={() => setEditKeepAttachments(prev => prev.filter((_, j) => j !== i))} onClick={() => setSelectedPreviewAttachment(att)} />
-                                                        ))}
-                                                        {editAttachments.map((att, i) => (
-                                                            <AttachmentThumbnail key={`new-${i}`} attachment={att} onRemove={() => setEditAttachments(prev => prev.filter((_, j) => j !== i))} onClick={() => setSelectedPreviewAttachment(att)} />
-                                                        ))}
-                                                    </div>
-                                                    <input type="file" ref={editFileInputRef} className="hidden" multiple
-                                                        accept={`${ACCEPTED_IMAGE_TYPES},${ACCEPTED_DOC_TYPES}`}
-                                                        onChange={e => { handleFileSelect(e.target.files, true); e.target.value = '' }}
-                                                    />
-                                                    <button type="button" onClick={() => editFileInputRef.current?.click()}
-                                                        disabled={isGenerating}
-                                                        className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed bg-muted px-3 py-1.5 rounded-md"
-                                                    >
-                                                        <Paperclip className="h-3.5 w-3.5" /> 附加檔案
-                                                    </button>
-                                                </div>
-                                            )}
-                                            <div className="flex gap-2 justify-end pt-2">
-                                                <button onClick={cancelEdit}
-                                                    disabled={isGenerating}
-                                                    className="text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted px-4 py-2 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                                >
-                                                    取消
-                                                </button>
-                                                <button onClick={() => commitEdit(msg)}
-                                                    disabled={isGenerating}
-                                                    className="flex items-center gap-1.5 text-xs font-medium bg-primary text-primary-foreground px-4 py-2 rounded-md hover:bg-primary/90 shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                                >
-                                                    <Check className="h-3.5 w-3.5" />
-                                                    {msg.role === 'user' ? '儲存並重新生成' : '儲存'}
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <>
-                                            {/* Normal Render */}
-                                            {msg.attachments && msg.attachments.length > 0 && (
-                                                <div className={`flex flex-wrap gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                                    {msg.attachments.map((att, i) => (
-                                                        <AttachmentThumbnail key={i} attachment={{ ...att, base64: att.base64 || '' }} onClick={() => setSelectedPreviewAttachment({ ...att, base64: att.base64 || '' })} />
-                                                    ))}
-                                                </div>
-                                            )}
-
-                                            {msg.content && (
-                                                <div className={`
-                                                    relative text-[15px] leading-relaxed
-                                                    ${msg.role === 'user'
-                                                        ? 'bg-muted text-foreground px-5 py-3.5 rounded-[24px] rounded-br-sm'
-                                                        : 'bg-transparent text-foreground py-1 w-full'
-                                                    }
-                                                `}>
-                                                    {msg.role === 'assistant'
-                                                        ? <MessageContent content={msg.content} isStreaming={msg.isStreaming} />
-                                                        : <p className="whitespace-pre-wrap">{msg.content}</p>
-                                                    }
-
-                                                    {/* Action buttons (Edit/Regenerate) */}
-                                                    {!msg.isStreaming && (
-                                                        <div className={`absolute -bottom-9 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ${msg.role === 'user' ? 'right-0' : '-left-2'}`}>
-                                                            <button
-                                                                onClick={() => startEdit(msg)}
-                                                                disabled={isGenerating}
-                                                                className="flex items-center gap-1.5 p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted bg-background/50 backdrop-blur-sm border border-transparent hover:border-border transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                                                                title="編輯"
-                                                            >
-                                                                <Edit2 className="h-3.5 w-3.5" />
-                                                            </button>
-                                                            {msg.role === 'assistant' && (
-                                                                <button
-                                                                    onClick={() => handleRegenerate(msg.id)}
-                                                                    disabled={isGenerating}
-                                                                    className="flex items-center gap-1.5 p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted bg-background/50 backdrop-blur-sm border border-transparent hover:border-border transition-all disabled:opacity-50 shadow-sm"
-                                                                    title="重新生成"
-                                                                >
-                                                                    <RefreshCw className="h-3.5 w-3.5" />
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
-                                        </>
-                                    )}
-                                </div>
-                            </div>
-                        ))}
-
-                        <StatusBadge text={statusText} />
-                        <div ref={messagesEndRef} className="h-4" />
-                    </div>
-
-                    {/* Scroll to bottom floating button — sticky inside the scroll container */}
-                    {showScrollButton && (
-                        <div className="sticky bottom-4 flex justify-center w-full pointer-events-none z-20">
-                            <button
-                                onClick={() => {
-                                    // One-shot smooth scroll to bottom, then re-enable rAF auto-scroll
-                                    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-                                    setTimeout(() => setIsAutoScrolling(true), 500)
-                                }}
-                                className="pointer-events-auto flex items-center justify-center h-8 w-8 rounded-full bg-background/80 backdrop-blur border border-border shadow-md text-muted-foreground hover:text-foreground hover:bg-background transition-all"
-                                aria-label="捲動到最底部"
-                            >
-                                <ChevronDown className="h-4 w-4" />
-                            </button>
-                        </div>
-                    )}
-                </div>
-
-                {/* Input Area */}
-                <div className="bg-background px-4 py-4 shrink-0">
-                    <div
-                        className={`relative mx-auto flex flex-col rounded-[24px] bg-muted/30 transition-all shadow-sm
-                                     border border-border/80 focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/50 focus-within:bg-background
-                                     hover:border-primary/30
-                                     ${selectedPreviewAttachment ? 'max-w-full' : 'max-w-3xl'}`}
-                    >
-                        {/* Attachments Section Inside Input Box */}
-                        {attachments.length > 0 && (
-                            <div className="flex flex-wrap gap-2 px-5 pt-4 pb-0">
-                                {attachments.map((att, i) => (
-                                    <AttachmentThumbnail key={i} attachment={att} onRemove={() => setAttachments(prev => prev.filter((_, j) => j !== i))} onClick={() => setSelectedPreviewAttachment(att)} />
-                                ))}
-                            </div>
-                        )}
-
-                        <textarea
-                            ref={textareaRef}
-                            value={input}
-                            onPaste={handlePaste}
-                            onChange={e => setInput(e.target.value)}
-                            onKeyDown={handleKeyDown}
-                            placeholder="輸入訊息或拖曳檔案/圖片至此處... (Shift+Enter 換行)"
-                            disabled={isGenerating || isSetupBlocked}
-                            rows={1}
-                            className={`w-full resize-none bg-transparent px-5 py-4 text-[15px] leading-relaxed focus:outline-none placeholder:text-muted-foreground disabled:opacity-50 min-h-[56px] max-h-[30vh] overflow-y-auto scrollbar-hide ${attachments.length > 0 ? 'pt-3' : ''}`}
-                        />
-
-                        {/* Input Actions Footer */}
-                        <div className="flex items-center justify-between px-3 pb-3 pt-1">
-                            <div className="flex items-center gap-1">
-                                <input ref={fileInputRef} type="file" multiple className="hidden"
-                                    accept={`${ACCEPTED_IMAGE_TYPES},${ACCEPTED_DOC_TYPES}`}
-                                    onChange={e => { handleFileSelect(e.target.files); e.target.value = '' }}
-                                />
-                                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isGenerating || isSetupBlocked}
-                                    className="p-2 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
-                                    title="附加圖片或文件"
-                                >
-                                    <Paperclip className="h-5 w-5" />
-                                </button>
-                            </div>
-
-                            <button type="button" onClick={() => handleSubmit()}
-                                disabled={(!input.trim() && attachments.length === 0) || isGenerating || isSetupBlocked}
-                                className={`flex items-center justify-center p-2.5 rounded-full transition-all duration-200 
-                                    ${(!input.trim() && attachments.length === 0)
-                                        ? 'bg-muted/80 text-muted-foreground'
-                                        : 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-md transform hover:scale-105 active:scale-95'
-                                    } disabled:opacity-50 disabled:hover:scale-100 disabled:shadow-none mr-1`}
-                            >
-                                {isGenerating ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5 pl-0.5" />}
-                            </button>
-                        </div>
-                    </div>
-                    <p className="text-xs text-muted-foreground/50 text-center mt-3 font-medium">AI 助手可能會產生錯誤資訊，請小心查證。</p>
-                </div>
+                <ChatComposer
+                    hasRightPanel={hasRightPanel}
+                    attachments={attachments}
+                    input={input}
+                    isGenerating={isGenerating}
+                    isSetupBlocked={isSetupBlocked}
+                    isSyncingModels={isSyncingModels}
+                    chatMode={chatMode}
+                    textareaRef={textareaRef}
+                    fileInputRef={fileInputRef}
+                    onInputChange={setInput}
+                    onInputPaste={handlePaste}
+                    onInputKeyDown={handleKeyDown}
+                    onHandleFileSelect={handleFileSelect}
+                    onOpenAttachmentPreview={openAttachmentPreview}
+                    onRemoveAttachment={(index) => setAttachments((prev) => prev.filter((_, i) => i !== index))}
+                    onToggleMode={(mode) => {
+                        if (isGenerating || isSyncingModels) return
+                        if (mode === "agent") {
+                            switchToAgentModeWithGlow()
+                        } else {
+                            switchToNormalMode()
+                        }
+                    }}
+                    onStopGeneration={() => { void handleStopGeneration() }}
+                    onSubmit={() => handleSubmit()}
+                />
             </div>
 
             {/* Split Sidebar View */}
-            {selectedPreviewAttachment && (
-                <FilePreviewSidebar
+            {selectedToolFlowMessage ? (
+                <AgentToolFlowSidebar
+                    message={selectedToolFlowMessage}
+                    localePrefix={localePrefix}
+                    onClose={() => setSelectedToolFlowMessageId(null)}
+                />
+            ) : selectedPreviewAttachment ? (
+                <FilePreviewDrawer
                     attachment={selectedPreviewAttachment}
                     onClose={() => setSelectedPreviewAttachment(null)}
                 />
+            ) : null}
+
+            {/* Sub-Agent Drawer: desktop from right, mobile from bottom */}
+            {subAgentSessionId && (
+                <Drawer
+                    open
+                    onOpenChange={(open) => {
+                        if (!open) setSubAgentSessionId(null)
+                    }}
+                    direction={isMobileSubAgentDrawer ? "bottom" : "right"}
+                >
+                    <DrawerContent
+                        className={cn(
+                            "p-0 overflow-hidden",
+                            isMobileSubAgentDrawer
+                                ? "h-[78vh] max-h-[78vh]"
+                                : "inset-x-auto left-auto right-0 top-0 bottom-0 mt-0 h-full w-[26%] min-w-[240px] max-w-[340px] rounded-none border-l border-r-0 border-t-0"
+                        )}
+                    >
+                        <DrawerTitle className="sr-only">Sub-Agent Drawer</DrawerTitle>
+                        <SubAgentSidebar
+                            sessionId={subAgentSessionId}
+                            localePrefix={localePrefix}
+                            onClose={() => setSubAgentSessionId(null)}
+                            agentFetch={agentFetch}
+                            paused={agentPaused}
+                        />
+                    </DrawerContent>
+                </Drawer>
             )}
 
             <SetupChecker userRole={userRole} onBlockingChange={setIsSetupBlocked} />

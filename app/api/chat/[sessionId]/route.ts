@@ -11,6 +11,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ sess
     const { sessionId } = await params;
     const userId = session.user.id as string;
 
+    const chatSession = await db.query.chatSessions.findFirst({
+        where: and(
+            eq(chatSessions.id, sessionId),
+            eq(chatSessions.userId, userId),
+            eq(chatSessions.mode, "normal")
+        )
+    });
+    if (!chatSession) return new Response("Not found", { status: 404 });
+
     const msgs = await db.query.chatMessages.findMany({
         where: and(eq(chatMessages.sessionId, sessionId), eq(chatMessages.userId, userId)),
         orderBy: (m, { asc }) => [asc(m.createdAt)]
@@ -27,7 +36,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ se
     const userId = session.user.id as string;
 
     const chatSession = await db.query.chatSessions.findFirst({
-        where: and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId))
+        where: and(
+            eq(chatSessions.id, sessionId),
+            eq(chatSessions.userId, userId),
+            eq(chatSessions.mode, "normal")
+        )
     });
     if (!chatSession) return new Response("Not found", { status: 404 });
 
@@ -65,7 +78,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ s
     const userId = session.user.id as string;
 
     const chatSession = await db.query.chatSessions.findFirst({
-        where: and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId))
+        where: and(
+            eq(chatSessions.id, sessionId),
+            eq(chatSessions.userId, userId),
+            eq(chatSessions.mode, "normal")
+        )
     });
     if (!chatSession) return new Response("Not found", { status: 404 });
 

@@ -22,7 +22,11 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
 
     // Get all chats in this project, sorted by newest first
     const projectSessions = await db.query.chatSessions.findMany({
-        where: and(eq(chatSessions.projectId, projectId), eq(chatSessions.userId, userId)),
+        where: and(
+            eq(chatSessions.projectId, projectId),
+            eq(chatSessions.userId, userId),
+            eq(chatSessions.mode, "normal")
+        ),
         orderBy: (s, { desc }) => [desc(s.updatedAt)],
     })
 
