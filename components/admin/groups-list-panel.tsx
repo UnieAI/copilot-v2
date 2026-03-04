@@ -21,6 +21,7 @@ type SystemUser = {
 type Group = {
     id: string
     name: string
+    image?: string | null
     creatorId: string | null
     currentUserRole?: GroupRole | null
     memberCount: number
@@ -106,6 +107,17 @@ function GroupRow({
     return (
         <div className="rounded-xl border border-border/50 bg-background overflow-hidden shadow-sm">
             <div className="flex items-center gap-3 px-4 py-3">
+                {group.image ? (
+                    <img
+                        src={group.image}
+                        alt={group.name}
+                        className="h-10 w-10 rounded-xl object-cover shrink-0 border border-border/50"
+                    />
+                ) : (
+                    <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                        <Users className="h-5 w-5 text-primary" />
+                    </div>
+                )}
                 <button onClick={() => router.push(`/g/${group.id}`)} className="flex-1 text-left group">
                     <p className="text-sm font-semibold group-hover:text-primary transition-colors truncate">{group.name}</p>
                     <p className="text-[11px] text-muted-foreground mt-0.5">{group.memberCount} 位成員</p>
