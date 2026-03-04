@@ -537,6 +537,7 @@ function GroupDetail({
 
     const isAdminViewer = ["admin", "super"].includes(viewerRole)
     const canEdit = isAdminViewer || ["creator", "editor"].includes(group.currentUserRole || "")
+    const creatorUserId = group.creatorId
 
     useEffect(() => {
         if (!canEdit && tab === "usage") setTab("members")
@@ -657,6 +658,7 @@ function GroupDetail({
 
     const changeRole = (userId: string, role: GroupRole) => {
         if (!canEdit) return
+        if (creatorUserId && userId === creatorUserId) return
         setMemberRoles(prev => {
             const next = new Map(prev)
             next.set(userId, role)
@@ -682,6 +684,7 @@ function GroupDetail({
 
     const removeMember = (userId: string) => {
         if (!canEdit) return
+        if (creatorUserId && userId === creatorUserId) return
         setSelectedIds(prev => {
             const next = new Set(prev)
             next.delete(userId)
@@ -719,6 +722,14 @@ function GroupDetail({
         const selected = [...selectedIds]
         if (selected.length === 0) {
             toast.error("至少需要一位成員")
+            return
+        }
+        if (!creatorUserId || !selected.includes(creatorUserId)) {
+            toast.error("建立者必須保留在群組中")
+            return
+        }
+        if ((memberRoles.get(creatorUserId) || "member") !== "creator") {
+            toast.error("建立者角色不可變更")
             return
         }
         const hasCreator = selected.some(id => (memberRoles.get(id) || "member") === "creator")
@@ -917,6 +928,7 @@ function GroupDetail({
                                 <p className="text-sm text-muted-foreground text-center py-4">尚未加入成員</p>
                             ) : selectedMembers.map(u => {
                                 const role = memberRoles.get(u.id) || "member"
+                                const isCreator = creatorUserId === u.id
                                 return (
                                     <div key={u.id} className="flex items-center gap-3 p-2 rounded-lg border border-border/60">
                                         {u.image ? (
@@ -933,14 +945,14 @@ function GroupDetail({
                                         <select
                                             value={role}
                                             onChange={e => changeRole(u.id, e.target.value as GroupRole)}
-                                            disabled={!canEdit}
+                                            disabled={!canEdit || isCreator}
                                             className="text-xs border border-border rounded-md px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
                                         >
-                                            <option value="creator">Creator</option>
+                                            {isCreator && <option value="creator">Creator</option>}
                                             <option value="editor">共編者</option>
                                             <option value="member">用戶</option>
                                         </select>
-                                        {canEdit && (
+                                        {canEdit && !isCreator && (
                                             <button
                                                 onClick={() => removeMember(u.id)}
                                                 className="text-xs text-destructive hover:underline"
