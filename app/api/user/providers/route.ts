@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
         return Response.json({ error: "Prefix already in use" }, { status: 409 });
     }
 
-    const [newProvider] = await db.insert(userProviders).values({
+    const [created] = await db.insert(userProviders).values({
         userId,
         displayName: displayName || '',
         prefix: upperPrefix,
@@ -64,5 +64,25 @@ export async function POST(req: NextRequest) {
         selectedModels: [] as any,
     }).returning();
 
-    return Response.json(newProvider, { status: 201 });
+    try {
+        const cleanUrl = String(apiUrl).replace(/\/+$/, "").replace(/\/v1$/, "");
+        const res = await fetch(`${cleanUrl}/v1/models`, {
+            headers: { Authorization: `Bearer ${apiKey}` },
+        });
+        if (res.ok) {
+            const data = await res.json();
+            const models = Array.isArray(data?.data) ? data.data : [];
+            const selectedModels = models.map((m: any) => m.id || String(m));
+            const [updated] = await db
+                .update(userProviders)
+                .set({ modelList: models as any, selectedModels: selectedModels as any, updatedAt: new Date() })
+                .where(eq(userProviders.id, created.id))
+                .returning();
+            return Response.json(updated, { status: 201 });
+        }
+    } catch {
+        // Keep created row even if sync failed.
+    }
+
+    return Response.json(created, { status: 201 });
 }
