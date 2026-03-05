@@ -1,170 +1,725 @@
-"use client"
-import { useState, useEffect } from "react"
-import { toast } from "sonner"
-import { Plus, Trash2, RefreshCw, Pencil, Check, X, ChevronDown, ChevronUp, Eye, EyeOff } from "lucide-react"
-import { GroupProvider, maskKey, UNIEAI_PROVIDER_URL, UNIEAI_PROVIDER_KEY } from "./group-types"
-import { UnieAIIcon } from "@/components/sidebar/unieai-logo"
+"use client";
 
-function ModelChecklist({ groupId, provider, onSaved, readOnly = false }: {
-    groupId: string; provider: GroupProvider; onSaved: () => void; readOnly?: boolean
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import {
+  ChevronDown,
+  ChevronUp,
+  Eye,
+  EyeOff,
+  Plus,
+  RefreshCw,
+  ToggleLeft,
+  ToggleRight,
+  Trash2,
+  X,
+} from "lucide-react";
+import { GroupProvider, UNIEAI_PROVIDER_KEY, UNIEAI_PROVIDER_URL } from "./group-types";
+import { UnieAIIcon } from "@/components/sidebar/unieai-logo";
+
+type ModelItem = {
+  id: string;
+  object?: string;
+  [key: string]: unknown;
+};
+
+type ProviderFormState = {
+  displayName: string;
+  prefix: string;
+  apiUrl: string;
+  apiKey: string;
+  enable: boolean;
+};
+
+const getModelId = (model: ModelItem) => model.id || String(model);
+
+function ProviderCard({
+  groupId,
+  provider,
+  onUpdate,
+  onDelete,
+  canEdit,
+}: {
+  groupId: string;
+  provider: GroupProvider;
+  onUpdate: (updated: GroupProvider) => void;
+  onDelete: () => void;
+  canEdit: boolean;
 }) {
-    const allModels = Array.isArray(provider.modelList) ? provider.modelList : []
-    const [selected, setSelected] = useState<Set<string>>(new Set(Array.isArray(provider.selectedModels) ? provider.selectedModels : []))
-    const [saving, setSaving] = useState(false)
-    useEffect(() => { setSelected(new Set(Array.isArray(provider.selectedModels) ? provider.selectedModels : [])) }, [provider.selectedModels])
-    const toggleAll = () => { if (readOnly) return; selected.size === allModels.length ? setSelected(new Set()) : setSelected(new Set(allModels.map((m: any) => m.id || String(m)))) }
-    const toggle = (id: string) => { if (readOnly) return; setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n }) }
-    const save = async () => {
-        setSaving(true)
-        try {
-            const res = await fetch(`/api/admin/groups/${groupId}/providers/${provider.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ selectedModels: [...selected] }) })
-            if (!res.ok) { toast.error("儲存失敗"); return }
-            toast.success("模型選擇已儲存"); onSaved()
-        } finally { setSaving(false) }
+  const [expanded, setExpanded] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [form, setForm] = useState<ProviderFormState>({
+    displayName: provider.displayName,
+    prefix: provider.prefix,
+    apiUrl: provider.apiUrl,
+    apiKey: provider.apiKey,
+    enable: provider.enable === 1,
+  });
+  const [models, setModels] = useState<ModelItem[]>(
+    Array.isArray(provider.modelList) ? (provider.modelList as ModelItem[]) : []
+  );
+  const [selectedModelIds, setSelectedModelIds] = useState<string[]>(
+    Array.isArray(provider.selectedModels) ? provider.selectedModels : []
+  );
+
+  useEffect(() => {
+    setForm({
+      displayName: provider.displayName,
+      prefix: provider.prefix,
+      apiUrl: provider.apiUrl,
+      apiKey: provider.apiKey,
+      enable: provider.enable === 1,
+    });
+    setModels(Array.isArray(provider.modelList) ? (provider.modelList as ModelItem[]) : []);
+    setSelectedModelIds(Array.isArray(provider.selectedModels) ? provider.selectedModels : []);
+  }, [provider]);
+
+  const applyUnieAIProviderDefaults = () => {
+    if (!UNIEAI_PROVIDER_URL) {
+      toast.error("NEXT_PUBLIC_UNIEAI_PROVIDER_URL is not set");
+      return;
     }
-    if (allModels.length === 0) return <p className="text-xs text-muted-foreground py-2 px-1">尚無模型資料，請點擊「重新整理」獲取模型清單</p>
-    const allChecked = selected.size === allModels.length; const someChecked = selected.size > 0 && selected.size < allModels.length
-    return (
-        <div className="mt-2 space-y-2">
-            <div className="flex items-center justify-between mb-1">
-                <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
-                    <input type="checkbox" checked={allChecked} ref={el => { if (el) el.indeterminate = someChecked }} onChange={toggleAll} className="h-3.5 w-3.5 rounded border-border accent-primary" disabled={readOnly} />
-                    全選 ({selected.size}/{allModels.length})
-                </label>
-                <button onClick={save} disabled={saving || readOnly} className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors">
-                    <Check className="h-3 w-3" />{saving ? "儲存中..." : readOnly ? "僅檢視" : "套用"}
-                </button>
+    if (!UNIEAI_PROVIDER_KEY) {
+      toast.error("NEXT_PUBLIC_UNIEAI_PROVIDER_KEY is not set");
+      return;
+    }
+    setForm((prev) => ({
+      ...prev,
+      apiUrl: UNIEAI_PROVIDER_URL,
+      apiKey: UNIEAI_PROVIDER_KEY,
+    }));
+  };
+
+  const handleToggleEnable = async () => {
+    if (!canEdit) return;
+    const nextEnable = !form.enable;
+    setForm((prev) => ({ ...prev, enable: nextEnable }));
+    try {
+      const res = await fetch(`/api/admin/groups/${groupId}/providers/${provider.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enable: nextEnable }),
+      });
+      if (!res.ok) throw new Error();
+      const updated = await res.json();
+      onUpdate({
+        ...provider,
+        ...updated,
+        modelList: Array.isArray(updated.modelList) ? updated.modelList : models,
+        selectedModels: Array.isArray(updated.selectedModels) ? updated.selectedModels : selectedModelIds,
+      });
+      toast.success(nextEnable ? "Provider enabled" : "Provider disabled");
+    } catch {
+      setForm((prev) => ({ ...prev, enable: !nextEnable }));
+      toast.error("Update failed");
+    }
+  };
+
+  const handleSave = async () => {
+    if (!canEdit) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/admin/groups/${groupId}/providers/${provider.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          displayName: form.displayName,
+          apiUrl: form.apiUrl,
+          apiKey: form.apiKey,
+          enable: form.enable,
+          modelList: models,
+          selectedModels: selectedModelIds,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Save failed");
+      }
+      const updated = await res.json();
+      onUpdate({
+        ...provider,
+        ...updated,
+        modelList: Array.isArray(updated.modelList) ? updated.modelList : models,
+        selectedModels: Array.isArray(updated.selectedModels) ? updated.selectedModels : selectedModelIds,
+      });
+      toast.success("Saved");
+    } catch (e: any) {
+      toast.error(e.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSync = async () => {
+    if (!canEdit) return;
+    setSyncing(true);
+    try {
+      const res = await fetch(`/api/admin/groups/${groupId}/providers/${provider.id}/sync`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Sync models failed");
+      }
+      const data = await res.json();
+      const nextModels = Array.isArray(data.modelList) ? data.modelList : [];
+      const nextSelected = Array.isArray(data.selectedModels) ? data.selectedModels : [];
+      setModels(nextModels);
+      setSelectedModelIds(nextSelected);
+      onUpdate({
+        ...provider,
+        ...data.provider,
+        modelList: nextModels,
+        selectedModels: nextSelected,
+      });
+      toast.success(`Synced ${nextModels.length} models`);
+      setExpanded(true);
+    } catch (e: any) {
+      toast.error(e.message || "Sync models failed");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!canEdit) return;
+    if (!confirm(`Delete Provider "${form.displayName || form.prefix}"?`)) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/admin/groups/${groupId}/providers/${provider.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error();
+      onDelete();
+      toast.success("Provider deleted");
+    } catch {
+      toast.error("Delete failed");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const selectedCount = selectedModelIds.length;
+  const totalCount = models.length;
+
+  return (
+    <div
+      className={`rounded-2xl border transition-colors ${form.enable ? "border-border bg-background" : "border-border/50 bg-muted/30"
+        }`}
+    >
+      <div className="flex items-center gap-3 px-4 py-3">
+        <button
+          type="button"
+          onClick={handleToggleEnable}
+          disabled={!canEdit}
+          className={`shrink-0 transition-colors ${form.enable ? "text-primary" : "text-muted-foreground/50"
+            } disabled:opacity-50`}
+          title={form.enable ? "Disable provider" : "Enable provider"}
+        >
+          {form.enable ? <ToggleRight className="h-5 w-5" /> : <ToggleLeft className="h-5 w-5" />}
+        </button>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-sm truncate">{form.displayName || "Untitled Provider"}</span>
+            <span className="text-[10px] font-mono bg-primary/10 text-primary px-1.5 py-0.5 rounded font-bold tracking-wider shrink-0">
+              {form.prefix}
+            </span>
+            {!form.enable && (
+              <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">
+                Disabled
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground truncate">
+            {form.apiUrl || "No API URL"} | {selectedCount}/{totalCount} selected models
+          </p>
+        </div>
+
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
+          >
+            {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </button>
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={deleting || !canEdit}
+            className="p-1.5 rounded-lg hover:bg-destructive/10 hover:text-destructive transition-colors text-muted-foreground disabled:opacity-50"
+            title="Delete provider"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="px-4 pb-4 space-y-4 border-t border-border/40 pt-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs font-medium">顯示名稱</label>
+              <input
+                type="text"
+                value={form.displayName}
+                onChange={(e) => setForm((prev) => ({ ...prev, displayName: e.target.value }))}
+                placeholder="e.g. OpenAI"
+                disabled={!canEdit}
+                className="w-full h-9 rounded-xl border border-input/60 bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all disabled:opacity-60"
+              />
             </div>
-            <div className="max-h-48 overflow-y-auto space-y-0.5 pr-1">
-                {allModels.map((m: any) => {
-                    const id = m.id || String(m); return (
-                        <label key={id} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-muted/50 cursor-pointer text-xs">
-                            <input type="checkbox" checked={selected.has(id)} onChange={() => toggle(id)} className="h-3.5 w-3.5 rounded border-border accent-primary shrink-0" disabled={readOnly} />
-                            <span className="font-mono truncate">{id}</span>
-                        </label>
-                    )
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium">
+                Prefix（4碼英數字，唯一識別）<span className="text-destructive">*</span>
+              </label>
+              <input
+                type="text"
+                value={form.prefix}
+                disabled
+                className="w-full h-9 rounded-xl border border-input/60 bg-background px-3 text-sm font-mono uppercase disabled:opacity-60"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium">API URL</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="url"
+                  value={form.apiUrl}
+                  onChange={(e) => setForm((prev) => ({ ...prev, apiUrl: e.target.value }))}
+                  placeholder="https://api.openai.com/v1"
+                  disabled={!canEdit}
+                  className="flex-1 h-9 rounded-xl border border-input/60 bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all disabled:opacity-60"
+                />
+                <button
+                  type="button"
+                  onClick={applyUnieAIProviderDefaults}
+                  disabled={!canEdit}
+                  className="h-9 w-9 shrink-0 rounded-full border border-input/60 bg-background hover:bg-muted transition-colors inline-flex items-center justify-center disabled:opacity-60"
+                  title="Use UnieAI"
+                >
+                  <UnieAIIcon className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium">API Key</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type={showApiKey ? "text" : "password"}
+                  value={form.apiKey}
+                  onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
+                  placeholder="sk-..."
+                  disabled={!canEdit}
+                  className="flex-1 h-9 rounded-xl border border-input/60 bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all disabled:opacity-60"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowApiKey((prev) => !prev)}
+                  className="h-9 w-9 shrink-0 rounded-full border border-input/60 bg-background hover:bg-muted transition-colors inline-flex items-center justify-center"
+                  title={showApiKey ? "Hide API Key" : "Show API Key"}
+                  aria-label={showApiKey ? "Hide API Key" : "Show API Key"}
+                >
+                  {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-2 pt-2 border-t border-border/40">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <p className="text-xs text-muted-foreground">選擇模型（已選 {selectedCount}/{totalCount} 個）</p>
+                <button
+                  type="button"
+                  onClick={handleSync}
+                  disabled={syncing || !canEdit}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-muted transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`h-3 w-3 ${syncing ? "animate-spin" : ""}`} />
+                  {syncing ? "同步中..." : "同步模型"}
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedModelIds(models.map(getModelId))}
+                  className="h-7 px-2.5 rounded-lg border border-border bg-background hover:bg-muted text-xs"
+                  disabled={models.length === 0 || !canEdit}
+                >
+                  全選
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedModelIds([])}
+                  className="h-7 px-2.5 rounded-lg border border-border bg-background hover:bg-muted text-xs"
+                  disabled={selectedModelIds.length === 0 || !canEdit}
+                >
+                  清空
+                </button>
+              </div>
+            </div>
+
+            {models.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto border border-border/50 rounded-xl p-2">
+                {models.map((m) => {
+                  const modelId = getModelId(m);
+                  return (
+                    <label key={modelId} className="text-xs flex items-center gap-2 rounded-md px-2 py-1 hover:bg-muted/60">
+                      <input
+                        type="checkbox"
+                        checked={selectedModelIds.includes(modelId)}
+                        onChange={(e) => {
+                          const next = e.target.checked
+                            ? Array.from(new Set([...selectedModelIds, modelId]))
+                            : selectedModelIds.filter((id) => id !== modelId);
+                          setSelectedModelIds(next);
+                        }}
+                        disabled={!canEdit}
+                      />
+                      <span className="font-mono truncate">{modelId}</span>
+                    </label>
+                  );
                 })}
-            </div>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">尚無模型，請先同步模型。</p>
+            )}
+          </div>
+
+          <div className="flex justify-end border-t border-border/40 pt-3">
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || !canEdit}
+              className="h-9 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-all shadow-sm active:scale-95 disabled:opacity-50"
+            >
+              {saving ? "儲存中..." : "儲存"}
+            </button>
+          </div>
         </div>
-    )
+      )}
+    </div>
+  );
 }
 
-function ProviderForm({ groupId, provider, onSave, onCancel }: {
-    groupId: string; provider?: GroupProvider; onSave: (created?: GroupProvider) => void; onCancel: () => void
+function CreateProviderDialog({
+  groupId,
+  existingPrefixes,
+  onCreated,
+  onClose,
+}: {
+  groupId: string;
+  existingPrefixes: string[];
+  onCreated: (provider: GroupProvider) => void;
+  onClose: () => void;
 }) {
-    const [form, setForm] = useState({ displayName: provider?.displayName || "", prefix: provider?.prefix || "", apiUrl: provider?.apiUrl || "", apiKey: provider?.apiKey || "", enable: provider ? provider.enable === 1 : true })
-    const [showApiKey, setShowApiKey] = useState(false)
-    const [saving, setSaving] = useState(false)
-    const applyDefaults = () => {
-        if (!UNIEAI_PROVIDER_URL) { toast.error("NEXT_PUBLIC_UNIEAI_PROVIDER_URL 未設定"); return }
-        if (!UNIEAI_PROVIDER_KEY) { toast.error("NEXT_PUBLIC_UNIEAI_PROVIDER_KEY 未設定"); return }
-        setForm(f => ({ ...f, apiUrl: UNIEAI_PROVIDER_URL, apiKey: UNIEAI_PROVIDER_KEY }))
+  const [form, setForm] = useState({
+    displayName: "",
+    prefix: "",
+    apiUrl: "",
+    apiKey: "",
+  });
+  const [prefixError, setPrefixError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
+
+  const validatePrefix = (val: string) => {
+    if (!val) return "Prefix is required";
+    if (!/^[A-Z0-9]{4}$/.test(val)) return "Prefix must be 4 alphanumeric chars";
+    if (existingPrefixes.includes(val)) return "Prefix already exists";
+    return "";
+  };
+
+  const handlePrefixChange = (val: string) => {
+    const upper = val.toUpperCase().slice(0, 4);
+    setForm((prev) => ({ ...prev, prefix: upper }));
+    setPrefixError(validatePrefix(upper));
+  };
+
+  const handleSubmit = async () => {
+    const err = validatePrefix(form.prefix);
+    if (err) {
+      setPrefixError(err);
+      return;
     }
-    const save = async () => {
-        setSaving(true)
-        try {
-            const url = provider ? `/api/admin/groups/${groupId}/providers/${provider.id}` : `/api/admin/groups/${groupId}/providers`
-            const res = await fetch(url, { method: provider ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) })
-            if (!res.ok) { const err = await res.json().catch(() => ({})); toast.error(err.error || "儲存失敗"); return }
-            const data = await res.json(); toast.success(provider ? "更新完成" : `新增完成${data.modelList?.length > 0 ? `，已自動獲取 ${data.modelList.length} 個模型` : ""}`); onSave(data)
-        } finally { setSaving(false) }
+    if (!form.displayName.trim()) {
+      toast.error("Display Name is required");
+      return;
     }
-    return (
-        <div className="space-y-3 rounded-xl border border-border bg-muted/30 p-4">
-            <div className="grid grid-cols-2 gap-3">
-                <div><label className="block text-xs font-medium text-muted-foreground mb-1">顯示名稱</label><input className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring" value={form.displayName} onChange={e => setForm(f => ({ ...f, displayName: e.target.value }))} placeholder="e.g. OpenAI" /></div>
-                <div><label className="block text-xs font-medium text-muted-foreground mb-1">Prefix <span className="text-muted-foreground/60">(4碼英數)</span></label><input className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-sm font-mono uppercase focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50" value={form.prefix} onChange={e => setForm(f => ({ ...f, prefix: e.target.value.toUpperCase().slice(0, 4) }))} placeholder="GRPA" disabled={!!provider} maxLength={4} /></div>
-            </div>
-            <div><label className="block text-xs font-medium text-muted-foreground mb-1">API URL</label>
-                <div className="flex items-center gap-2">
-                    <input className="flex-1 rounded-lg border border-input bg-background px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring" value={form.apiUrl} onChange={e => setForm(f => ({ ...f, apiUrl: e.target.value }))} placeholder="https://api.openai.com" />
-                    <button type="button" onClick={applyDefaults} className="h-9 w-9 shrink-0 rounded-full border border-input bg-background hover:bg-muted transition-colors inline-flex items-center justify-center" title="Use UnieAI"><UnieAIIcon className="h-4 w-4" /></button>
-                </div>
-            </div>
-            <div><label className="block text-xs font-medium text-muted-foreground mb-1">API Key</label>
-                <div className="flex items-center gap-2">
-                    <input className="flex-1 rounded-lg border border-input bg-background px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring" type={showApiKey ? "text" : "password"} value={form.apiKey} onChange={e => setForm(f => ({ ...f, apiKey: e.target.value }))} placeholder="sk-..." />
-                    <button type="button" onClick={() => setShowApiKey(v => !v)} className="h-9 w-9 shrink-0 rounded-full border border-input bg-background hover:bg-muted transition-colors inline-flex items-center justify-center" title={showApiKey ? "Hide API Key" : "Show API Key"} aria-label={showApiKey ? "Hide API Key" : "Show API Key"}>
-                        {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                </div>
-            </div>
-            <div className="flex items-center gap-2"><input id={`enable-${provider?.id || "new"}`} type="checkbox" checked={form.enable} onChange={e => setForm(f => ({ ...f, enable: e.target.checked }))} className="h-4 w-4 rounded border-border accent-primary" /><label htmlFor={`enable-${provider?.id || "new"}`} className="text-sm">啟用</label></div>
-            <div className="flex gap-2 pt-1">
-                <button onClick={save} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"><Check className="h-3.5 w-3.5" />{saving ? (provider ? "儲存中..." : "建立並獲取模型...") : (provider ? "儲存" : "建立")}</button>
-                <button onClick={onCancel} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-muted transition-colors"><X className="h-3.5 w-3.5" />取消</button>
-            </div>
+    if (!form.apiUrl.trim() || !form.apiKey.trim()) {
+      toast.error("Please fill API URL / API Key");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await fetch(`/api/admin/groups/${groupId}/providers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          displayName: form.displayName.trim(),
+          prefix: form.prefix,
+          apiUrl: form.apiUrl.trim(),
+          apiKey: form.apiKey.trim(),
+          enable: true,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Create failed");
+      }
+      onCreated({
+        ...data,
+        modelList: Array.isArray(data.modelList) ? data.modelList : [],
+        selectedModels: Array.isArray(data.selectedModels) ? data.selectedModels : [],
+      });
+      toast.success("Provider created");
+      onClose();
+    } catch (e: any) {
+      toast.error(e.message || "Create failed");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const applyUnieAIProviderDefaults = () => {
+    if (!UNIEAI_PROVIDER_URL) {
+      toast.error("NEXT_PUBLIC_UNIEAI_PROVIDER_URL is not set");
+      return;
+    }
+    if (!UNIEAI_PROVIDER_KEY) {
+      toast.error("NEXT_PUBLIC_UNIEAI_PROVIDER_KEY is not set");
+      return;
+    }
+    setForm((prev) => ({
+      ...prev,
+      apiUrl: UNIEAI_PROVIDER_URL,
+      apiKey: UNIEAI_PROVIDER_KEY,
+    }));
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !submitting) onClose();
+      }}
+    >
+      <div className="w-full max-w-md mx-4 bg-background rounded-2xl border border-border shadow-xl animate-in zoom-in-95 slide-in-from-bottom-4 duration-200">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border/50">
+          <h3 className="font-semibold text-base">新增 Provider</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={submitting}
+            className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
-    )
+
+        <div className="px-6 py-5 space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">
+              Display Name <span className="text-destructive">*</span>
+            </label>
+            <input
+              type="text"
+              value={form.displayName}
+              onChange={(e) => setForm((prev) => ({ ...prev, displayName: e.target.value }))}
+              placeholder="e.g. OpenAI"
+              autoFocus
+              className="w-full h-10 rounded-xl border border-input/60 bg-background px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">
+              Prefix <span className="text-destructive">*</span>
+              <span className="ml-1.5 text-xs text-muted-foreground font-normal">4 alphanumeric chars</span>
+            </label>
+            <input
+              type="text"
+              value={form.prefix}
+              onChange={(e) => handlePrefixChange(e.target.value)}
+              placeholder="e.g. GRP1"
+              maxLength={4}
+              className={`w-full h-10 rounded-xl border bg-background px-4 text-sm font-mono tracking-widest uppercase focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all ${prefixError ? "border-destructive focus:border-destructive" : "border-input/60 focus:border-primary/50"
+                }`}
+            />
+            {prefixError && <p className="text-xs text-destructive">{prefixError}</p>}
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">API URL</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={form.apiUrl}
+                onChange={(e) => setForm((prev) => ({ ...prev, apiUrl: e.target.value }))}
+                placeholder="https://api.openai.com/v1"
+                className="flex-1 h-10 rounded-xl border border-input/60 bg-background px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
+              />
+              <button
+                type="button"
+                onClick={applyUnieAIProviderDefaults}
+                className="h-10 w-10 shrink-0 rounded-full border border-input/60 bg-background hover:bg-muted transition-colors inline-flex items-center justify-center"
+                title="Use UnieAI"
+              >
+                <UnieAIIcon className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">API Key</label>
+            <div className="flex items-center gap-2">
+              <input
+                type={showApiKey ? "text" : "password"}
+                value={form.apiKey}
+                onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
+                placeholder="sk-..."
+                className="flex-1 h-10 rounded-xl border border-input/60 bg-background px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all"
+              />
+              <button
+                type="button"
+                onClick={() => setShowApiKey((prev) => !prev)}
+                className="h-10 w-10 shrink-0 rounded-full border border-input/60 bg-background hover:bg-muted transition-colors inline-flex items-center justify-center"
+                title={showApiKey ? "Hide API Key" : "Show API Key"}
+                aria-label={showApiKey ? "Hide API Key" : "Show API Key"}
+              >
+                {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border/50">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={submitting}
+            className="h-9 px-4 rounded-xl text-sm text-muted-foreground hover:bg-muted transition-colors"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={submitting || !!prefixError}
+            className="h-9 px-5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-all shadow-sm active:scale-95 disabled:opacity-50"
+          >
+            {submitting ? "建立中..." : "建立 Provider"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-function ProviderRow({ groupId, provider, onRefresh, canEdit }: {
-    groupId: string; provider: GroupProvider; onRefresh: () => void; canEdit: boolean
+export function ProviderSection({
+  groupId,
+  canEdit,
+  onProviderCountChange,
+}: {
+  groupId: string;
+  canEdit: boolean;
+  onProviderCountChange?: (count: number) => void;
 }) {
-    const [editing, setEditing] = useState(false)
-    const [showModels, setShowModels] = useState(false)
-    const [syncing, setSyncing] = useState(false)
-    const [deleting, setDeleting] = useState(false)
-    const syncModels = async () => {
-        if (!canEdit) return; setSyncing(true)
-        try {
-            const res = await fetch(`/api/admin/groups/${groupId}/providers/${provider.id}/sync`, { method: "POST" })
-            if (!res.ok) { const err = await res.json().catch(() => ({})); toast.error(err.error || "同步失敗"); return }
-            const data = await res.json(); toast.success(`已更新 ${data.modelList?.length ?? 0} 個模型`); onRefresh(); setShowModels(true)
-        } finally { setSyncing(false) }
-    }
-    const deleteProvider = async () => {
-        if (!canEdit) return
-        if (!confirm(`確定要刪除 Provider「${provider.displayName || provider.prefix}」？`)) return
-        setDeleting(true)
-        try {
-            const res = await fetch(`/api/admin/groups/${groupId}/providers/${provider.id}`, { method: "DELETE" })
-            if (!res.ok) { toast.error("刪除失敗"); return }; toast.success("已刪除"); onRefresh()
-        } finally { setDeleting(false) }
-    }
-    if (editing) return <ProviderForm groupId={groupId} provider={provider} onSave={() => { setEditing(false); onRefresh() }} onCancel={() => setEditing(false)} />
-    const modelCount = Array.isArray(provider.modelList) ? provider.modelList.length : 0
-    const selectedCount = Array.isArray(provider.selectedModels) ? provider.selectedModels.length : 0
-    return (
-        <div className="rounded-lg border border-border/40 bg-background overflow-hidden">
-            <div className="flex items-center gap-2 py-2 px-3 text-sm">
-                <div className={`h-2 w-2 rounded-full shrink-0 ${provider.enable ? "bg-green-500" : "bg-muted-foreground/40"}`} />
-                <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded text-muted-foreground shrink-0">{provider.prefix}</span>
-                <span className="font-medium flex-1 truncate">{provider.displayName || provider.prefix}</span>
-                <button onClick={() => setShowModels(v => !v)} className="text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0 flex items-center gap-1">
-                    {modelCount > 0 ? `${selectedCount > 0 ? selectedCount : "全部"} / ${modelCount} 模型` : "無模型"}
-                    {showModels ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                </button>
-                <span className="text-xs text-muted-foreground/60 truncate max-w-[120px] hidden lg:block">{maskKey(provider.apiKey)}</span>
-                <div className="flex items-center gap-1 shrink-0">
-                    <button onClick={syncModels} disabled={syncing || !canEdit} title="重新整理模型清單" className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} /></button>
-                    <button onClick={() => canEdit && setEditing(true)} title="編輯" className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50" disabled={!canEdit}><Pencil className="h-3.5 w-3.5" /></button>
-                    <button onClick={deleteProvider} disabled={deleting || !canEdit} title="刪除" className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" /></button>
-                </div>
-            </div>
-            {showModels && <div className="border-t border-border/30 px-3 pb-3"><ModelChecklist groupId={groupId} provider={provider} onSaved={onRefresh} readOnly={!canEdit} /></div>}
+  const [providers, setProviders] = useState<GroupProvider[]>([]);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+
+  const fetchProviders = async () => {
+    const res = await fetch(`/api/admin/groups/${groupId}/providers`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const list = Array.isArray(data) ? data : [];
+    setProviders(list);
+    onProviderCountChange?.(list.length);
+  };
+
+  useEffect(() => {
+    fetchProviders();
+  }, [groupId]);
+
+  const existingPrefixes = providers.map((p) => p.prefix.toUpperCase());
+
+  const handleUpdate = (updated: GroupProvider) => {
+    setProviders((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+  };
+
+  const handleDelete = (id: string) => {
+    setProviders((prev) => prev.filter((p) => p.id !== id));
+    onProviderCountChange?.(Math.max(0, providers.length - 1));
+  };
+
+  return (
+    <>
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="font-semibold">Group Providers</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              設定群組可用的 Provider 與模型。
+            </p>
+          </div>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => setShowCreateDialog(true)}
+              className="flex items-center gap-1.5 h-9 px-4 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-all shadow-sm active:scale-95"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              新增 Provider
+            </button>
+          )}
         </div>
-    )
+
+        {providers.length === 0 ? (
+          <div className="text-center py-10 border border-dashed border-border rounded-2xl text-muted-foreground">
+            <p className="text-sm">尚未設定任何 Provider</p>
+            <p className="text-xs mt-1">請先新增 Provider 並同步模型。</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {providers.map((p) => (
+              <ProviderCard
+                key={p.id}
+                groupId={groupId}
+                provider={p}
+                canEdit={canEdit}
+                onUpdate={handleUpdate}
+                onDelete={() => handleDelete(p.id)}
+              />
+            ))}
+          </div>
+        )}
+
+        {!canEdit && (
+          <p className="text-xs text-muted-foreground text-right">
+            只有 Creator/共編者可以調整 Provider。
+          </p>
+        )}
+      </section>
+
+      {showCreateDialog && canEdit && (
+        <CreateProviderDialog
+          groupId={groupId}
+          existingPrefixes={existingPrefixes}
+          onCreated={(newProvider) => {
+            setProviders((prev) => [...prev, newProvider]);
+            onProviderCountChange?.(providers.length + 1);
+          }}
+          onClose={() => setShowCreateDialog(false)}
+        />
+      )}
+    </>
+  );
 }
 
-export function ProviderSection({ groupId, canEdit, onProviderCountChange }: { groupId: string; canEdit: boolean; onProviderCountChange?: (count: number) => void }) {
-    const [providers, setProviders] = useState<GroupProvider[]>([])
-    const [addingProvider, setAddingProvider] = useState(false)
-    const fetchProviders = async () => {
-        const res = await fetch(`/api/admin/groups/${groupId}/providers`)
-        if (res.ok) { const data = await res.json(); setProviders(data); onProviderCountChange?.(data.length) }
-    }
-    useEffect(() => { fetchProviders() }, [groupId])
-    return (
-        <div className="space-y-3">
-            <div className="flex items-center justify-between">
-                <p className="text-xs text-muted-foreground">設定此群組可用的 AI Provider，並勾選要開放的模型</p>
-                {canEdit && <button onClick={() => setAddingProvider(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-muted transition-colors"><Plus className="h-3.5 w-3.5" />新增 Provider</button>}
-            </div>
-            {addingProvider && canEdit && <ProviderForm groupId={groupId} onSave={(created) => { setAddingProvider(false); fetchProviders(); if ((created?.modelList?.length ?? 0) > 0) toast.success(`已獲取 ${created!.modelList.length} 個模型`) }} onCancel={() => setAddingProvider(false)} />}
-            {providers.length === 0 && !addingProvider ? <p className="text-sm text-muted-foreground text-center py-6">尚未設定任何 Provider</p>
-                : <div className="space-y-2">{providers.map(p => <ProviderRow key={p.id} groupId={groupId} provider={p} onRefresh={fetchProviders} canEdit={canEdit} />)}</div>}
-            {!canEdit && <p className="text-xs text-muted-foreground text-right">只有 Creator/共編者可以調整 Provider</p>}
-        </div>
-    )
-}

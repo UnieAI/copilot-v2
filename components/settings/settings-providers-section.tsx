@@ -398,7 +398,7 @@ function ProviderCard({
                 })}
               </div>
             ) : (
-              <p className="text-xs text-muted-foreground">尚無模型，請先同步。</p>
+              <p className="text-xs text-muted-foreground">尚無模型，請先同步模型。</p>
             )}
           </div>
 

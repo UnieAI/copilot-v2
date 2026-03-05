@@ -539,7 +539,9 @@ export function GlobalProvidersPanel() {
                           />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-xs font-medium">Prefix（4碼英數字，唯一識別）</label>
+                          <label className="text-xs font-medium">
+                            Prefix（4碼英數字，唯一識別）<span className="text-destructive">*</span>
+                          </label>
                           <input
                             value={p.prefix}
                             disabled
@@ -619,30 +621,34 @@ export function GlobalProvidersPanel() {
                               className="h-7 px-2.5 rounded-lg border border-border bg-background hover:bg-muted text-xs"
                               disabled={selected.length === 0}
                             >
-                              清除選擇
+                              清空
                             </button>
                           </div>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto border border-border/50 rounded-xl p-2">
-                          {models.map((m: any) => {
-                            const modelId = m.id || String(m);
-                            return (
-                              <label key={modelId} className="text-xs flex items-center gap-2 rounded-md px-2 py-1 hover:bg-muted/60">
-                                <input
-                                  type="checkbox"
-                                  checked={selected.includes(modelId)}
-                                  onChange={(e) => {
-                                    const next = e.target.checked
-                                      ? Array.from(new Set([...selected, modelId]))
-                                      : selected.filter((id: string) => id !== modelId);
-                                    updateProviderSelectedModels(p.id, next);
-                                  }}
-                                />
-                                <span className="font-mono truncate">{modelId}</span>
-                              </label>
-                            );
-                          })}
-                        </div>
+                        {models.length > 0 ? (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto border border-border/50 rounded-xl p-2">
+                            {models.map((m: any) => {
+                              const modelId = m.id || String(m);
+                              return (
+                                <label key={modelId} className="text-xs flex items-center gap-2 rounded-md px-2 py-1 hover:bg-muted/60">
+                                  <input
+                                    type="checkbox"
+                                    checked={selected.includes(modelId)}
+                                    onChange={(e) => {
+                                      const next = e.target.checked
+                                        ? Array.from(new Set([...selected, modelId]))
+                                        : selected.filter((id: string) => id !== modelId);
+                                      updateProviderSelectedModels(p.id, next);
+                                    }}
+                                  />
+                                  <span className="font-mono truncate">{modelId}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">尚無模型，請先同步模型。</p>
+                        )}
                       </div>
 
                       <div className="border-t border-border/40 pt-3 space-y-2">
