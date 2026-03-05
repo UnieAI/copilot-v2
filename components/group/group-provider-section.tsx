@@ -1,7 +1,7 @@
 "use client"
 import { useState, useEffect } from "react"
 import { toast } from "sonner"
-import { Plus, Trash2, RefreshCw, Pencil, Check, X, ChevronDown, ChevronUp } from "lucide-react"
+import { Plus, Trash2, RefreshCw, Pencil, Check, X, ChevronDown, ChevronUp, Eye, EyeOff } from "lucide-react"
 import { GroupProvider, maskKey, UNIEAI_PROVIDER_URL, UNIEAI_PROVIDER_KEY } from "./group-types"
 import { UnieAIIcon } from "@/components/sidebar/unieai-logo"
 
@@ -53,6 +53,7 @@ function ProviderForm({ groupId, provider, onSave, onCancel }: {
     groupId: string; provider?: GroupProvider; onSave: (created?: GroupProvider) => void; onCancel: () => void
 }) {
     const [form, setForm] = useState({ displayName: provider?.displayName || "", prefix: provider?.prefix || "", apiUrl: provider?.apiUrl || "", apiKey: provider?.apiKey || "", enable: provider ? provider.enable === 1 : true })
+    const [showApiKey, setShowApiKey] = useState(false)
     const [saving, setSaving] = useState(false)
     const applyDefaults = () => {
         if (!UNIEAI_PROVIDER_URL) { toast.error("NEXT_PUBLIC_UNIEAI_PROVIDER_URL 未設定"); return }
@@ -80,7 +81,14 @@ function ProviderForm({ groupId, provider, onSave, onCancel }: {
                     <button type="button" onClick={applyDefaults} className="h-9 w-9 shrink-0 rounded-full border border-input bg-background hover:bg-muted transition-colors inline-flex items-center justify-center" title="Use UnieAI"><UnieAIIcon className="h-4 w-4" /></button>
                 </div>
             </div>
-            <div><label className="block text-xs font-medium text-muted-foreground mb-1">API Key</label><input className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring" type="password" value={form.apiKey} onChange={e => setForm(f => ({ ...f, apiKey: e.target.value }))} placeholder="sk-..." /></div>
+            <div><label className="block text-xs font-medium text-muted-foreground mb-1">API Key</label>
+                <div className="flex items-center gap-2">
+                    <input className="flex-1 rounded-lg border border-input bg-background px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring" type={showApiKey ? "text" : "password"} value={form.apiKey} onChange={e => setForm(f => ({ ...f, apiKey: e.target.value }))} placeholder="sk-..." />
+                    <button type="button" onClick={() => setShowApiKey(v => !v)} className="h-9 w-9 shrink-0 rounded-full border border-input bg-background hover:bg-muted transition-colors inline-flex items-center justify-center" title={showApiKey ? "Hide API Key" : "Show API Key"} aria-label={showApiKey ? "Hide API Key" : "Show API Key"}>
+                        {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                </div>
+            </div>
             <div className="flex items-center gap-2"><input id={`enable-${provider?.id || "new"}`} type="checkbox" checked={form.enable} onChange={e => setForm(f => ({ ...f, enable: e.target.checked }))} className="h-4 w-4 rounded border-border accent-primary" /><label htmlFor={`enable-${provider?.id || "new"}`} className="text-sm">啟用</label></div>
             <div className="flex gap-2 pt-1">
                 <button onClick={save} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"><Check className="h-3.5 w-3.5" />{saving ? (provider ? "儲存中..." : "建立並獲取模型...") : (provider ? "儲存" : "建立")}</button>
