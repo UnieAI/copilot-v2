@@ -16,7 +16,7 @@ export default function NotFound() {
 
                 <div className="relative z-10 w-full max-w-[456px] flex flex-col items-center gap-5 sm:gap-8">
                     {/* Logo - 32px height */}
-                    <UnieAIIcon className="sm:w-8 sm:h-8" />
+                    <UnieAIIcon className="size-8" />
                     UnieAI
 
                     {/* Title - responsive */}
