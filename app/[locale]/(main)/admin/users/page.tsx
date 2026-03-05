@@ -1,5 +1,6 @@
 import { db } from "@/lib/db"
 import { auth } from "@/auth"
+import { toast } from "sonner"
 import { redirect } from "next/navigation"
 import { userPhotos, users } from "@/lib/db/schema"
 import { eq } from "drizzle-orm"
@@ -59,7 +60,9 @@ export default async function AdminUsersPage() {
         if (!target || target.role === 'super') return
         if (target.role === 'admin' && actorRole !== 'super') return
 
-        await db.update(users).set({ role: newRole }).where(eq(users.id, targetId))
+        const result = await db.update(users).set({ role: newRole }).where(eq(users.id, targetId))
+        if (result) toast.success("使用者權限變更完成")
+        else toast.error("系統出錯，請稍後重試")
         revalidatePath("/admin/users")
     }
 
@@ -73,7 +76,9 @@ export default async function AdminUsersPage() {
         const [target] = await db.select({ role: users.role }).from(users).where(eq(users.id, targetId)).limit(1)
         if (!target || !['user', 'pending'].includes(target.role)) return
 
-        await db.delete(users).where(eq(users.id, targetId))
+        const result = await db.delete(users).where(eq(users.id, targetId))
+        if (result) toast.success("使用者已刪除")
+        else toast.error("系統出錯，請稍後重試")
         revalidatePath("/admin/users")
     }
 
