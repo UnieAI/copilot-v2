@@ -163,7 +163,7 @@ export default function Home() {
                                 }}
                             />
 
-                            <div className="flex items-center justify-between p-1 mt-auto">
+                            <div className="flex items-center justify-end p-1 mt-auto">
                                 <div className="flex items-center gap-2">
                                     <Button
                                         type="submit"
