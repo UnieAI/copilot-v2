@@ -34,6 +34,18 @@ import { cn } from "@/lib/utils"
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
 import { SetupChecker } from "../setup-checker"
 import { Session } from "next-auth"
+import ShinyText from "../ui/ShinyText"
+
+const shimmerAnimation = {
+    backgroundPosition: ['200% 0', '-200% 0'],
+    transition: { repeat: Infinity, duration: 4, ease: "linear" },
+}
+
+const verticalSlideVariants = {
+    initial: { y: 10, opacity: 0 },
+    animate: { y: 0, opacity: 1 },
+    exit: { y: -10, opacity: 0 },
+}
 
 // ─── Types ─────────────────────────────────────────────────────────────
 type Attachment = {
@@ -516,14 +528,39 @@ function FilePreviewSidebar({ attachment, onClose }: { attachment: Attachment, o
 function StatusBadge({ text }: { text: string }) {
     if (!text) return null
     return (
-        <div className="flex items-center justify-center gap-2 py-2">
-            <div className="flex items-center gap-2 bg-muted/80 backdrop-blur border border-border rounded-full px-4 py-1.5 text-xs text-muted-foreground">
+        <div className="flex items-center gap-2 py-2">
+            <div className="flex items-center gap-2 rounded-full px-4 py-1.5 text-xs text-muted-foreground">
                 <Loader2 className="h-3 w-3 animate-spin" />
                 <span>{text}</span>
             </div>
         </div>
     )
 }
+
+const CircularProgress = ({ progress, colorClass }: { progress: number, colorClass: string }) => {
+    const radius = 9;
+    const circumference = 2 * Math.PI * radius;
+    const offset = circumference - (progress / 100) * circumference;
+
+    return (
+        <div className="relative flex items-center justify-center w-5 h-5">
+            <svg className="w-full h-full -rotate-90">
+                {/* 背景灰圈 */}
+                <circle cx="10" cy="10" r={radius} className="stroke-muted/30 fill-none" strokeWidth="2" />
+                {/* 進度藍圈 */}
+                <motion.circle
+                    cx="10" cy="10" r={radius}
+                    className={`fill-none ${colorClass}`}
+                    strokeWidth="2"
+                    strokeDasharray={circumference}
+                    initial={{ strokeDashoffset: circumference }}
+                    animate={{ strokeDashoffset: offset }}
+                    transition={{ duration: 0.5, ease: "easeInOut" }}
+                />
+            </svg>
+        </div>
+    );
+};
 
 // ─── Per-Attachment Progress Panel ──────────────────────────────────────
 function AttachmentsProgressPanel({ attachments }: { attachments: AttachmentProgress[] }) {
@@ -562,8 +599,20 @@ function AttachmentsProgressPanel({ attachments }: { attachments: AttachmentProg
         return parts.length > 1 ? parts[parts.length - 1].toUpperCase() : 'FILE'
     }
 
+    const [aiSubStatus, setAiSubStatus] = useState('分析排版中')
+    useEffect(() => {
+        const statuses = ['分析排版中', '擷取關鍵內容', '辨識圖片語義', '思考提取策略', '整合跨頁資訊']
+        let i = 0
+        const timer = setInterval(() => {
+            i = (i + 1) % statuses.length
+            setAiSubStatus(statuses[i])
+        }, 6000)
+        return () => clearInterval(timer)
+    }, [])
+
+
     return (
-        <div className="flex flex-col gap-2 py-2 px-8 w-full justify-center items-center">
+        <div className="flex flex-col gap-2 px-4 w-full items-center">
             <div className="flex flex-col gap-2 px-4 w-3/4">
                 {attachments.map((att, i) => {
                     const isPdf = att.mimeType === 'application/pdf'
@@ -590,9 +639,10 @@ function AttachmentsProgressPanel({ attachments }: { attachments: AttachmentProg
 
                             {/* Name + progress */}
                             <div className="flex-1 min-w-0">
-                                <p className="text-xs font-medium truncate text-foreground/90" title={att.name}>
+                                {/* <p className="text-xs font-medium truncate text-foreground/90" title={att.name}>
                                     {att.name}
-                                </p>
+                                </p> */}
+                                <ShinyText text={att.name} />
                                 {hasPages && (
                                     <div className="flex items-center gap-2 mt-1">
                                         <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
@@ -621,7 +671,11 @@ function AttachmentsProgressPanel({ attachments }: { attachments: AttachmentProg
             </div>
         </div>
     )
+
+
 }
+
+
 
 // ─── Model Type ─────────────────────────────────────────────────────────
 type AvailableModel = {
@@ -1851,8 +1905,7 @@ export function ChatInterface({
                             </div>
                         ))}
 
-                        <StatusBadge text={statusText} />
-                        <AttachmentsProgressPanel attachments={attachmentProgress} />
+                        {attachmentProgress ? (<AttachmentsProgressPanel attachments={attachmentProgress} />) : (<StatusBadge text={statusText} />)}
                         <div ref={messagesEndRef} className="h-4" />
                     </div>
 
