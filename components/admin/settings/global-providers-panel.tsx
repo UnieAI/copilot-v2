@@ -235,14 +235,10 @@ export function GlobalProvidersPanel() {
         body: JSON.stringify({ apiUrl, apiKey }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(data?.error || "Sync models failed");
-        return;
-      }
-
       const nextModels = Array.isArray(data?.modelList) ? data.modelList : [];
-      const nextModelIds = nextModels.map((m: any) => m.id || String(m));
-      const nextSelectedModels = nextModelIds;
+      const nextSelectedModels = Array.isArray(data?.selectedModels)
+        ? data.selectedModels
+        : nextModels.map((m: any) => m.id || String(m));
 
       setProviders((prev) =>
         prev.map((item) =>
@@ -263,6 +259,11 @@ export function GlobalProvidersPanel() {
           modelList: nextModels,
           selectedModels: nextSelectedModels,
         });
+      }
+
+      if (!res.ok) {
+        toast.error(data?.error || "Sync models failed");
+        return;
       }
 
       toast.success(`Synced ${nextModels.length} models`);
@@ -314,8 +315,7 @@ export function GlobalProvidersPanel() {
       }
       const data = await res.json();
       const existing = Array.isArray(data?.quotas) ? data.quotas : [];
-      const latestProvider = providers.find((p) => p.id === provider.id) || provider;
-      const selectedModels = Array.isArray(latestProvider.selectedModels) ? latestProvider.selectedModels : [];
+      const selectedModels = Array.isArray(provider.selectedModels) ? provider.selectedModels : [];
       const merged = buildQuotaItemsForModels(
         provider.id,
         selectedModels,

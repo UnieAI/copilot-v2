@@ -34,13 +34,34 @@ export async function POST(
 
   const cleanUrl = apiUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
   const targetUrl = `${cleanUrl}/v1/models`;
+  const clearModels = async () => {
+    const [cleared] = await db
+      .update(globalProviders)
+      .set({
+        modelList: [] as any,
+        selectedModels: [] as any,
+        updatedAt: new Date(),
+      })
+      .where(eq(globalProviders.id, id))
+      .returning();
+    return cleared;
+  };
 
   try {
     const res = await fetch(targetUrl, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     if (!res.ok) {
-      return Response.json({ error: `API returned ${res.status}: ${res.statusText}` }, { status: 502 });
+      const cleared = await clearModels();
+      return Response.json(
+        {
+          error: `API returned ${res.status}: ${res.statusText}`,
+          modelList: [],
+          selectedModels: [],
+          provider: cleared,
+        },
+        { status: 502 }
+      );
     }
 
     const data = await res.json();
@@ -62,7 +83,16 @@ export async function POST(
 
     return Response.json({ modelList: models, selectedModels, provider: updated });
   } catch (e: any) {
-    return Response.json({ error: `Connection failed: ${e.message}` }, { status: 502 });
+    const cleared = await clearModels();
+    return Response.json(
+      {
+        error: `Connection failed: ${e.message}`,
+        modelList: [],
+        selectedModels: [],
+        provider: cleared,
+      },
+      { status: 502 }
+    );
   }
 }
 

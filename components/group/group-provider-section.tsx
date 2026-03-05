@@ -159,12 +159,13 @@ function ProviderCard({
     try {
       const res = await fetch(`/api/admin/groups/${groupId}/providers/${provider.id}/sync`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          apiUrl: form.apiUrl.trim(),
+          apiKey: form.apiKey.trim(),
+        }),
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Sync models failed");
-      }
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       const nextModels = Array.isArray(data.modelList) ? data.modelList : [];
       const nextSelected = Array.isArray(data.selectedModels) ? data.selectedModels : [];
       setModels(nextModels);
@@ -175,6 +176,9 @@ function ProviderCard({
         modelList: nextModels,
         selectedModels: nextSelected,
       });
+      if (!res.ok) {
+        throw new Error(data.error || "Sync models failed");
+      }
       toast.success(`Synced ${nextModels.length} models`);
       setExpanded(true);
     } catch (e: any) {
@@ -722,4 +726,3 @@ export function ProviderSection({
     </>
   );
 }
-

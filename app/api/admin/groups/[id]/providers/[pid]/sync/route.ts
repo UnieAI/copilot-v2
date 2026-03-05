@@ -6,7 +6,7 @@ import { requireGroupEditor } from "@/lib/group-permissions";
 
 // POST /api/admin/groups/[id]/providers/[pid]/sync
 export async function POST(
-    _req: NextRequest,
+    req: NextRequest,
     { params }: { params: Promise<{ id: string; pid: string }> }
 ) {
     const { id: groupId, pid } = await params;
@@ -18,17 +18,54 @@ export async function POST(
 
     if (!provider) return new Response("Not found", { status: 404 });
 
-    const cleanUrl = provider.apiUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
+    const body = await req.json().catch(() => ({}));
+    const inputApiUrl = typeof body?.apiUrl === "string" ? body.apiUrl.trim() : "";
+    const inputApiKey = typeof body?.apiKey === "string" ? body.apiKey.trim() : "";
+    const apiUrl = inputApiUrl || provider.apiUrl;
+    const apiKey = inputApiKey || provider.apiKey;
+    const clearModels = async () => {
+        const [cleared] = await db
+            .update(groupProviders)
+            .set({
+                modelList: [] as any,
+                selectedModels: [] as any,
+                updatedAt: new Date(),
+            })
+            .where(and(eq(groupProviders.id, pid), eq(groupProviders.groupId, groupId)))
+            .returning();
+        return cleared;
+    };
+
+    if (!apiUrl || !apiKey) {
+        const cleared = await clearModels();
+        return Response.json(
+            {
+                error: "apiUrl and apiKey are required",
+                modelList: [],
+                selectedModels: [],
+                provider: cleared,
+            },
+            { status: 400 }
+        );
+    }
+
+    const cleanUrl = apiUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
     const targetUrl = `${cleanUrl}/v1/models`;
 
     try {
         const res = await fetch(targetUrl, {
-            headers: { Authorization: `Bearer ${provider.apiKey}` },
+            headers: { Authorization: `Bearer ${apiKey}` },
         });
 
         if (!res.ok) {
+            const cleared = await clearModels();
             return Response.json(
-                { error: `API returned ${res.status}: ${res.statusText}` },
+                {
+                    error: `API returned ${res.status}: ${res.statusText}`,
+                    modelList: [],
+                    selectedModels: [],
+                    provider: cleared,
+                },
                 { status: 502 }
             );
         }
@@ -53,6 +90,15 @@ export async function POST(
 
         return Response.json({ modelList: models, selectedModels: existingSelected, provider: updated });
     } catch (e: any) {
-        return Response.json({ error: `Connection failed: ${e.message}` }, { status: 502 });
+        const cleared = await clearModels();
+        return Response.json(
+            {
+                error: `Connection failed: ${e.message}`,
+                modelList: [],
+                selectedModels: [],
+                provider: cleared,
+            },
+            { status: 502 }
+        );
     }
 }

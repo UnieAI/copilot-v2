@@ -30,6 +30,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const cleanUrl = apiUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
     const targetUrl = `${cleanUrl}/v1/models`;
+    const clearModels = async () => {
+        const [cleared] = await db.update(userProviders)
+            .set({
+                modelList: [] as any,
+                selectedModels: [] as any,
+                updatedAt: new Date(),
+            })
+            .where(and(eq(userProviders.id, id), eq(userProviders.userId, userId)))
+            .returning();
+        return cleared;
+    };
 
     try {
         const res = await fetch(targetUrl, {
@@ -37,7 +48,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         });
 
         if (!res.ok) {
-            return Response.json({ error: `API returned ${res.status}: ${res.statusText}` }, { status: 502 });
+            const cleared = await clearModels();
+            return Response.json(
+                {
+                    error: `API returned ${res.status}: ${res.statusText}`,
+                    modelList: [],
+                    selectedModels: [],
+                    provider: cleared,
+                },
+                { status: 502 }
+            );
         }
 
         const data = await res.json();
@@ -62,6 +82,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
         return Response.json({ modelList: models, selectedModels, provider: updated });
     } catch (e: any) {
-        return Response.json({ error: `Connection failed: ${e.message}` }, { status: 502 });
+        const cleared = await clearModels();
+        return Response.json(
+            {
+                error: `Connection failed: ${e.message}`,
+                modelList: [],
+                selectedModels: [],
+                provider: cleared,
+            },
+            { status: 502 }
+        );
     }
 }
