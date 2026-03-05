@@ -505,14 +505,6 @@ export function GlobalProvidersPanel() {
 
                     <div className="flex items-center gap-1 shrink-0">
                       <button
-                        onClick={() => syncProviderModels(p)}
-                        disabled={syncingProviderId === p.id}
-                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-muted transition-colors"
-                      >
-                        <RefreshCw className={`h-3 w-3 ${syncingProviderId === p.id ? "animate-spin" : ""}`} />
-                        同步模型
-                      </button>
-                      <button
                         onClick={async () => {
                           if (isExpanded) {
                             setExpandedId(null);
@@ -554,7 +546,7 @@ export function GlobalProvidersPanel() {
                             className="w-full h-9 rounded-xl border border-input/60 bg-background px-3 text-sm font-mono uppercase opacity-70"
                           />
                         </div>
-                        <div className="space-y-1 md:col-span-2">
+                        <div className="space-y-1">
                           <label className="text-xs font-medium">API URL</label>
                           <div className="flex items-center gap-2">
                             <input
@@ -572,7 +564,7 @@ export function GlobalProvidersPanel() {
                             </button>
                           </div>
                         </div>
-                        <div className="space-y-1 md:col-span-2">
+                        <div className="space-y-1">
                           <label className="text-xs font-medium">API Key</label>
                           <div className="flex items-center gap-2">
                             <input
@@ -598,7 +590,17 @@ export function GlobalProvidersPanel() {
 
                       <div className="space-y-2 pt-2 border-t border-border/40">
                         <div className="flex items-center justify-between gap-2">
-                          <p className="text-xs text-muted-foreground">選擇模型（已選 {selected.length}/{models.length} 個）</p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs text-muted-foreground">選擇模型（已選 {selected.length}/{models.length} 個）</p>
+                            <button
+                              onClick={() => syncProviderModels(p)}
+                              disabled={syncingProviderId === p.id}
+                              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-muted transition-colors"
+                            >
+                              <RefreshCw className={`h-3 w-3 ${syncingProviderId === p.id ? "animate-spin" : ""}`} />
+                              {syncingProviderId === p.id ? "同步中..." : "同步模型"}
+                            </button>
+                          </div>
                           <div className="flex items-center gap-2">
                             <button
                               type="button"

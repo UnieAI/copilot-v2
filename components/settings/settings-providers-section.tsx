@@ -217,9 +217,8 @@ function ProviderCard({
 
   return (
     <div
-      className={`rounded-2xl border transition-colors ${
-        form.enable ? "border-border bg-background" : "border-border/50 bg-muted/30"
-      }`}
+      className={`rounded-2xl border transition-colors ${form.enable ? "border-border bg-background" : "border-border/50 bg-muted/30"
+        }`}
     >
       <div className="flex items-center gap-3 px-4 py-3">
         <button
@@ -249,15 +248,6 @@ function ProviderCard({
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
-          <button
-            type="button"
-            onClick={handleSync}
-            disabled={syncing}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-muted transition-colors disabled:opacity-50"
-          >
-            <RefreshCw className={`h-3 w-3 ${syncing ? "animate-spin" : ""}`} />
-            {syncing ? "同步中..." : "同步模型"}
-          </button>
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
@@ -300,9 +290,8 @@ function ProviderCard({
                 disabled
                 placeholder="例：OAI1"
                 maxLength={4}
-                className={`w-full h-9 rounded-xl border bg-background px-3 text-sm font-mono uppercase focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all ${
-                  prefixError ? "border-destructive focus:border-destructive" : "border-input/60 focus:border-primary/50"
-                }`}
+                className={`w-full h-9 rounded-xl border bg-background px-3 text-sm font-mono uppercase focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all ${prefixError ? "border-destructive focus:border-destructive" : "border-input/60 focus:border-primary/50"
+                  }`}
               />
               {prefixError && <p className="text-xs text-destructive">{prefixError}</p>}
             </div>
@@ -353,9 +342,20 @@ function ProviderCard({
 
           <div className="space-y-2 pt-2 border-t border-border/40">
             <div className="flex items-center justify-between gap-2">
-              <p className="text-xs text-muted-foreground">
-                模型選擇：{selectedCount}/{totalCount}
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="text-xs text-muted-foreground">
+                  選擇模型（已選 {selectedCount}/{totalCount} 個）
+                </p>
+                <button
+                  type="button"
+                  onClick={handleSync}
+                  disabled={syncing}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-muted transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`h-3 w-3 ${syncing ? "animate-spin" : ""}`} />
+                  {syncing ? "同步中..." : "同步模型"}
+                </button>
+              </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -552,9 +552,8 @@ function CreateProviderDialog({
               onChange={(e) => handlePrefixChange(e.target.value)}
               placeholder="例：OAI1"
               maxLength={4}
-              className={`w-full h-10 rounded-xl border bg-background px-4 text-sm font-mono tracking-widest uppercase focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all ${
-                prefixError ? "border-destructive focus:border-destructive" : "border-input/60 focus:border-primary/50"
-              }`}
+              className={`w-full h-10 rounded-xl border bg-background px-4 text-sm font-mono tracking-widest uppercase focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all ${prefixError ? "border-destructive focus:border-destructive" : "border-input/60 focus:border-primary/50"
+                }`}
             />
             {prefixError && <p className="text-xs text-destructive">{prefixError}</p>}
           </div>
