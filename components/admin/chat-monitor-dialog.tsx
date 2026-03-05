@@ -25,6 +25,46 @@ type AttachmentItem = {
   previewUrl?: string
 }
 
+function base64ToBlobUrl(base64: string, mimeType: string): string {
+  const bin = atob(base64)
+  const len = bin.length
+  const bytes = new Uint8Array(len)
+  for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i)
+  return URL.createObjectURL(new Blob([bytes], { type: mimeType }))
+}
+
+function useAttachmentPreviewSrc(attachment: AttachmentItem): string | undefined {
+  const [blobUrl, setBlobUrl] = useState<string | undefined>(undefined)
+
+  useEffect(() => {
+    if (attachment.previewUrl) {
+      setBlobUrl(undefined)
+      return
+    }
+    if (!attachment.base64 || attachment.mimeType !== "application/pdf") {
+      setBlobUrl(undefined)
+      return
+    }
+
+    let url: string | undefined
+    try {
+      url = base64ToBlobUrl(attachment.base64, attachment.mimeType)
+      setBlobUrl(url)
+    } catch {
+      setBlobUrl(undefined)
+    }
+
+    return () => {
+      if (url) URL.revokeObjectURL(url)
+    }
+  }, [attachment.base64, attachment.mimeType, attachment.previewUrl])
+
+  if (attachment.previewUrl) return attachment.previewUrl
+  if (blobUrl) return blobUrl
+  if (attachment.base64) return `data:${attachment.mimeType};base64,${attachment.base64}`
+  return undefined
+}
+
 type ChatMessageItem = {
   id: string
   role: "user" | "assistant" | "system"
@@ -146,7 +186,7 @@ function MessageContent({ content }: { content: string }) {
 function AttachmentThumbnail({ attachment, onClick }: { attachment: AttachmentItem; onClick?: () => void }) {
   const isImage = attachment.mimeType.startsWith("image/")
   const isPdf = attachment.mimeType === "application/pdf"
-  const imgSrc = attachment.previewUrl || (attachment.base64 ? `data:${attachment.mimeType};base64,${attachment.base64}` : undefined)
+  const imgSrc = useAttachmentPreviewSrc(attachment)
 
   let ext = "FILE"
   const parts = attachment.name.split(".")
@@ -181,7 +221,7 @@ function AttachmentThumbnail({ attachment, onClick }: { attachment: AttachmentIt
 
 function FilePreviewSidebar({ attachment, onClose }: { attachment: AttachmentItem; onClose: () => void }) {
   const isImage = attachment.mimeType.startsWith("image/")
-  const imgSrc = attachment.previewUrl || (attachment.base64 ? `data:${attachment.mimeType};base64,${attachment.base64}` : undefined)
+  const imgSrc = useAttachmentPreviewSrc(attachment)
 
   return (
     <div className="w-1/2 min-w-[300px] border-l border-border bg-card flex flex-col h-full animate-in slide-in-from-right-8 duration-300 relative z-20 shadow-xl">
