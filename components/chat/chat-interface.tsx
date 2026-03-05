@@ -563,8 +563,8 @@ function AttachmentsProgressPanel({ attachments }: { attachments: AttachmentProg
     }
 
     return (
-        <div className="flex flex-col gap-2 py-2 px-8">
-            <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2 py-2 px-8 w-full justify-center items-center">
+            <div className="flex flex-col gap-2 px-4 w-3/4">
                 {attachments.map((att, i) => {
                     const isPdf = att.mimeType === 'application/pdf'
                     const isImage = att.mimeType.startsWith('image/')
