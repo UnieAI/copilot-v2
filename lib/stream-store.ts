@@ -14,10 +14,19 @@ export type StreamMessage = {
     attachments?: any[]
 }
 
+export type AttachmentProgress = {
+    name: string
+    mimeType: string
+    status: 'queued' | 'parsing' | 'vlm' | 'done' | 'error'
+    totalPages?: number
+    completedPages?: number
+}
+
 type Listener = (
     messages: StreamMessage[],
     isGenerating: boolean,
-    statusText: string
+    statusText: string,
+    attachmentProgress: AttachmentProgress[]
 ) => void
 type StatusListener = (entries: { sessionId: string; statusText: string }[]) => void
 
@@ -25,6 +34,7 @@ type Entry = {
     messages: StreamMessage[]
     isGenerating: boolean
     statusText: string
+    attachmentProgress: AttachmentProgress[]
     controller: AbortController
     listeners: Set<Listener>
 }
@@ -55,6 +65,7 @@ export const streamStore = {
             messages: [...initialMessages],
             isGenerating: true,
             statusText: '',
+            attachmentProgress: [],
             controller,
             listeners: new Set(),
         })
@@ -82,7 +93,7 @@ export const streamStore = {
         const prevStatus = entry.statusText
         fn(entry)
         const msgs = [...entry.messages]
-        entry.listeners.forEach(l => l(msgs, entry.isGenerating, entry.statusText))
+        entry.listeners.forEach(l => l(msgs, entry.isGenerating, entry.statusText, entry.attachmentProgress))
         if (entry.isGenerating !== prevGenerating || entry.statusText !== prevStatus) {
             notifyStatusListeners()
         }
@@ -97,7 +108,7 @@ export const streamStore = {
         const entry = registry.get(sessionId)
         if (!entry) return () => { }
         entry.listeners.add(listener)
-        listener([...entry.messages], entry.isGenerating, entry.statusText)
+        listener([...entry.messages], entry.isGenerating, entry.statusText, entry.attachmentProgress)
         return () => entry.listeners.delete(listener)
     },
 
@@ -129,7 +140,8 @@ export const streamStore = {
         if (!entry) return
         entry.isGenerating = false
         entry.statusText = ''
-        entry.listeners.forEach(l => l([...entry.messages], false, ''))
+        entry.attachmentProgress = []
+        entry.listeners.forEach(l => l([...entry.messages], false, '', []))
         notifyStatusListeners()
         registry.delete(sessionId)
     },

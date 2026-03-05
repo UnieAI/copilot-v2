@@ -14,7 +14,7 @@ import {
     Search
 } from "lucide-react"
 import { toast } from "sonner"
-import { streamStore } from "@/lib/stream-store"
+import { streamStore, AttachmentProgress } from "@/lib/stream-store"
 import { useTranslations } from "next-intl"
 import { DynamicGreeting } from "@/components/ui/dynamic-greeting"
 import { MarkdownCode } from "@/components/chat/markdown-code"
@@ -525,6 +525,104 @@ function StatusBadge({ text }: { text: string }) {
     )
 }
 
+// ─── Per-Attachment Progress Panel ──────────────────────────────────────
+function AttachmentsProgressPanel({ attachments }: { attachments: AttachmentProgress[] }) {
+    if (!attachments || attachments.length === 0) return null
+
+    const statusLabel = (s: AttachmentProgress['status']) => {
+        switch (s) {
+            case 'queued': return '排隊中'
+            case 'parsing': return '解析中'
+            case 'vlm': return '分析中'
+            case 'done': return '完成'
+            case 'error': return '失敗'
+        }
+    }
+    const statusColor = (s: AttachmentProgress['status']) => {
+        switch (s) {
+            case 'queued': return 'text-muted-foreground bg-muted/60'
+            case 'parsing': return 'text-blue-600 bg-blue-500/10'
+            case 'vlm': return 'text-violet-600 bg-violet-500/10'
+            case 'done': return 'text-emerald-600 bg-emerald-500/10'
+            case 'error': return 'text-red-500 bg-red-500/10'
+        }
+    }
+    const dotColor = (s: AttachmentProgress['status']) => {
+        switch (s) {
+            case 'queued': return 'bg-muted-foreground/40'
+            case 'parsing': return 'bg-blue-500 animate-pulse'
+            case 'vlm': return 'bg-violet-500 animate-pulse'
+            case 'done': return 'bg-emerald-500'
+            case 'error': return 'bg-red-500'
+        }
+    }
+
+    const getFileExt = (name: string) => {
+        const parts = name.split('.')
+        return parts.length > 1 ? parts[parts.length - 1].toUpperCase() : 'FILE'
+    }
+
+    return (
+        <div className="flex flex-col gap-2 py-2 px-8">
+            <div className="flex flex-col gap-2">
+                {attachments.map((att, i) => {
+                    const isPdf = att.mimeType === 'application/pdf'
+                    const isImage = att.mimeType.startsWith('image/')
+                    const hasPages = isPdf && att.status === 'vlm' && att.totalPages != null
+                    const progressPct = hasPages && att.totalPages!
+                        ? Math.round(((att.completedPages ?? 0) / att.totalPages!) * 100)
+                        : 0
+
+                    return (
+                        <motion.div
+                            key={`${att.name}-${i}`}
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: i * 0.04, duration: 0.2 }}
+                            className="flex items-center gap-3 bg-muted/40 border border-border/50 rounded-2xl px-4 py-2.5"
+                        >
+                            {/* File type badge */}
+                            <div className="flex-shrink-0 w-8 h-8 rounded-xl bg-muted flex items-center justify-center">
+                                <span className="text-[9px] font-bold text-muted-foreground tracking-wider">
+                                    {isImage ? 'IMG' : getFileExt(att.name)}
+                                </span>
+                            </div>
+
+                            {/* Name + progress */}
+                            <div className="flex-1 min-w-0">
+                                <p className="text-xs font-medium truncate text-foreground/90" title={att.name}>
+                                    {att.name}
+                                </p>
+                                {hasPages && (
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
+                                            <motion.div
+                                                className="h-full bg-violet-500 rounded-full"
+                                                initial={{ width: 0 }}
+                                                animate={{ width: `${progressPct}%` }}
+                                                transition={{ duration: 0.3 }}
+                                            />
+                                        </div>
+                                        <span className="text-[10px] text-muted-foreground shrink-0">
+                                            {att.completedPages ?? 0}/{att.totalPages} 頁
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Status badge */}
+                            <div className={`flex items-center gap-1.5 shrink-0 px-2.5 py-1 rounded-full text-[10px] font-semibold ${statusColor(att.status)}`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${dotColor(att.status)}`} />
+                                {statusLabel(att.status)}
+                            </div>
+                        </motion.div>
+                    )
+                })}
+            </div>
+        </div>
+    )
+}
+
 // ─── Model Type ─────────────────────────────────────────────────────────
 type AvailableModel = {
     value: string      // "{prefix}-{modelId}"
@@ -584,6 +682,7 @@ export function ChatInterface({
     const [isGenerating, setIsGenerating] = useState(false)
     const [isSetupBlocked, setIsSetupBlocked] = useState(false)
     const [statusText, setStatusText] = useState("")
+    const [attachmentProgress, setAttachmentProgress] = useState<AttachmentProgress[]>([])
     const [attachments, setAttachments] = useState<Attachment[]>([])
     const [editingId, setEditingId] = useState<string | null>(null)
     const [editContent, setEditContent] = useState("")
@@ -712,10 +811,11 @@ export function ChatInterface({
                 setMessages(snap.messages as UIMessage[])
                 setIsGenerating(snap.isGenerating)
             }
-            const unsub = streamStore.subscribe(initialSessionId, (msgs, generating, status) => {
+            const unsub = streamStore.subscribe(initialSessionId, (msgs, generating, status, attProg) => {
                 setMessages(msgs as UIMessage[])
                 setIsGenerating(generating)
                 setStatusText(status)
+                setAttachmentProgress(attProg)
             })
             storeKeyRef.current = initialSessionId
             return unsub  // cleanup: just removes listener, stream stays alive
@@ -924,6 +1024,7 @@ export function ChatInterface({
             }
             setIsGenerating(false)
             setStatusText('')
+            setAttachmentProgress([])
             abortControllerRef.current?.abort()
             abortControllerRef.current = null
         }
@@ -1001,7 +1102,15 @@ export function ChatInterface({
                             onSessionCreated?.(realId, '')
                         } else if (ev.type === 'status') {
                             setStatusText(ev.data)
+                            // Empty status = parsing done, LLM starting → close progress panel
+                            if (ev.data === '') {
+                                setAttachmentProgress([])
+                                if (storeKeyRef.current) streamStore.update(storeKeyRef.current, e => { e.attachmentProgress = [] })
+                            }
                             if (storeKeyRef.current) streamStore.update(storeKeyRef.current, e => { e.statusText = ev.data })
+                        } else if (ev.type === 'attachments_status') {
+                            setAttachmentProgress(ev.data.attachments)
+                            if (storeKeyRef.current) streamStore.update(storeKeyRef.current, e => { e.attachmentProgress = ev.data.attachments })
                         } else if (ev.type === 'chunk') {
                             setMessages(prev => prev.map(m =>
                                 m.id === aiMsgId ? { ...m, content: m.content + ev.data } : m
@@ -1030,6 +1139,7 @@ export function ChatInterface({
                             }))
                             setIsGenerating(false)
                             setStatusText('')
+                            setAttachmentProgress([])
                             // Update store messages to mark done
                             if (storeKeyRef.current) streamStore.update(storeKeyRef.current, e => {
                                 const aiMsg = e.messages.find(m => m.id === aiMsgId)
@@ -1038,6 +1148,7 @@ export function ChatInterface({
                                 if (usrMsg) usrMsg.dbId = userMsgDbId
                                 e.isGenerating = false
                                 e.statusText = ''
+                                e.attachmentProgress = []
                             })
                         }
                     } catch { }
@@ -1062,6 +1173,7 @@ export function ChatInterface({
                 // User navigated away — clean up silently
                 setIsGenerating(false)
                 setStatusText('')
+                setAttachmentProgress([])
                 abortControllerRef.current = null
                 if (storeKeyRef.current) {
                     streamStore.abort(storeKeyRef.current)
@@ -1075,6 +1187,7 @@ export function ChatInterface({
         } finally {
             setIsGenerating(false)
             setStatusText('')
+            setAttachmentProgress([])
         }
     }, [isGenerating, messages, sessionId, selectedModel, systemPrompt, router])
 
@@ -1166,7 +1279,10 @@ export function ChatInterface({
                     if (!line.startsWith('data: ')) continue
                     try {
                         const ev = JSON.parse(line.slice(6).trim())
-                        if (ev.type === 'status') setStatusText(ev.data)
+                        if (ev.type === 'status') {
+                            setStatusText(ev.data)
+                            if (ev.data === '') setAttachmentProgress([])
+                        } else if (ev.type === 'attachments_status') setAttachmentProgress(ev.data.attachments)
                         else if (ev.type === 'chunk') {
                             setMessages(prev => prev.map(m => m.id === aiMsgId ? { ...m, content: m.content + ev.data } : m))
                         } else if (ev.type === 'title_updated') {
@@ -1188,6 +1304,7 @@ export function ChatInterface({
                             }))
                             setIsGenerating(false)
                             setStatusText("")
+                            setAttachmentProgress([])
                         }
                     } catch { }
                 }
@@ -1201,6 +1318,7 @@ export function ChatInterface({
         } finally {
             setIsGenerating(false)
             setStatusText("")
+            setAttachmentProgress([])
         }
     }
 
@@ -1734,6 +1852,7 @@ export function ChatInterface({
                         ))}
 
                         <StatusBadge text={statusText} />
+                        <AttachmentsProgressPanel attachments={attachmentProgress} />
                         <div ref={messagesEndRef} className="h-4" />
                     </div>
 

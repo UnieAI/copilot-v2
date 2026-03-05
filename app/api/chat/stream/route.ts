@@ -223,38 +223,65 @@ export async function POST(req: NextRequest) {
                     let parsedParts: (string | null)[] = [];
 
                     if (attachments && attachments.length > 0) {
-                        // Announce parsing start with a single status event
-                        send({ type: 'status', data: `正在解析 ${attachments.length} 個附件...` });
+                        // ── Build shared per-attachment state array ──────────────────
+                        type AttState = {
+                            name: string;
+                            mimeType: string;
+                            status: 'queued' | 'parsing' | 'vlm' | 'done' | 'error';
+                            totalPages?: number;
+                            completedPages?: number;
+                        };
+                        const attStates: AttState[] = (attachments as any[]).map((a: any) => ({
+                            name: a.name,
+                            mimeType: a.mimeType,
+                            status: 'queued' as const,
+                        }));
+
+                        const sendAttachmentsStatus = () => {
+                            send({ type: 'attachments_status', data: { attachments: attStates } });
+                        };
+
+                        // Announce parsing start via the normal status badge, then emit queued state
+                        send({ type: 'status', data: `正在處理附件...` });
+                        sendAttachmentsStatus();
 
                         // Parse ALL attachments concurrently, then collect results in order
                         parsedParts = await Promise.all(
-                            attachments.map(async (att: any) => {
+                            attachments.map(async (att: any, idx: number) => {
                                 const { name, mimeType, base64 } = att;
 
                                 if (isPdf(name, mimeType)) {
-                                    // 先呼叫 parseFile，取得圖片陣列
+                                    // Step 1: parse to images
+                                    attStates[idx].status = 'parsing';
+                                    sendAttachmentsStatus();
+
                                     const parsed = await parseFile(name, mimeType, base64);
 
                                     if (!parsed.images || parsed.images.length === 0) {
-                                        send({ type: 'status', data: `PDF ${name} 解析失敗` });
+                                        attStates[idx].status = 'error';
+                                        sendAttachmentsStatus();
                                         try {
-                                            const fallback = await parseFile(name, mimeType, base64); // 這裡會再進 pdf-parse 分支（你可自行加）
+                                            const fallback = await parseFile(name, mimeType, base64);
                                             return `[PDF ${name} 文字內容]\n${fallback.content || '無內容'}`;
                                         } catch {
                                             return `[PDF ${name} 解析失敗]`;
                                         }
                                     }
 
-                                    // 取得 VLM 配置（跟單一圖片一樣）
                                     if (!adminConf?.visionModelUrl || !adminConf?.visionModelKey || !adminConf?.visionModelName) {
+                                        attStates[idx].status = 'error';
+                                        sendAttachmentsStatus();
                                         return `[PDF ${name} 無視覺模型，無法分析圖片]`;
                                     }
 
+                                    // Step 2: VLM analysis per page
+                                    attStates[idx].status = 'vlm';
+                                    attStates[idx].totalPages = parsed.images.length;
+                                    attStates[idx].completedPages = 0;
+                                    sendAttachmentsStatus();
+
                                     const visionBase = adminConf.visionModelUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
 
-                                    send({ type: 'status', data: `PDF ${name} 共 ${parsed.images.length} 頁，開始並行 VLM 分析...` });
-
-                                    // 併發呼叫 VLM（模仿單一圖片）
                                     const pageResults = await Promise.allSettled(
                                         parsed.images.map(async (img) => {
                                             const res = await fetch(`${visionBase}/v1/chat/completions`, {
@@ -280,30 +307,36 @@ export async function POST(req: NextRequest) {
 
                                             const json = await res.json();
                                             let rawContent = json.choices?.[0]?.message?.content?.trim() || '（無內容）';
-
-                                            // 過濾思考區塊，只保留最終輸出
                                             rawContent = stripThinkAndKeepFinal(rawContent);
+
+                                            // Update page progress as each page finishes
+                                            attStates[idx].completedPages = (attStates[idx].completedPages ?? 0) + 1;
+                                            sendAttachmentsStatus();
 
                                             return rawContent;
                                         })
                                     );
 
-                                    // 整理結果，按頁數排序
-                                    const summaries = pageResults.map((result, idx) => {
-                                        if (result.status === 'fulfilled') {
-                                            return result.value;
-                                        }
-                                        return `（第 ${idx + 1} 頁解析失敗）`;
-                                    });
-
+                                    const summaries = pageResults.map((result, i) =>
+                                        result.status === 'fulfilled' ? result.value : `（第 ${i + 1} 頁解析失敗）`
+                                    );
                                     const combined = summaries
-                                        .map((desc, idx) => `第 ${idx + 1} 頁：${desc}`)
+                                        .map((desc, i) => `第 ${i + 1} 頁：${desc}`)
                                         .join('\n');
 
+                                    attStates[idx].status = 'done';
+                                    sendAttachmentsStatus();
                                     return `[PDF ${name} 的詳細內容]\n${combined}`;
+
                                 } else if (isImageFile(name, mimeType)) {
+                                    attStates[idx].status = 'parsing';
+                                    sendAttachmentsStatus();
+
                                     if (adminConf?.visionModelUrl && adminConf?.visionModelKey && adminConf?.visionModelName) {
                                         try {
+                                            attStates[idx].status = 'vlm';
+                                            sendAttachmentsStatus();
+
                                             const visionBase = adminConf.visionModelUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
                                             const visionRes = await fetch(`${visionBase}/v1/chat/completions`, {
                                                 method: 'POST',
@@ -324,31 +357,45 @@ export async function POST(req: NextRequest) {
                                             });
                                             if (visionRes.ok) {
                                                 const visionData = await visionRes.json();
-
                                                 let rawContent = visionData.choices?.[0]?.message?.content?.trim() || '（無內容）';
-
-                                                // 過濾思考區塊，只保留最終輸出
                                                 rawContent = stripThinkAndKeepFinal(rawContent);
+                                                attStates[idx].status = 'done';
+                                                sendAttachmentsStatus();
                                                 return `[圖片 ${name} 的描述]\n${rawContent}`;
                                             }
+                                            attStates[idx].status = 'error';
+                                            sendAttachmentsStatus();
                                             return `[圖片 ${name} 解析失敗]`;
                                         } catch {
+                                            attStates[idx].status = 'error';
+                                            sendAttachmentsStatus();
                                             return `[圖片 ${name} 解析失敗]`;
                                         }
                                     } else {
+                                        attStates[idx].status = 'done';
+                                        sendAttachmentsStatus();
                                         return `[使用者上傳了圖片: ${name}，但未配置圖片解析模型]`;
                                     }
 
                                 } else if (isDocumentFile(name, mimeType)) {
+                                    attStates[idx].status = 'parsing';
+                                    sendAttachmentsStatus();
                                     try {
                                         const parsed = await parseFile(name, mimeType, base64);
+                                        attStates[idx].status = 'done';
+                                        sendAttachmentsStatus();
                                         return `[文件 ${name} 的內容]\n${parsed.content}`;
                                     } catch {
+                                        attStates[idx].status = 'error';
+                                        sendAttachmentsStatus();
                                         return `[文件 ${name} 解析失敗]`;
                                     }
                                 }
 
-                                return null; // unsupported file type — skip
+                                // Unsupported type — mark done silently
+                                attStates[idx].status = 'done';
+                                sendAttachmentsStatus();
+                                return null;
                             })
                         );
 
