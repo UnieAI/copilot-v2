@@ -493,11 +493,12 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                                     <DropdownMenuSubTrigger className="rounded-xl px-3 py-2.5 gap-3 cursor-pointer"><Shield className="h-4 w-4 opacity-70 text-amber-500" /> 管理員工具箱</DropdownMenuSubTrigger>
                                     <DropdownMenuPortal>
                                         <DropdownMenuSubContent className="w-56 rounded-2xl p-2 ml-1 shadow-2xl">
-                                            <Link href="/admin/users"><DropdownMenuItem className="rounded-lg gap-2">使用者中心</DropdownMenuItem></Link>
-                                            <Link href="/admin/groups"><DropdownMenuItem className="rounded-lg gap-2">群組管理</DropdownMenuItem></Link>
-                                            <Link href="/admin/usage"><DropdownMenuItem className="rounded-lg gap-2">用量監控</DropdownMenuItem></Link>
-                                            <Link href="/admin/chat"><DropdownMenuItem className="rounded-lg gap-2">聊天監控</DropdownMenuItem></Link>
-                                            <DropdownMenuSeparator /><Link href="/admin/settings"><DropdownMenuItem className="rounded-lg gap-2 text-primary font-bold">核心系統設定</DropdownMenuItem></Link>
+                                            <Link href="/admin/users"><DropdownMenuItem className="rounded-lg gap-2 cursor-pointer">使用者中心</DropdownMenuItem></Link>
+                                            <Link href="/admin/groups"><DropdownMenuItem className="rounded-lg gap-2 cursor-pointer">群組管理</DropdownMenuItem></Link>
+                                            <Link href="/admin/usage"><DropdownMenuItem className="rounded-lg gap-2 cursor-pointer">用量監控</DropdownMenuItem></Link>
+                                            <Link href="/admin/chat"><DropdownMenuItem className="rounded-lg gap-2 cursor-pointer">聊天監控</DropdownMenuItem></Link>
+                                            <DropdownMenuSeparator />
+                                            <Link href="/admin/settings"><DropdownMenuItem className="rounded-lg gap-2 text-primary font-bold cursor-pointer">核心系統設定</DropdownMenuItem></Link>
                                         </DropdownMenuSubContent>
                                     </DropdownMenuPortal>
                                 </DropdownMenuSub>
