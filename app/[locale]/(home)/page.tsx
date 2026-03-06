@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { getSession } from 'next-auth/react';
 import { useTranslations } from 'next-intl';
 import { DynamicGreeting } from '@/components/ui/dynamic-greeting';
+import { UnieAIIcon } from '@/components/sidebar/unieai-logo';
 
 export default function Home() {
     const router = useRouter();
@@ -66,7 +67,10 @@ export default function Home() {
         >
             {/* Simple Header */}
             <header className="absolute top-0 left-0 right-0 z-50 px-6 py-4 flex items-center justify-between">
-                <div />
+                <div className="flex flex-row items-center gap-2">
+                    <UnieAIIcon className="size-8" />
+                    <span className="font-semibold tracking-tight text-foreground">UnieAI</span>
+                </div>
                 <div className="flex items-center gap-4">
                     {process.env.NEXT_PUBLIC_ENABLE_TUTORIALS === "true" && (
                         <Link href="/tutorials" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
