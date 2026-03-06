@@ -332,14 +332,14 @@ export default function TutorialsPage() {
                 </h3>
                 <div className="space-y-2">
                   <a
-                    href="/support"
+                    href={process.env.NEXT_PUBLIC_UNIEAI_WEBSITE}
                     className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors py-1"
                   >
                     <ChevronRight className="w-4 h-4" />
                     {t('support')}
                   </a>
                   <a
-                    href="mailto:roy@unieai.com"
+                    href={`mailto:${process.env.NEXT_PUBLIC_UNIEAI_CONTACT_MAIL}`}
                     className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors py-1"
                   >
                     <ChevronRight className="w-4 h-4" />

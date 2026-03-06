@@ -19,7 +19,7 @@ export function SimpleFooter() {
             {/* Social links */}
             <div className="flex items-center gap-3 pt-2">
               <a
-                href="https://github.com/UnieAI/copilot-v2"
+                href={process.env.NEXT_PUBLIC_UNIEAI_AGENT_GITHUB_URL}
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="GitHub"
