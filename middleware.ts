@@ -48,7 +48,6 @@ export async function middleware(request: NextRequest) {
     '/share',
     '/templates',
     '/support',
-    '/suna',
     '/help',
     '/agents-101',
     '/about',

@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Maximize2, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
-import { KortixLoader } from '@/components/ui/kortix-loader';
+import { UnieAILoader } from '@/components/ui/unieai-loader';
 
 // Global cache for rendered Mermaid diagrams
 const mermaidCache = new Map<string, string>();
@@ -386,7 +386,7 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = React.memo(
         <div className={cn('flex items-center justify-center p-8 bg-muted/30 rounded-2xl border border-dashed', className)}>
           <div className="text-center">
             <div className="text-sm text-muted-foreground mb-3">Rendering diagram…</div>
-            <KortixLoader size="medium" />
+            <UnieAILoader size="medium" />
           </div>
         </div>
       );
@@ -530,7 +530,7 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = React.memo(
                   />
                 ) : (
                   <div className="flex items-center justify-center h-full">
-                    <KortixLoader size="medium" />
+                    <UnieAILoader size="medium" />
                   </div>
                 )}
 

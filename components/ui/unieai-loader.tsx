@@ -4,7 +4,7 @@ import * as React from 'react';
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
 
-interface KortixLoaderProps {
+interface UnieAILoaderProps {
   /**
    * Size preset for the loader
    * @default 'medium'
@@ -58,7 +58,7 @@ const SIZE_MAP = {
 } as const;
 
 /**
- * KortixLoader - A unified circular loading animation component
+ * UnieAILoader - A unified circular loading animation component
  * 
  * Uses a CSS-based circular spinner that adapts to light/dark themes.
  * 
@@ -73,19 +73,19 @@ const SIZE_MAP = {
  * @example
  * ```tsx
  * // Auto-themed (default)
- * <KortixLoader />
+ * <UnieAILoader />
  * 
  * // Always white (for dark backgrounds in any theme)
- * <KortixLoader variant="white" />
+ * <UnieAILoader variant="white" />
  * 
  * // Always black (for light backgrounds in any theme)
- * <KortixLoader variant="black" />
+ * <UnieAILoader variant="black" />
  * 
  * // Custom size
- * <KortixLoader size="large" />
+ * <UnieAILoader size="large" />
  * ```
  */
-export function KortixLoader({
+export function UnieAILoader({
   size = 'medium',
   speed = 1.2,
   customSize,
@@ -95,7 +95,7 @@ export function KortixLoader({
   loop = true,
   variant = 'auto',
   forceTheme, // deprecated, but kept for backwards compatibility
-}: KortixLoaderProps) {
+}: UnieAILoaderProps) {
   const { resolvedTheme } = useTheme();
   const loaderSize = customSize || SIZE_MAP[size];
   
@@ -163,14 +163,14 @@ export function KortixLoader({
           borderTopColor: spinnerColor,
           borderRadius: '50%',
           animation: autoPlay && loop 
-            ? `kortix-spin ${animationDuration}s linear infinite` 
+            ? `unieai-spin ${animationDuration}s linear infinite` 
             : autoPlay 
-              ? `kortix-spin ${animationDuration}s linear` 
+              ? `unieai-spin ${animationDuration}s linear` 
               : 'none',
         }}
       />
       <style jsx>{`
-        @keyframes kortix-spin {
+        @keyframes unieai-spin {
           to {
             transform: rotate(360deg);
           }

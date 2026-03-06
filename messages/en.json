@@ -52,10 +52,10 @@
     },
     "Tutorials": {
         "title": "Tutorials",
-        "subtitle": "Learn Kortix",
-        "description": "Step-by-step interactive tutorials to help you get the most out of Kortix. From getting started to advanced workflows, master every feature.",
+        "subtitle": "Learn UnieAI",
+        "description": "Step-by-step interactive tutorials to help you get the most out of UnieAI. From getting started to advanced workflows, master every feature.",
         "comingSoon": "More tutorials coming soon",
-        "checkBack": "We're always adding new tutorials to help you get the most out of Kortix. Check back regularly for fresh content and tips.",
+        "checkBack": "We're always adding new tutorials to help you get the most out of UnieAI. Check back regularly for fresh content and tips.",
         "chapters": "Chapters",
         "support": "Support",
         "contact": "Contact us",
@@ -66,24 +66,24 @@
     },
     "TutorialItems": {
         "intro": {
-            "title": "Introduction to Kortix",
-            "desc": "Get a comprehensive overview of Kortix and discover the different AI-powered content generation modes available to supercharge your workflow."
+            "title": "Introduction to UnieAI",
+            "desc": "Get a comprehensive overview of UnieAI and discover the different AI-powered content generation modes available to supercharge your workflow."
         },
         "first_task": {
             "title": "Getting Started: Your First Task",
-            "desc": "Learn the basics of creating and completing your first task with Kortix. This tutorial walks you through the essential workflow to get you productive right away."
+            "desc": "Learn the basics of creating and completing your first task with UnieAI. This tutorial walks you through the essential workflow to get you productive right away."
         },
         "presentations": {
             "title": "How to Create and Export Presentations",
-            "desc": "Discover how to create stunning presentations with Kortix and export them in various formats for sharing and presenting."
+            "desc": "Discover how to create stunning presentations with UnieAI and export them in various formats for sharing and presenting."
         },
         "manage_files": {
-            "title": "How to Create and Manage Files with Kortix",
-            "desc": "Learn how to create, organize, and manage files with Kortix. This tutorial covers downloading data, exporting to different formats like Excel, and more."
+            "title": "How to Create and Manage Files with UnieAI",
+            "desc": "Learn how to create, organize, and manage files with UnieAI. This tutorial covers downloading data, exporting to different formats like Excel, and more."
         },
         "media": {
             "title": "Create Videos and Images",
-            "desc": "Explore the powerful media creation capabilities of Kortix. Learn how to generate videos and images using AI to enhance your projects."
+            "desc": "Explore the powerful media creation capabilities of UnieAI. Learn how to generate videos and images using AI to enhance your projects."
         },
         "canvas": {
             "title": "Use Our Canvas Feature",

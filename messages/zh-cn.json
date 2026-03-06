@@ -52,8 +52,8 @@
     },
     "Tutorials": {
         "title": "教學指南",
-        "subtitle": "學習 Kortix",
-        "description": "循序漸進的互動式教學，幫助您充分利用 Kortix。從入門到進階工作流程，精通每個功能。",
+        "subtitle": "學習 UnieAI",
+        "description": "循序漸進的互動式教學，幫助您充分利用 UnieAI。從入門到進階工作流程，精通每個功能。",
         "comingSoon": "即將推出更多教學",
         "checkBack": "我們隨時新增教學內容，協助您發揮最大效益。請定期回來查看最新的內容與提示。",
         "chapters": "章節",
@@ -66,24 +66,24 @@
     },
     "TutorialItems": {
         "intro": {
-            "title": "Kortix 簡介",
-            "desc": "全面了解 Kortix，探索不同的 AI 驅動內容生成模式，以增強您的工作流程。"
+            "title": "UnieAI 簡介",
+            "desc": "全面了解 UnieAI，探索不同的 AI 驅動內容生成模式，以增強您的工作流程。"
         },
         "first_task": {
             "title": "開始使用：您的第一個任務",
-            "desc": "學習建立和完成 Kortix 第一個任務的基礎知識。本教學引導您完成基本工作流程，讓您立即提升效率。"
+            "desc": "學習建立和完成 UnieAI 第一個任務的基礎知識。本教學引導您完成基本工作流程，讓您立即提升效率。"
         },
         "presentations": {
             "title": "如何建立和匯出簡報",
-            "desc": "探索如何使用 Kortix 建立令人驚豔的簡報，並將其匯出為各種格式以進行分享和簡報。"
+            "desc": "探索如何使用 UnieAI 建立令人驚豔的簡報，並將其匯出為各種格式以進行分享和簡報。"
         },
         "manage_files": {
-            "title": "如何使用 Kortix 建立和管理文件",
-            "desc": "了解如何使用 Kortix 建立、組織和管理文件。本教學涵蓋下載資料、匯出成 Excel 等不同格式的其他功能。"
+            "title": "如何使用 UnieAI 建立和管理文件",
+            "desc": "了解如何使用 UnieAI 建立、組織和管理文件。本教學涵蓋下載資料、匯出成 Excel 等不同格式的其他功能。"
         },
         "media": {
             "title": "建立影片和圖片",
-            "desc": "探索 Kortix 強大的多媒體建立功能。了解如何使用 AI 生成影片和圖片來增強您的專案。"
+            "desc": "探索 UnieAI 強大的多媒體建立功能。了解如何使用 AI 生成影片和圖片來增強您的專案。"
         },
         "canvas": {
             "title": "使用我們的畫布功能",

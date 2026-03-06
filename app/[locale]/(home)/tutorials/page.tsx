@@ -31,7 +31,7 @@ interface Tutorial {
 
 const tutorials: Tutorial[] = [
   {
-    id: 'introduction-to-kortix',
+    id: 'introduction-to-unieai',
     i18nKey: 'intro',
     duration: '3 min',
     icon: Sparkles,
@@ -42,7 +42,7 @@ const tutorials: Tutorial[] = [
     i18nKey: 'first_task',
     duration: '4 min',
     icon: Rocket,
-    embedCode: `<div style="position: relative; padding-bottom: calc(57.3684% + 41px); height: 0px; width: 100%;"><iframe src="https://demo.arcade.software/8tC4UfBbqMpsUo6CM30i?embed&embed_mobile=tab&embed_desktop=inline&show_copy_link=true" title="Your first task with Kortix" frameborder="0" loading="lazy" webkitallowfullscreen mozallowfullscreen allowfullscreen allow="clipboard-write" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; color-scheme: light;" ></iframe></div>`,
+    embedCode: `<div style="position: relative; padding-bottom: calc(57.3684% + 41px); height: 0px; width: 100%;"><iframe src="https://demo.arcade.software/8tC4UfBbqMpsUo6CM30i?embed&embed_mobile=tab&embed_desktop=inline&show_copy_link=true" title="Your first task with UnieAI" frameborder="0" loading="lazy" webkitallowfullscreen mozallowfullscreen allowfullscreen allow="clipboard-write" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; color-scheme: light;" ></iframe></div>`,
   },
   {
     id: 'create-export-presentations',
@@ -339,7 +339,7 @@ export default function TutorialsPage() {
                     {t('support')}
                   </a>
                   <a
-                    href="mailto:support@kortix.com"
+                    href="mailto:roy@unieai.com"
                     className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors py-1"
                   >
                     <ChevronRight className="w-4 h-4" />

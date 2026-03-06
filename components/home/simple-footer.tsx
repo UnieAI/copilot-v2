@@ -13,13 +13,13 @@ export function SimpleFooter() {
           {/* Brand column */}
           <div className="col-span-2 md:col-span-1 space-y-4">
             <Link href="/" className="inline-flex items-center gap-2 group">
-              <span className="font-bold text-xl tracking-tight">Kortix</span>
+              <span className="font-bold text-xl tracking-tight">UnieAI</span>
             </Link>
 
             {/* Social links */}
             <div className="flex items-center gap-3 pt-2">
               <a
-                href="https://github.com/kortix-ai/suna"
+                href="https://github.com/UnieAI/copilot-v2"
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="GitHub"
@@ -47,7 +47,7 @@ export function SimpleFooter() {
         <div className="mt-12 pt-8 border-t border-border/40">
           <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
             <p className="text-sm text-muted-foreground">
-              © {currentYear} Kortix. All rights reserved.
+              © {currentYear} UnieAI. All rights reserved.
             </p>
           </div>
         </div>

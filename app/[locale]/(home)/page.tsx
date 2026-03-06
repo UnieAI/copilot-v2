@@ -96,7 +96,7 @@ export default function Home() {
                     aria-hidden="true"
                 >
                     <img
-                        src="/kortix-brandmark-bg.svg"
+                        src="/unieai-brandmark-bg.svg"
                         alt=""
                         className="absolute left-1/2 -translate-x-1/2 top-[-10%] sm:top-1/2 sm:-translate-y-1/2 w-[140vw] min-w-[700px] h-auto sm:w-[160vw] sm:min-w-[1000px] md:min-w-[1200px] lg:w-[162vw] lg:min-w-[1620px] object-contain select-none invert dark:invert-0 opacity-80"
                         draggable={false}
