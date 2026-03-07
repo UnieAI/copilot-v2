@@ -10,6 +10,12 @@ import { ACCEPTED_IMAGE_TYPES, ACCEPTED_DOC_TYPES } from "./types"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 type AgentStatus = "idle" | "starting" | "connected" | "error"
+type AgentHealthPayload = {
+    healthy?: boolean
+    version?: string | null
+    status?: string
+    error?: string
+}
 
 export function ChatInput({
     input,
@@ -132,22 +138,26 @@ export function ChatInput({
         }
     }
 
-    const pollHealth = useCallback(async (maxAttempts = 20, intervalMs = 1500): Promise<boolean> => {
+    const markAgentConnected = useCallback((payload?: AgentHealthPayload | null) => {
+        setAgentStatus("connected")
+        setAgentVersion(payload?.version || null)
+        setAgentStartedAt(null)
+    }, [setAgentStatus, setAgentStartedAt])
+
+    const pollHealth = useCallback(async (maxAttempts = 20, intervalMs = 1500): Promise<AgentHealthPayload | null> => {
         for (let i = 0; i < maxAttempts; i++) {
             try {
                 const res = await fetch("/api/agent")
-                const data = await res.json()
+                const data = await res.json() as AgentHealthPayload
                 if (data.healthy) {
-                    setAgentStatus("connected")
-                    setAgentVersion(data.version || null)
-                    setAgentStartedAt(null)
-                    return true
+                    markAgentConnected(data)
+                    return data
                 }
             } catch { /* ignore, keep polling */ }
             await new Promise(r => setTimeout(r, intervalMs))
         }
-        return false
-    }, [setAgentStatus, setAgentStartedAt])
+        return null
+    }, [markAgentConnected])
 
     const startAgentSandbox = useCallback(async () => {
         setAgentStatus("starting")
@@ -156,26 +166,23 @@ export function ChatInput({
 
         try {
             const res = await fetch("/api/agent", { method: "POST" })
-            const data = await res.json()
+            const data = await res.json() as AgentHealthPayload
 
             if (data.healthy) {
-                setAgentStatus("connected")
-                setAgentVersion(data.version || null)
-                setAgentStartedAt(null)
-                // toast.success(`Agent sandbox 已連線 (v${data.version})`)
+                markAgentConnected(data)
                 return
             }
 
-            if (data.error) {
+            if (res.status >= 500 && data.error) {
                 setAgentStatus("error")
                 setAgentStartedAt(null)
                 toast.error(data.error)
                 return
             }
 
-            // Container started but not healthy yet — poll until ready
-            const ok = await pollHealth()
-            if (!ok) {
+            // Container started but not healthy yet — keep waiting until ready.
+            const healthy = await pollHealth(30, 1500)
+            if (!healthy) {
                 setAgentStatus("error")
                 setAgentStartedAt(null)
                 toast.error("Agent sandbox 啟動逾時，請檢查 Docker 是否運行中")
@@ -196,11 +203,20 @@ export function ChatInput({
             // Quick health check first — if already running, skip startup
             try {
                 const res = await fetch("/api/agent")
-                const data = await res.json()
+                const data = await res.json() as AgentHealthPayload
                 if (data.healthy) {
-                    setAgentStatus("connected")
-                    setAgentVersion(data.version || null)
-                    setAgentStartedAt(null)
+                    markAgentConnected(data)
+                    return
+                }
+
+                // Container is already booting. Do not restart it; just wait for health.
+                if (data.status === "running") {
+                    const healthy = await pollHealth(30, 1500)
+                    if (!healthy) {
+                        setAgentStatus("error")
+                        setAgentStartedAt(null)
+                        toast.error("Agent sandbox 啟動逾時，請檢查 Docker 是否運行中")
+                    }
                     return
                 }
             } catch { /* not running, proceed to start */ }
@@ -219,7 +235,7 @@ export function ChatInput({
                     fetch("/api/agent", { method: "DELETE" }).catch(() => { })
                 })
         }
-    }, [startAgentSandbox, setMode, setAgentStatus, setAgentStartedAt])
+    }, [markAgentConnected, pollHealth, startAgentSandbox, setMode, setAgentStatus, setAgentStartedAt])
 
     useEffect(() => {
         if (mode === "agent" && agentStatus === "idle" && !agentStartAttemptedRef.current) {

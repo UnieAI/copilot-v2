@@ -223,21 +223,10 @@ function reducer(state: AgentState, action: Action): AgentState {
         case "message.updated": {
           const msg = event.properties.info
           if (msg.sessionID !== state.sessionId) return state
-          const shouldSetIdle =
-            msg.role === "assistant" &&
-            (
-              Boolean((msg as any).time?.completed) ||
-              Boolean((msg as any).error) ||
-              (
-                typeof (msg as any).finish === "string" &&
-                !["tool-calls", "unknown"].includes((msg as any).finish)
-              )
-            )
           return {
             ...state,
             messages: { ...state.messages, [msg.id]: msg },
             messageOrder: upsertMessageOrder(state.messageOrder, msg.id),
-            status: shouldSetIdle ? { type: "idle" } : state.status,
           }
         }
         case "message.removed": {
@@ -262,7 +251,6 @@ function reducer(state: AgentState, action: Action): AgentState {
               ...state.parts,
               [part.messageID]: upsertPart(msgParts, part),
             },
-            status: part.type === "step-finish" ? { type: "idle" } : state.status,
           }
         }
         case "message.part.delta": {
@@ -459,6 +447,16 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
   useEffect(() => {
     stateRef.current = state
   }, [state])
+
+  // Keep the shared opencode SSE warm even before a session exists.
+  useEffect(() => {
+    const syncConnection = () => {
+      setIsConnected(getOpencodeEventSnapshot().connected)
+    }
+
+    syncConnection()
+    return subscribeOpencodeSnapshot(syncConnection)
+  }, [])
 
   const handleApiError = useCallback((err: unknown) => {
     if (isSuppressedApiError(err)) {
@@ -796,7 +794,7 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
   // Workspace event stream
   useEffect(() => {
     if (!state.sessionId) {
-      setIsConnected(false)
+      setIsConnected(getOpencodeEventSnapshot().connected)
       return
     }
     const activeSessionId = state.sessionId

@@ -115,6 +115,7 @@ export function AgentView({
   agentStatus,
   agentStartedAt,
   onBusyChange,
+  onPendingCountChange,
   runtimeConfig,
 }: {
   agentRef: React.MutableRefObject<ReturnType<typeof useAgentSession> | null>
@@ -123,6 +124,7 @@ export function AgentView({
   agentStatus: "idle" | "starting" | "connected" | "error"
   agentStartedAt: number | null
   onBusyChange?: (busy: boolean) => void
+  onPendingCountChange?: (count: number) => void
   runtimeConfig?: AgentRuntimeConfig
 }) {
   const agent = useAgentSession(runtimeConfig)
@@ -144,6 +146,12 @@ export function AgentView({
   useEffect(() => {
     onBusyChangeRef.current?.(agent.isBusy)
   }, [agent.isBusy])
+
+  const onPendingCountChangeRef = useRef(onPendingCountChange)
+  onPendingCountChangeRef.current = onPendingCountChange
+  useEffect(() => {
+    onPendingCountChangeRef.current?.(agent.pendingPrompts.length)
+  }, [agent.pendingPrompts.length])
 
   // Load the target session when sandbox becomes connected (only if initialSessionId is provided).
   // If no initialSessionId, stay on the homepage — session is created lazily on first sendMessage.
@@ -199,6 +207,10 @@ export function AgentView({
         ),
     [orderedMessages],
   )
+  const queuedPromptIds = useMemo(
+    () => new Set(agent.pendingPrompts.map((item) => item.id)),
+    [agent.pendingPrompts],
+  )
 
   const turns = useMemo(() => {
     const result: Array<{
@@ -234,12 +246,12 @@ export function AgentView({
         assistantParts: assistantMessages.flatMap((item) => parts[item.id] || []),
         lastAssistantId: assistantMessages.at(-1)?.id,
         active: pendingUserId === message.id,
-        queued: Boolean(pendingAssistant && message.id > pendingAssistant.id),
+        queued: queuedPromptIds.has(message.id),
       })
     })
 
     return result
-  }, [orderedMessages, parts, pendingAssistant])
+  }, [orderedMessages, parts, pendingAssistant, queuedPromptIds])
 
   const activeTurn = turns.find((turn) => turn.active)
   const lastAssistantId = [...turns]

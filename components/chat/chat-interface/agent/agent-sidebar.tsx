@@ -277,10 +277,12 @@ function inferLiveLabel(currentSessionId?: string) {
 }
 
 export function AgentSidebar({
+  open = true,
   agentStatus,
   currentSessionId,
   onClose,
 }: {
+  open?: boolean
   agentStatus: "idle" | "starting" | "connected" | "error"
   currentSessionId?: string
   onClose: () => void
@@ -493,13 +495,14 @@ export function AgentSidebar({
   )
 
   useEffect(() => {
+    if (agentStatus === "idle") return
     void fetchMeta()
-  }, [fetchMeta])
+  }, [agentStatus, fetchMeta])
 
   useEffect(() => {
     if (agentStatus !== "connected") return
-    void Promise.allSettled([fetchStatuses(), fetchLatestDiff()])
-  }, [agentStatus, fetchLatestDiff, fetchStatuses])
+    void Promise.allSettled([fetchMeta(), fetchStatuses(), fetchLatestDiff()])
+  }, [agentStatus, fetchLatestDiff, fetchMeta, fetchStatuses])
 
   useEffect(() => {
     if (agentStatus !== "connected") return
@@ -730,7 +733,10 @@ export function AgentSidebar({
   }
 
   return (
-    <aside className="flex h-full w-[26rem] shrink-0 flex-col border-l border-border bg-[linear-gradient(180deg,rgba(245,247,250,0.92)_0%,rgba(255,255,255,0.98)_100%)]">
+    <aside
+      className={`${open ? "flex" : "hidden"} h-full w-[26rem] shrink-0 flex-col border-l border-border bg-[linear-gradient(180deg,rgba(245,247,250,0.92)_0%,rgba(255,255,255,0.98)_100%)]`}
+      aria-hidden={!open}
+    >
       <div className="flex items-center justify-between border-b border-border/50 px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
           {statusIcon()}

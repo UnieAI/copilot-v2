@@ -88,18 +88,21 @@ export function ChatInterface({
     const [agentStatus, setAgentStatus] = useState<"idle" | "starting" | "connected" | "error">("idle")
     const [agentStartedAt, setAgentStartedAt] = useState<number | null>(null)
     const [agentBusy, setAgentBusy] = useState(false)
+    const [agentPendingCount, setAgentPendingCount] = useState(0)
     const agentRef = useRef<ReturnType<typeof useAgentSession> | null>(null)
     const handledAgentFreshRef = useRef("")
 
     useEffect(() => {
         if (mode !== "agent") {
             setAgentBusy(false)
+            setAgentPendingCount(0)
         }
     }, [mode])
 
     useEffect(() => {
         if (agentStatus !== "connected") {
             setAgentBusy(false)
+            setAgentPendingCount(0)
         }
     }, [agentStatus])
 
@@ -489,6 +492,7 @@ export function ChatInterface({
                         agentStatus={agentStatus}
                         agentStartedAt={agentStartedAt}
                         onBusyChange={setAgentBusy}
+                        onPendingCountChange={setAgentPendingCount}
                         runtimeConfig={selectedAgentRuntimeConfig || undefined}
                     />
                 ) : (
@@ -566,7 +570,7 @@ export function ChatInterface({
                     setAgentStatus={setAgentStatus}
                     setAgentStartedAt={setAgentStartedAt}
                     agentBusy={agentBusy}
-                    agentPendingCount={agentRef.current?.pendingPrompts?.length || 0}
+                    agentPendingCount={agentPendingCount}
                     onAgentAbort={handleAgentAbort}
                 />
             </div>
@@ -580,8 +584,9 @@ export function ChatInterface({
             )}
 
             {/* Agent Sidebar */}
-            {mode === "agent" && showAgentSidebar && (
+            {mode === "agent" && (
                 <AgentSidebar
+                    open={showAgentSidebar}
                     agentStatus={agentStatus}
                     currentSessionId={currentAgentSessionId}
                     onClose={() => setShowAgentSidebar(false)}
