@@ -9,6 +9,7 @@ import { Sparkles, Globe, Eye, Zap, Save, RefreshCw, Paperclip, EyeOff } from "l
 import { UnieAIIcon } from "@/components/sidebar/unieai-logo"
 import { Switch } from "@/components/ui/switch"
 import { GlobalProvidersPanel } from "@/components/admin/settings/global-providers-panel"
+import { AgentSandboxPanel } from "@/components/admin/settings/agent-sandbox-panel"
 
 const UNIEAI_PROVIDER_URL = process.env.NEXT_PUBLIC_UNIEAI_PROVIDER_URL || ""
 const UNIEAI_PROVIDER_KEY = process.env.NEXT_PUBLIC_UNIEAI_PROVIDER_KEY || ""
@@ -26,13 +27,76 @@ type AdminSettings = {
     visionModelUrl?: string | null
     visionModelKey?: string | null
     visionModelName?: string | null
+    agentDefaultWorkspacePersistence?: boolean | null
+    agentDefaultMemoryMb?: number | null
+    agentDefaultCpuMillicores?: number | null
+    agentDefaultPidLimit?: number | null
+    agentDefaultIdleTimeoutMinutes?: number | null
+    agentPortRangeStart?: number | null
+    agentPortRangeEnd?: number | null
 }
 
 interface Props {
     initialSettings: AdminSettings | undefined
+    initialAgentUsers: Array<{
+        id: string
+        name: string | null
+        email: string
+        role: string
+        settings: {
+            useCustomSettings: boolean
+            defaults: {
+                workspacePersistence: boolean
+                memoryMb: number
+                cpuMillicores: number
+                pidLimit: number
+                idleTimeoutMinutes: number
+            }
+            overrides: {
+                workspacePersistence: boolean | null
+                memoryMb: number | null
+                cpuMillicores: number | null
+                pidLimit: number | null
+                idleTimeoutMinutes: number | null
+            }
+            effective: {
+                workspacePersistence: boolean
+                memoryMb: number
+                cpuMillicores: number
+                pidLimit: number
+                idleTimeoutMinutes: number
+                assignedPort: number
+            }
+        }
+        runtime: {
+            imageName: string
+            containerName: string
+            workspaceVolume: string | null
+            homeVolume: string | null
+            workdir: string
+            homeDir: string
+            hostPort: number
+            bindAddress: string
+            networkName: string
+            portRange: {
+                start: number
+                end: number
+            }
+            workspacePersistence: boolean
+            idleTimeoutMinutes: number
+            readOnlyRootfs: boolean
+            limits: {
+                memory: string
+                memoryMb: number
+                cpus: string
+                cpuMillicores: number
+                pids: number
+            }
+        }
+    }>
 }
 
-export default function AdminSettingsClient({ initialSettings }: Props) {
+export default function AdminSettingsClient({ initialSettings, initialAgentUsers }: Props) {
     const router = useRouter()
     const [activeTab, setActiveTab] = useState("models")
     const [isSaving, setIsSaving] = useState(false)
@@ -41,6 +105,9 @@ export default function AdminSettingsClient({ initialSettings }: Props) {
     const [visionModels, setVisionModels] = useState<string[]>([])
     const [fileAttachmentSessionOnly, setFileAttachmentSessionOnly] = useState<boolean>(
         initialSettings?.fileAttachmentSessionOnly ?? false
+    )
+    const [agentDefaultWorkspacePersistence, setAgentDefaultWorkspacePersistence] = useState<boolean>(
+        initialSettings?.agentDefaultWorkspacePersistence ?? true
     )
 
     const [showWorkKey, setShowWorkKey] = useState(false)
@@ -153,6 +220,12 @@ export default function AdminSettingsClient({ initialSettings }: Props) {
                                     className="px-6 py-3 text-sm font-medium data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-foreground text-muted-foreground hover:text-foreground transition-colors"
                                 >
                                     其他設定
+                                </Tabs.Trigger>
+                                <Tabs.Trigger
+                                    value="agent"
+                                    className="px-6 py-3 text-sm font-medium data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-foreground text-muted-foreground hover:text-foreground transition-colors"
+                                >
+                                    Agent Sandbox
                                 </Tabs.Trigger>
                             </Tabs.List>
 
@@ -294,6 +367,11 @@ export default function AdminSettingsClient({ initialSettings }: Props) {
                                 <GlobalProvidersPanel />
                             </Tabs.Content>
 
+                            <Tabs.Content value="agent" className="space-y-10">
+                                <AgentSandboxPanel users={initialAgentUsers} />
+                                <div className="pb-8" />
+                            </Tabs.Content>
+
                             <Tabs.Content value="other" className="space-y-10">
                                 {/* 註冊行為設定 */}
                                 <section className={sectionClasses}>
@@ -346,12 +424,111 @@ export default function AdminSettingsClient({ initialSettings }: Props) {
                                     </div>
                                 </section>
 
+                                <section className={sectionClasses}>
+                                    <div className="flex items-center gap-3 mb-2">
+                                        <div className="p-2 rounded-xl bg-primary/10 text-primary">
+                                            <Zap className="h-5 w-5" />
+                                        </div>
+                                        <h2 className="text-xl font-semibold">Agent Sandbox 預設</h2>
+                                    </div>
+
+                                    <div className="text-xs text-muted-foreground bg-muted/20 rounded-2xl p-4">
+                                        這些值是所有使用者的預設 sandbox 限額。使用者若沒有在個人設定中覆寫，就會直接沿用這裡。
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div>
+                                            <label className={labelClasses}>預設記憶體上限 (MB)</label>
+                                            <input
+                                                name="agentDefaultMemoryMb"
+                                                type="number"
+                                                min={512}
+                                                max={8192}
+                                                defaultValue={initialSettings?.agentDefaultMemoryMb ?? 2048}
+                                                className={inputClasses}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className={labelClasses}>預設 CPU 上限 (millicores)</label>
+                                            <input
+                                                name="agentDefaultCpuMillicores"
+                                                type="number"
+                                                min={250}
+                                                max={4000}
+                                                defaultValue={initialSettings?.agentDefaultCpuMillicores ?? 1000}
+                                                className={inputClasses}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className={labelClasses}>預設 PID 上限</label>
+                                            <input
+                                                name="agentDefaultPidLimit"
+                                                type="number"
+                                                min={64}
+                                                max={1024}
+                                                defaultValue={initialSettings?.agentDefaultPidLimit ?? 256}
+                                                className={inputClasses}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className={labelClasses}>預設閒置逾時 (分鐘)</label>
+                                            <input
+                                                name="agentDefaultIdleTimeoutMinutes"
+                                                type="number"
+                                                min={5}
+                                                max={240}
+                                                defaultValue={initialSettings?.agentDefaultIdleTimeoutMinutes ?? 30}
+                                                className={inputClasses}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className={labelClasses}>Sandbox Port Range Start</label>
+                                            <input
+                                                name="agentPortRangeStart"
+                                                type="number"
+                                                min={1025}
+                                                max={65534}
+                                                defaultValue={initialSettings?.agentPortRangeStart ?? 14108}
+                                                className={inputClasses}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className={labelClasses}>Sandbox Port Range End</label>
+                                            <input
+                                                name="agentPortRangeEnd"
+                                                type="number"
+                                                min={1035}
+                                                max={65535}
+                                                defaultValue={initialSettings?.agentPortRangeEnd ?? 18108}
+                                                className={inputClasses}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center justify-between p-4 rounded-2xl bg-muted/20">
+                                        <div>
+                                            <p className="text-sm font-semibold text-foreground">預設保留工作區</p>
+                                            <div className="text-xs text-muted-foreground mt-0.5 space-y-1">
+                                                <p>開啟：使用 persistent Docker volume。</p>
+                                                <p>關閉：預設改用 tmpfs，container 重啟後不保留檔案。</p>
+                                            </div>
+                                        </div>
+                                        <Switch checked={agentDefaultWorkspacePersistence} onCheckedChange={setAgentDefaultWorkspacePersistence} />
+                                        <input
+                                            id="agentDefaultWorkspacePersistence"
+                                            type="hidden"
+                                            name="agentDefaultWorkspacePersistence"
+                                            value={agentDefaultWorkspacePersistence ? "true" : "false"}
+                                        />
+                                    </div>
+                                </section>
+
                                 <div className="pb-8" />
                             </Tabs.Content>
                         </Tabs.Root>
 
                         {/* 懸浮儲存按鈕 */}
-                        {activeTab !== "providers" && (
+                        {activeTab !== "providers" && activeTab !== "agent" && (
                             <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-30 w-full max-w-[200px]">
                                 <button
                                     disabled={isSaving}

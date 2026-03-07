@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { Paperclip, ChevronDown, Settings2, CircleCheck, Loader2, CircleX, Server } from "lucide-react"
+import { Paperclip, ChevronDown, Settings2, CircleCheck, Loader2, CircleX, Server, PanelRightClose, PanelRightOpen } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Session } from "next-auth"
 import { toast } from "sonner"
@@ -20,6 +20,7 @@ import { useAutoScroll } from "./hooks/use-auto-scroll"
 import { useChatStream } from "./hooks/use-chat-stream"
 import { AgentView } from "./agent/agent-view"
 import { AgentSidebar } from "./agent/agent-sidebar"
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
 import type { AgentRuntimeConfig, useAgentSession } from "./agent/use-agent-session"
 
 export function ChatInterface({
@@ -213,7 +214,7 @@ export function ChatInterface({
     const handleSubmit = async (e?: React.FormEvent) => {
         e?.preventDefault()
         if (mode === "agent") {
-            if (!input.trim() || agentStatus !== "connected") return
+            if (!input.trim() || agentStatus !== "connected" || agentRef.current?.isBusy) return
             const runtimeConfig = selectedAgentRuntimeConfig
             const selectedAgentModel = runtimeConfig?.model
             if (!selectedAgentModel) {
@@ -436,167 +437,197 @@ export function ChatInterface({
                 </div>
             )}
 
-            <div className={`relative flex flex-col h-full bg-background transition-all duration-300 ease-in-out ${selectedPreviewAttachment ? 'w-1/2 min-w-0 border-r border-border' : 'w-full'} `}>
-                {/* Header */}
-                <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 bg-background/80 backdrop-blur sticky top-0 z-10 shrink-0">
-                    <ModelPicker
-                        availableModels={availableModels}
-                        selectedModel={selectedModel}
-                        onModelChange={handleModelChange}
-                    />
-                    {mode === "agent" ? (
-                        <button
-                            onClick={() => setShowAgentSidebar(v => !v)}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-colors ${agentStatus === "connected"
-                                ? "text-emerald-600 hover:bg-emerald-500/10"
-                                : agentStatus === "starting"
-                                    ? "text-blue-600 hover:bg-blue-500/10"
-                                    : agentStatus === "error"
-                                        ? "text-red-500 hover:bg-red-500/10"
-                                        : "text-muted-foreground hover:bg-muted/60"
-                                }`}
-                        >
-                            {agentStatus === "connected" && <CircleCheck className="h-3.5 w-3.5" />}
-                            {agentStatus === "starting" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                            {agentStatus === "error" && <CircleX className="h-3.5 w-3.5" />}
-                            {agentStatus === "idle" && <Server className="h-3.5 w-3.5" />}
-                            {agentStatus === "connected" ? "Sandbox 已連線" :
-                                agentStatus === "starting" ? "啟動中..." :
-                                    agentStatus === "error" ? "連線失敗" : "Agent"}
-                        </button>
-                    ) : (
-                        <button
-                            onClick={() => setShowSystemPrompt(v => !v)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors"
-                        >
-                            <Settings2 className="h-4 w-4" />
-                            Prompt 設定
-                        </button>
-                    )}
-                </div>
-
-                {/* System Prompt Panel */}
-                {showSystemPrompt && (
-                    <div className="px-4 py-3 border-b border-border bg-muted/30 shrink-0">
-                        <textarea
-                            value={systemPrompt}
-                            onChange={e => setSystemPrompt(e.target.value)}
-                            placeholder="輸入 System Prompt（留空則不使用）..."
-                            rows={3}
-                            className="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                        />
-                    </div>
-                )}
-
-                {/* Messages Container — Agent or Normal */}
-                {mode === "agent" ? (
-                    <AgentView
-                        agentRef={agentRef}
-                        initialSessionId={currentAgentSessionId}
-                        onSessionChange={handleAgentSessionChange}
-                        agentStatus={agentStatus}
-                        agentStartedAt={agentStartedAt}
-                        onBusyChange={setAgentBusy}
-                        onPendingCountChange={setAgentPendingCount}
-                        runtimeConfig={selectedAgentRuntimeConfig || undefined}
-                    />
-                ) : (
-                    <div
-                        ref={scrollContainerRef}
-                        className="flex-1 overflow-y-auto w-full relative [scrollbar-color:auto_transparent] [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:bg-transparent"
-                    >
-                        <div className={`mx-auto w-full space-y-8 py-8 ${selectedPreviewAttachment ? 'px-6 max-w-full' : 'px-4 max-w-3xl'}`}>
-                            {messages.length === 0 && !isGenerating && (
-                                <div className="flex flex-col items-center justify-center min-h-[30vh] text-center animate-in fade-in slide-in-from-bottom-4 duration-1000">
-                                    <h1 className="mt-52 text-4xl font-semibold tracking-tight mb-3 bg-gradient-to-r from-foreground via-foreground/80 to-muted-foreground bg-clip-text">
-                                        <DynamicGreeting />
-                                    </h1>
-                                    <p className="text-lg text-muted-foreground max-w-md leading-relaxed">
-                                        {t('subtitle') || '今天我能幫你處理什麼？'}
-                                    </p>
-                                </div>
-                            )}
-
-                            {messages.map((msg) => (
-                                <MessageBubble
-                                    key={msg.id}
-                                    msg={msg}
-                                    isGenerating={isGenerating}
-                                    editingId={editingId}
-                                    editContent={editContent}
-                                    editAttachments={editAttachments}
-                                    editKeepAttachments={editKeepAttachments}
-                                    onStartEdit={startEdit}
-                                    onCancelEdit={cancelEdit}
-                                    onCommitEdit={commitEdit}
-                                    onSetEditContent={setEditContent}
-                                    onSetEditAttachments={setEditAttachments}
-                                    onSetEditKeepAttachments={setEditKeepAttachments}
-                                    onHandleFileSelect={handleFileSelect}
-                                    onRegenerate={handleRegenerate}
-                                    onPreviewAttachment={setSelectedPreviewAttachment}
-                                />
-                            ))}
-
-                            {attachmentProgress ? (<AttachmentsProgressPanel attachments={attachmentProgress} />) : (<StatusBadge text={statusText} />)}
-                            <div ref={messagesEndRef} className="h-4" />
+            <ResizablePanelGroup direction="horizontal" className="h-full w-full">
+                {/* Main Chat Panel */}
+                <ResizablePanel defaultSize={mode === "agent" && showAgentSidebar ? 60 : 100} minSize={35}>
+                    <div className="relative flex flex-col h-full bg-background">
+                        {/* Header */}
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 bg-background/80 backdrop-blur sticky top-0 z-10 shrink-0">
+                            <ModelPicker
+                                availableModels={availableModels}
+                                selectedModel={selectedModel}
+                                onModelChange={handleModelChange}
+                            />
+                            <div className="flex items-center gap-1">
+                                {mode === "agent" ? (
+                                    <>
+                                        <button
+                                            onClick={() => setShowAgentSidebar(v => !v)}
+                                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${agentStatus === "connected"
+                                                ? "text-emerald-600 hover:bg-emerald-500/10"
+                                                : agentStatus === "starting"
+                                                    ? "text-blue-600 hover:bg-blue-500/10"
+                                                    : agentStatus === "error"
+                                                        ? "text-red-500 hover:bg-red-500/10"
+                                                        : "text-muted-foreground hover:bg-muted/60"
+                                                }`}
+                                        >
+                                            {agentStatus === "connected" && <CircleCheck className="h-3.5 w-3.5" />}
+                                            {agentStatus === "starting" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                                            {agentStatus === "error" && <CircleX className="h-3.5 w-3.5" />}
+                                            {agentStatus === "idle" && <Server className="h-3.5 w-3.5" />}
+                                            {agentStatus === "connected" ? "Sandbox" :
+                                                agentStatus === "starting" ? "Starting..." :
+                                                    agentStatus === "error" ? "Error" : "Agent"}
+                                        </button>
+                                        <button
+                                            onClick={() => setShowAgentSidebar(v => !v)}
+                                            className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                            aria-label={showAgentSidebar ? "Hide sidebar" : "Show sidebar"}
+                                        >
+                                            {showAgentSidebar ? (
+                                                <PanelRightClose className="h-4 w-4" />
+                                            ) : (
+                                                <PanelRightOpen className="h-4 w-4" />
+                                            )}
+                                        </button>
+                                    </>
+                                ) : (
+                                    <button
+                                        onClick={() => setShowSystemPrompt(v => !v)}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors"
+                                    >
+                                        <Settings2 className="h-4 w-4" />
+                                        Prompt
+                                    </button>
+                                )}
+                            </div>
                         </div>
 
-                        {/* Scroll to bottom floating button */}
-                        {showScrollButton && (
-                            <div className="sticky bottom-4 flex justify-center w-full pointer-events-none z-20">
-                                <button
-                                    onClick={scrollToBottom}
-                                    className="pointer-events-auto flex items-center justify-center h-8 w-8 rounded-full bg-background/80 backdrop-blur border border-border shadow-md text-muted-foreground hover:text-foreground hover:bg-background transition-all"
-                                    aria-label="捲動到最底部"
-                                >
-                                    <ChevronDown className="h-4 w-4" />
-                                </button>
+                        {/* System Prompt Panel */}
+                        {showSystemPrompt && (
+                            <div className="px-4 py-3 border-b border-border bg-muted/30 shrink-0">
+                                <textarea
+                                    value={systemPrompt}
+                                    onChange={e => setSystemPrompt(e.target.value)}
+                                    placeholder="Enter system prompt (leave empty to skip)..."
+                                    rows={3}
+                                    className="w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                                />
                             </div>
                         )}
+
+                        {/* Messages Container — Agent or Normal */}
+                        {mode === "agent" ? (
+                            <AgentView
+                                agentRef={agentRef}
+                                initialSessionId={currentAgentSessionId}
+                                onSessionChange={handleAgentSessionChange}
+                                agentStatus={agentStatus}
+                                agentStartedAt={agentStartedAt}
+                                onBusyChange={setAgentBusy}
+                                onPendingCountChange={setAgentPendingCount}
+                                runtimeConfig={selectedAgentRuntimeConfig || undefined}
+                            />
+                        ) : (
+                            <div
+                                ref={scrollContainerRef}
+                                className="flex-1 overflow-y-auto w-full relative [scrollbar-color:auto_transparent] [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:bg-transparent"
+                            >
+                                <div className={`mx-auto w-full space-y-8 py-8 ${selectedPreviewAttachment ? 'px-6 max-w-full' : 'px-4 max-w-3xl'}`}>
+                                    {messages.length === 0 && !isGenerating && (
+                                        <div className="flex flex-col items-center justify-center min-h-[30vh] text-center animate-in fade-in slide-in-from-bottom-4 duration-1000">
+                                            <h1 className="mt-52 text-4xl font-semibold tracking-tight mb-3 bg-gradient-to-r from-foreground via-foreground/80 to-muted-foreground bg-clip-text">
+                                                <DynamicGreeting />
+                                            </h1>
+                                            <p className="text-lg text-muted-foreground max-w-md leading-relaxed">
+                                                {t('subtitle') || '今天我能幫你處理什麼？'}
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {messages.map((msg) => (
+                                        <MessageBubble
+                                            key={msg.id}
+                                            msg={msg}
+                                            isGenerating={isGenerating}
+                                            editingId={editingId}
+                                            editContent={editContent}
+                                            editAttachments={editAttachments}
+                                            editKeepAttachments={editKeepAttachments}
+                                            onStartEdit={startEdit}
+                                            onCancelEdit={cancelEdit}
+                                            onCommitEdit={commitEdit}
+                                            onSetEditContent={setEditContent}
+                                            onSetEditAttachments={setEditAttachments}
+                                            onSetEditKeepAttachments={setEditKeepAttachments}
+                                            onHandleFileSelect={handleFileSelect}
+                                            onRegenerate={handleRegenerate}
+                                            onPreviewAttachment={setSelectedPreviewAttachment}
+                                        />
+                                    ))}
+
+                                    {attachmentProgress ? (<AttachmentsProgressPanel attachments={attachmentProgress} />) : (<StatusBadge text={statusText} />)}
+                                    <div ref={messagesEndRef} className="h-4" />
+                                </div>
+
+                                {/* Scroll to bottom floating button */}
+                                {showScrollButton && (
+                                    <div className="sticky bottom-4 flex justify-center w-full pointer-events-none z-20">
+                                        <button
+                                            onClick={scrollToBottom}
+                                            className="pointer-events-auto flex items-center justify-center h-8 w-8 rounded-full bg-background/80 backdrop-blur border border-border shadow-md text-muted-foreground hover:text-foreground hover:bg-background transition-all"
+                                            aria-label="Scroll to bottom"
+                                        >
+                                            <ChevronDown className="h-4 w-4" />
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Input Area */}
+                        <ChatInput
+                            input={input}
+                            setInput={setInput}
+                            attachments={attachments}
+                            setAttachments={setAttachments}
+                            isGenerating={isGenerating}
+                            isSetupBlocked={isSetupBlocked}
+                            onSubmit={handleSubmit}
+                            onHandleFileSelect={handleFileSelect}
+                            onPreviewAttachment={setSelectedPreviewAttachment}
+                            selectedPreviewAttachment={selectedPreviewAttachment}
+                            mode={mode}
+                            setMode={setMode}
+                            agentStatus={agentStatus}
+                            setAgentStatus={setAgentStatus}
+                            setAgentStartedAt={setAgentStartedAt}
+                            agentBusy={agentBusy}
+                            agentPendingCount={agentPendingCount}
+                            onAgentAbort={handleAgentAbort}
+                        />
                     </div>
+                </ResizablePanel>
+
+                {/* Split Sidebar View */}
+                {selectedPreviewAttachment && (
+                    <>
+                        <ResizableHandle />
+                        <ResizablePanel defaultSize={50} minSize={20}>
+                            <FilePreviewSidebar
+                                attachment={selectedPreviewAttachment}
+                                onClose={() => setSelectedPreviewAttachment(null)}
+                            />
+                        </ResizablePanel>
+                    </>
                 )}
 
-                {/* Input Area */}
-                <ChatInput
-                    input={input}
-                    setInput={setInput}
-                    attachments={attachments}
-                    setAttachments={setAttachments}
-                    isGenerating={isGenerating}
-                    isSetupBlocked={isSetupBlocked}
-                    onSubmit={handleSubmit}
-                    onHandleFileSelect={handleFileSelect}
-                    onPreviewAttachment={setSelectedPreviewAttachment}
-                    selectedPreviewAttachment={selectedPreviewAttachment}
-                    mode={mode}
-                    setMode={setMode}
-                    agentStatus={agentStatus}
-                    setAgentStatus={setAgentStatus}
-                    setAgentStartedAt={setAgentStartedAt}
-                    agentBusy={agentBusy}
-                    agentPendingCount={agentPendingCount}
-                    onAgentAbort={handleAgentAbort}
-                />
-            </div>
-
-            {/* Split Sidebar View */}
-            {selectedPreviewAttachment && (
-                <FilePreviewSidebar
-                    attachment={selectedPreviewAttachment}
-                    onClose={() => setSelectedPreviewAttachment(null)}
-                />
-            )}
-
-            {/* Agent Sidebar */}
-            {mode === "agent" && (
-                <AgentSidebar
-                    open={showAgentSidebar}
-                    agentStatus={agentStatus}
-                    currentSessionId={currentAgentSessionId}
-                    onClose={() => setShowAgentSidebar(false)}
-                />
-            )}
+                {/* Agent Sidebar — resizable */}
+                {mode === "agent" && showAgentSidebar && (
+                    <>
+                        <ResizableHandle />
+                        <ResizablePanel defaultSize={80} minSize={20} maxSize={90}>
+                            <AgentSidebar
+                                open={showAgentSidebar}
+                                agentStatus={agentStatus}
+                                currentSessionId={currentAgentSessionId}
+                                onClose={() => setShowAgentSidebar(false)}
+                            />
+                        </ResizablePanel>
+                    </>
+                )}
+            </ResizablePanelGroup>
 
             <SetupChecker userRole={userRole} onBlockingChange={setIsSetupBlocked} />
         </div>

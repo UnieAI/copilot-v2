@@ -4,6 +4,7 @@ import { redirect } from "next/navigation"
 import { userPhotos, userProviders, mcpTools, users } from "@/lib/db/schema"
 import { eq } from "drizzle-orm"
 import SettingsClient from "@/components/settings/settings-client"
+import { getUserAgentMcpServers, getUserAgentSkills } from "@/lib/agent/runtime"
 
 export default async function SettingsPage() {
   const session = await auth()
@@ -27,9 +28,13 @@ export default async function SettingsPage() {
     where: eq(userProviders.userId, userId),
   })
 
-  const userMcpTools = await db.query.mcpTools.findMany({
-    where: eq(mcpTools.userId, userId),
-  })
+  const [userMcpTools, agentMcpServers, agentSkills] = await Promise.all([
+    db.query.mcpTools.findMany({
+      where: eq(mcpTools.userId, userId),
+    }),
+    getUserAgentMcpServers(userId),
+    getUserAgentSkills(userId),
+  ])
 
   return (
     <SettingsClient
@@ -37,7 +42,6 @@ export default async function SettingsPage() {
         name: dbUser?.name || "",
         email: dbUser?.email || "",
         image: dbUser?.image || "",
-        // role: dbUser?.role,        // 如果之後要顯示可以取消註解
       }}
       initialProviders={userProviderList.map((p) => ({
         ...p,
@@ -48,6 +52,8 @@ export default async function SettingsPage() {
         updatedAt: String(p.updatedAt),
       }))}
       initialTools={userMcpTools}
+      initialAgentMcpServers={agentMcpServers}
+      initialAgentSkills={agentSkills}
     />
   )
 }

@@ -4,29 +4,18 @@ import { tmpdir } from "os"
 import path from "path"
 import { promisify } from "util"
 import { NextRequest, NextResponse } from "next/server"
+import { getUserAgentRuntime, requireAgentUserId } from "@/lib/agent/runtime"
+import { toReadableSandboxAbsolutePath } from "@/lib/agent/workspace-guard"
 
 export const runtime = "nodejs"
 
 const execFileAsync = promisify(execFile)
-const CONTAINER_NAME = process.env.OPENCODE_CONTAINER_NAME || "opencode-agent"
-const CONTAINER_WORKDIR = process.env.OPENCODE_CONTAINER_WORKDIR || "/workspace"
 
-function normalizeRelativePath(input: string) {
-  const normalized = path.posix.normalize(input || "")
-  if (!normalized || normalized === ".") return ""
-  const trimmed = normalized.replace(/^\/+/, "")
-  if (trimmed === ".." || trimmed.startsWith("../")) {
-    throw new Error("invalid preview path")
-  }
-  return trimmed
-}
-
-function containerFilePath(relativePath: string) {
-  const safeRelative = normalizeRelativePath(relativePath)
-  if (!safeRelative) {
-    throw new Error("preview path is required")
-  }
-  return path.posix.join(CONTAINER_WORKDIR, safeRelative)
+function containerFilePath(relativePath: string, workdir: string, homeDir: string) {
+  return toReadableSandboxAbsolutePath(relativePath, [workdir, homeDir, "/tmp"], {
+    allowEmpty: false,
+    label: "preview path",
+  })
 }
 
 function inferMimeType(filepath: string) {
@@ -56,13 +45,13 @@ function inferMimeType(filepath: string) {
   }
 }
 
-async function ensureContainerRunning() {
+async function ensureContainerRunning(containerName: string) {
   try {
     const { stdout } = await execFileAsync("docker", [
       "inspect",
       "-f",
       "{{.State.Running}}",
-      CONTAINER_NAME,
+      containerName,
     ])
     return stdout.trim() === "true"
   } catch {
@@ -71,7 +60,15 @@ async function ensureContainerRunning() {
 }
 
 export async function GET(req: NextRequest) {
-  const running = await ensureContainerRunning()
+  let userId: string
+  try {
+    userId = await requireAgentUserId()
+  } catch {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  const agentRuntime = await getUserAgentRuntime(userId)
+  const running = await ensureContainerRunning(agentRuntime.containerName)
   if (!running) {
     return NextResponse.json(
       { error: "agent sandbox is not running" },
@@ -80,21 +77,22 @@ export async function GET(req: NextRequest) {
   }
 
   const relativePath = req.nextUrl.searchParams.get("path") || ""
+  const shouldDownload = req.nextUrl.searchParams.get("download") === "1"
 
   try {
-    const sourcePath = containerFilePath(relativePath)
+    const sourcePath = containerFilePath(relativePath, agentRuntime.workdir, agentRuntime.homeDir)
     const tempDir = await mkdtemp(path.join(tmpdir(), "opencode-preview-"))
     const tempFile = path.join(tempDir, path.basename(relativePath || "preview.bin"))
 
     try {
-      await execFileAsync("docker", ["cp", `${CONTAINER_NAME}:${sourcePath}`, tempFile])
+      await execFileAsync("docker", ["cp", `${agentRuntime.containerName}:${sourcePath}`, tempFile])
       const bytes = await readFile(tempFile)
       return new Response(bytes, {
         status: 200,
         headers: {
           "Content-Type": inferMimeType(relativePath),
           "Cache-Control": "no-store",
-          "Content-Disposition": `inline; filename="${path.basename(relativePath)}"`,
+          "Content-Disposition": `${shouldDownload ? "attachment" : "inline"}; filename="${path.basename(relativePath)}"`,
         },
       })
     } finally {
@@ -103,7 +101,7 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "preview failed"
     const status =
-      message === "invalid preview path" || message === "preview path is required"
+      message === "invalid preview path"
         ? 400
         : 500
     return NextResponse.json({ error: message }, { status })

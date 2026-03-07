@@ -4,37 +4,27 @@ import { mkdir, rm, writeFile } from "fs/promises"
 import path from "path"
 import { promisify } from "util"
 import { NextRequest, NextResponse } from "next/server"
+import { getUserAgentRuntime, requireAgentUserId } from "@/lib/agent/runtime"
+import { toWorkspaceAbsolutePath, toWorkspaceRelativePath } from "@/lib/agent/workspace-guard"
 
 export const runtime = "nodejs"
 
 const execFileAsync = promisify(execFile)
-const CONTAINER_NAME = process.env.OPENCODE_CONTAINER_NAME || "opencode-agent"
-const CONTAINER_WORKDIR = process.env.OPENCODE_CONTAINER_WORKDIR || "/workspace"
 
-function normalizeRelativePath(input: string) {
-  const normalized = path.posix.normalize(input || "")
-  if (!normalized || normalized === ".") return ""
-  const trimmed = normalized.replace(/^\/+/, "")
-  if (trimmed === ".." || trimmed.startsWith("../")) {
-    throw new Error("invalid upload path")
-  }
-  return trimmed
+function containerTargetPath(relativePath: string, workdir: string) {
+  return toWorkspaceAbsolutePath(relativePath, workdir, {
+    allowEmpty: true,
+    label: "upload path",
+  })
 }
 
-function containerTargetPath(relativePath: string) {
-  const safeRelative = normalizeRelativePath(relativePath)
-  return safeRelative
-    ? path.posix.join(CONTAINER_WORKDIR, safeRelative)
-    : CONTAINER_WORKDIR
-}
-
-async function ensureContainerRunning() {
+async function ensureContainerRunning(containerName: string) {
   try {
     const { stdout } = await execFileAsync("docker", [
       "inspect",
       "-f",
       "{{.State.Running}}",
-      CONTAINER_NAME,
+      containerName,
     ])
     return stdout.trim() === "true"
   } catch {
@@ -43,7 +33,15 @@ async function ensureContainerRunning() {
 }
 
 export async function POST(req: NextRequest) {
-  const running = await ensureContainerRunning()
+  let userId: string
+  try {
+    userId = await requireAgentUserId()
+  } catch {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  const agentRuntime = await getUserAgentRuntime(userId)
+  const running = await ensureContainerRunning(agentRuntime.containerName)
   if (!running) {
     return NextResponse.json(
       { error: "agent sandbox is not running" },
@@ -65,8 +63,8 @@ export async function POST(req: NextRequest) {
   await mkdir(tempDir, { recursive: true })
 
   try {
-    const destinationDir = containerTargetPath(targetPath)
-    await execFileAsync("docker", ["exec", CONTAINER_NAME, "mkdir", "-p", destinationDir])
+    const destinationDir = containerTargetPath(targetPath, agentRuntime.workdir)
+    await execFileAsync("docker", ["exec", agentRuntime.containerName, "mkdir", "-p", destinationDir])
 
     const uploaded: Array<{ name: string; path: string; size: number }> = []
 
@@ -77,11 +75,14 @@ export async function POST(req: NextRequest) {
       await writeFile(tempFile, buffer)
 
       const containerFilePath = path.posix.join(destinationDir, safeName)
-      await execFileAsync("docker", ["cp", tempFile, `${CONTAINER_NAME}:${containerFilePath}`])
+      await execFileAsync("docker", ["cp", tempFile, `${agentRuntime.containerName}:${containerFilePath}`])
 
       uploaded.push({
         name: safeName,
-        path: normalizeRelativePath(joinRelativePath(targetPath, safeName)),
+        path: toWorkspaceRelativePath(joinRelativePath(targetPath, safeName), agentRuntime.workdir, {
+          allowEmpty: false,
+          label: "upload path",
+        }),
         size: file.size,
       })
     }
@@ -97,6 +98,6 @@ export async function POST(req: NextRequest) {
 }
 
 function joinRelativePath(parent: string, child: string) {
-  const base = normalizeRelativePath(parent)
+  const base = path.posix.normalize(parent || "").replace(/^\/+/, "").replace(/^\.$/, "")
   return base ? `${base}/${child}` : child
 }

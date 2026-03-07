@@ -10,12 +10,80 @@ import { QuestionBanner } from "./question-banner"
 import { TodoPanel } from "./todo-panel"
 import { TextShimmer } from "./text-shimmer"
 import { SubAgentSidebar } from "./subagent-sidebar"
+import { subscribeOpencodeEvents } from "./opencode-events"
+import { api } from "./agent-session-api"
 import { useAutoScroll } from "../hooks/use-auto-scroll"
-import type { Message, Part } from "./types"
+import type { Message, Part, PermissionRequest, ToolPart } from "./types"
 import type { AgentRuntimeConfig } from "./use-agent-session"
 
 // Max startup timeout = pollHealth maxAttempts(20) * intervalMs(1500) = 30s
 const STARTUP_TIMEOUT_SEC = 30
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+}
+
+function extractSessionIdFromOutput(output: string) {
+  if (!output) return ""
+
+  const patterns = [
+    /task_id:\s*([A-Za-z0-9_-]+)/i,
+    /["']task_id["']\s*:\s*["']([A-Za-z0-9_-]+)["']/i,
+    /session_id:\s*([A-Za-z0-9_-]+)/i,
+    /["']session_id["']\s*:\s*["']([A-Za-z0-9_-]+)["']/i,
+    /sessionId:\s*([A-Za-z0-9_-]+)/i,
+    /["']sessionId["']\s*:\s*["']([A-Za-z0-9_-]+)["']/i,
+  ]
+
+  for (const pattern of patterns) {
+    const match = output.match(pattern)
+    if (match?.[1]) return match[1]
+  }
+
+  return ""
+}
+
+function extractSubagentSessionId(part: ToolPart) {
+  const input = asRecord(part.state.input)
+  const stateMeta = "metadata" in part.state ? asRecord((part.state as any).metadata) : {}
+  const partMeta = asRecord((part as any).metadata)
+  const raw =
+    "raw" in part.state && typeof (part.state as any).raw === "string"
+      ? ((part.state as any).raw as string)
+      : ""
+  const output =
+    "output" in part.state && typeof (part.state as any).output === "string"
+      ? ((part.state as any).output as string)
+      : ""
+
+  return (
+    (typeof stateMeta.sessionId === "string" && stateMeta.sessionId) ||
+    (typeof stateMeta.sessionID === "string" && stateMeta.sessionID) ||
+    (typeof stateMeta.session_id === "string" && stateMeta.session_id) ||
+    (typeof stateMeta.taskId === "string" && stateMeta.taskId) ||
+    (typeof stateMeta.taskID === "string" && stateMeta.taskID) ||
+    (typeof stateMeta.task_id === "string" && stateMeta.task_id) ||
+    (typeof partMeta.sessionId === "string" && partMeta.sessionId) ||
+    (typeof partMeta.sessionID === "string" && partMeta.sessionID) ||
+    (typeof partMeta.session_id === "string" && partMeta.session_id) ||
+    (typeof partMeta.taskId === "string" && partMeta.taskId) ||
+    (typeof partMeta.taskID === "string" && partMeta.taskID) ||
+    (typeof partMeta.task_id === "string" && partMeta.task_id) ||
+    (typeof input.sessionId === "string" && input.sessionId) ||
+    (typeof input.sessionID === "string" && input.sessionID) ||
+    (typeof input.session_id === "string" && input.session_id) ||
+    (typeof input.taskId === "string" && input.taskId) ||
+    (typeof input.taskID === "string" && input.taskID) ||
+    (typeof input.task_id === "string" && input.task_id) ||
+    extractSessionIdFromOutput(raw) ||
+    extractSessionIdFromOutput(output) ||
+    ""
+  )
+}
+
+function isTaskPart(part: Part): part is ToolPart {
+  return part.type === "tool" && (part.tool === "task" || part.tool === "agent")
+}
 
 function StartupCountdown({
   agentStatus,
@@ -131,6 +199,7 @@ export function AgentView({
   const { messagesEndRef, scrollContainerRef, showScrollButton, scrollToBottom } = useAutoScroll(agent.isBusy)
   const bootstrapAttemptedRef = useRef(false)
   const [subAgentSessionId, setSubAgentSessionId] = useState<string | null>(null)
+  const [pendingSubagentPermission, setPendingSubagentPermission] = useState<PermissionRequest | null>(null)
 
   useEffect(() => {
     setSubAgentSessionId(null)
@@ -139,6 +208,11 @@ export function AgentView({
   // Expose agent to parent
   useEffect(() => {
     agentRef.current = agent
+    return () => {
+      if (agentRef.current === agent) {
+        agentRef.current = null
+      }
+    }
   }, [agent, agentRef])
 
   const onBusyChangeRef = useRef(onBusyChange)
@@ -218,11 +292,6 @@ export function AgentView({
         ),
     [orderedMessages],
   )
-  const queuedPromptIds = useMemo(
-    () => new Set(agent.pendingPrompts.map((item) => item.id)),
-    [agent.pendingPrompts],
-  )
-
   const turns = useMemo(() => {
     const result: Array<{
       userId: string
@@ -232,7 +301,6 @@ export function AgentView({
       assistantParts: Part[]
       lastAssistantId?: string
       active: boolean
-      queued: boolean
     }> = []
     const pendingUserId = pendingAssistant?.parentID
 
@@ -257,12 +325,80 @@ export function AgentView({
         assistantParts: assistantMessages.flatMap((item) => parts[item.id] || []),
         lastAssistantId: assistantMessages.at(-1)?.id,
         active: pendingUserId === message.id,
-        queued: queuedPromptIds.has(message.id),
       })
     })
 
     return result
-  }, [orderedMessages, parts, pendingAssistant, queuedPromptIds])
+  }, [orderedMessages, parts, pendingAssistant])
+
+  const knownSubagentSessionIds = useMemo(() => {
+    const ids = new Set<string>()
+    Object.values(parts)
+      .flat()
+      .forEach((part) => {
+        if (!isTaskPart(part)) return
+        const sessionId = extractSubagentSessionId(part)
+        if (sessionId) ids.add(sessionId)
+      })
+    return ids
+  }, [parts])
+
+  useEffect(() => {
+    if (knownSubagentSessionIds.size === 0) {
+      setPendingSubagentPermission(null)
+      return
+    }
+
+    let cancelled = false
+
+    void api<PermissionRequest[]>("/permission")
+      .then((requests) => {
+        if (cancelled) return
+        const next =
+          (Array.isArray(requests) ? requests : []).find((request) =>
+            knownSubagentSessionIds.has(request.sessionID),
+          ) || null
+        setPendingSubagentPermission(next)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPendingSubagentPermission((current) =>
+            current && knownSubagentSessionIds.has(current.sessionID) ? current : null,
+          )
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [knownSubagentSessionIds])
+
+  useEffect(() => {
+    if (knownSubagentSessionIds.size === 0) return
+
+    return subscribeOpencodeEvents((event) => {
+      if (event.type === "permission.asked") {
+        const request = event.properties as PermissionRequest
+        if (!knownSubagentSessionIds.has(request.sessionID)) return
+        setPendingSubagentPermission(request)
+        return
+      }
+
+      if (event.type === "permission.replied") {
+        const sessionID = (event.properties as { sessionID?: string } | undefined)?.sessionID
+        if (!sessionID || !knownSubagentSessionIds.has(sessionID)) return
+        setPendingSubagentPermission((current) =>
+          current?.sessionID === sessionID ? null : current,
+        )
+      }
+    })
+  }, [knownSubagentSessionIds])
+
+  const showSubagentPermissionHint = Boolean(
+    pendingSubagentPermission &&
+      pendingSubagentPermission.sessionID &&
+      pendingSubagentPermission.sessionID !== subAgentSessionId,
+  )
 
   const activeTurn = turns.find((turn) => turn.active)
   const lastAssistantId = [...turns]
@@ -328,11 +464,6 @@ export function AgentView({
                       </div>
                     )}
                   </div>
-                ) : turn.queued ? (
-                  <div className="ml-auto flex max-w-[85%] items-center gap-2 rounded-2xl border border-amber-500/20 bg-amber-500/5 px-4 py-2 text-xs text-amber-700">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    <span>Queued</span>
-                  </div>
                 ) : null}
               </div>
             ))}
@@ -390,6 +521,31 @@ export function AgentView({
             request={agent.state.permission}
             onReply={agent.replyPermission}
           />
+        )}
+
+        {showSubagentPermissionHint && pendingSubagentPermission && (
+          <div className="mx-auto mb-3 w-full max-w-3xl px-4">
+            <button
+              type="button"
+              onClick={() => setSubAgentSessionId(pendingSubagentPermission.sessionID)}
+              className="flex w-full items-start justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-left transition-colors hover:bg-amber-500/10"
+            >
+              <div>
+                <div className="text-sm font-semibold text-foreground">
+                  Subagent waiting for permission
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {pendingSubagentPermission.permission}
+                </div>
+                <div className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">
+                  點擊以開啟對應的 subagent sidebar 並回覆 permission
+                </div>
+              </div>
+              <span className="shrink-0 rounded-full border border-amber-500/20 bg-background/70 px-2 py-1 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+                {pendingSubagentPermission.sessionID.slice(0, 12)}
+              </span>
+            </button>
+          </div>
         )}
 
         {/* Question banner */}

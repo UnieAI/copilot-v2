@@ -2,6 +2,7 @@ import { auth } from "@/auth"
 import { NextResponse } from "next/server"
 import { getProvidersWithKeysForUser } from "@/lib/agent/providers"
 import { opencodeFetch, readResponsePayload } from "@/lib/agent/opencode"
+import { getUserAgentRuntime } from "@/lib/agent/runtime"
 
 /**
  * Clear all custom providers from OpenCode.
@@ -17,6 +18,7 @@ export async function POST(req: Request) {
   const userId = session.user.id as string
 
   try {
+    const runtime = await getUserAgentRuntime(userId)
     const rawProviders = await getProvidersWithKeysForUser(userId)
     if (rawProviders.length === 0) {
       return NextResponse.json({ success: true, message: "No custom providers to clear" })
@@ -27,14 +29,14 @@ export async function POST(req: Request) {
     // 1. DELETE /auth/{provider} for each provider to remove credentials
     await Promise.allSettled(
       providerIds.map((id) =>
-        opencodeFetch(`/auth/${id}`, { method: "DELETE" })
+        opencodeFetch(`/auth/${id}`, { method: "DELETE", runtime })
       )
     )
 
     // 2. PATCH /global/config to add providers to disabled_providers
     let currentDisabled: string[] = []
     try {
-      const cfgRes = await opencodeFetch("/global/config")
+      const cfgRes = await opencodeFetch("/global/config", { runtime })
       if (cfgRes.ok) {
         const payload = await readResponsePayload(cfgRes)
         const cfg = (payload?.data ?? payload ?? {}) as { disabled_providers?: string[] }
@@ -47,6 +49,7 @@ export async function POST(req: Request) {
     await opencodeFetch("/global/config", {
       method: "PATCH",
       body: { disabled_providers: nextDisabled },
+      runtime,
     })
 
     return NextResponse.json({ success: true })

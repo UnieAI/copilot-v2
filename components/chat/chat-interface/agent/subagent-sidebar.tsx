@@ -3,6 +3,7 @@
 import { useEffect, useMemo } from "react"
 import { ChevronDown, Loader2, X } from "lucide-react"
 import { AgentMessage } from "./agent-message"
+import { PermissionBanner } from "./permission-banner"
 import { useAgentSession } from "./use-agent-session"
 import { useAutoScroll } from "../hooks/use-auto-scroll"
 
@@ -13,7 +14,7 @@ export function SubAgentSidebar({
   sessionId: string
   onClose: () => void
 }) {
-  const { state, isBusy, loadSession } = useAgentSession()
+  const { state, isBusy, loadSession, replyPermission } = useAgentSession()
   const { messagesEndRef, scrollContainerRef, showScrollButton, scrollToBottom } =
     useAutoScroll(isBusy)
 
@@ -90,6 +91,13 @@ export function SubAgentSidebar({
           </div>
         )}
       </div>
+
+      {state.permission && (
+        <PermissionBanner
+          request={state.permission}
+          onReply={replyPermission}
+        />
+      )}
     </div>
   )
 }

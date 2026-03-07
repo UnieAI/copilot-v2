@@ -9,6 +9,7 @@ import {
     primaryKey,
     integer,
     boolean,
+    uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import type { AdapterAccount } from '@auth/core/adapters';
 
@@ -109,6 +110,14 @@ export const adminSettings = pgTable('admin_settings', {
     visionModelUrl: text('vision_model_url'),
     visionModelKey: text('vision_model_key'),
     visionModelName: text('vision_model_name'),
+
+    agentDefaultWorkspacePersistence: boolean('agent_default_workspace_persistence').notNull().default(true),
+    agentDefaultMemoryMb: integer('agent_default_memory_mb').notNull().default(2048),
+    agentDefaultCpuMillicores: integer('agent_default_cpu_millicores').notNull().default(1000),
+    agentDefaultPidLimit: integer('agent_default_pid_limit').notNull().default(256),
+    agentDefaultIdleTimeoutMinutes: integer('agent_default_idle_timeout_minutes').notNull().default(30),
+    agentPortRangeStart: integer('agent_port_range_start').notNull().default(14108),
+    agentPortRangeEnd: integer('agent_port_range_end').notNull().default(18108),
 
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -253,6 +262,42 @@ export const mcpTools = pgTable('mcp_tools', {
     updatedAt: timestamp('updatedAt').defaultNow().notNull(),
 });
 
+export const userAgentSettings = pgTable('user_agent_settings', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+        .notNull()
+        .unique()
+        .references(() => users.id, { onDelete: 'cascade' }),
+
+    workspacePersistence: boolean('workspace_persistence'),
+    memoryMb: integer('memory_mb'),
+    cpuMillicores: integer('cpu_millicores'),
+    pidLimit: integer('pid_limit'),
+    idleTimeoutMinutes: integer('idle_timeout_minutes'),
+    assignedPort: integer('assigned_port').unique(),
+    mcpConfig: json('mcp_config').notNull().default('{}'),
+
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const userAgentSkills = pgTable('user_agent_skills', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+        .notNull()
+        .references(() => users.id, { onDelete: 'cascade' }),
+
+    name: text('name').notNull(),
+    description: text('description').notNull().default(''),
+    content: text('content').notNull().default(''),
+    isEnabled: integer('is_enabled').notNull().default(1),
+
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+    userIdNameUniqueIdx: uniqueIndex('user_agent_skills_user_id_name_idx').on(table.userId, table.name),
+}));
+
 // ----------------------------------------------------------------------------
 // 5. Chat Projects / Folders
 // ----------------------------------------------------------------------------
@@ -282,6 +327,8 @@ export const chatSessions = pgTable('chat_sessions', {
         .references(() => chatProjects.id, { onDelete: 'set null' }),
 
     title: text('title').notNull().default('New Chat'),
+    mode: varchar('mode', { length: 20 }).notNull().default('normal'), // 'normal' | 'agent'
+    externalSessionId: text('external_session_id'), // OpenCode session id for agent mode
     systemPrompt: text('system_prompt'),
     modelName: text('model_name').notNull(), // the model user selected for this chat
     providerPrefix: text('provider_prefix'), // prefix of the provider this model belongs to
@@ -301,6 +348,7 @@ export const chatMessages = pgTable('chat_messages', {
 
     role: varchar('role', { length: 50 }).notNull(), // 'user', 'assistant', 'system'
     content: text('content').notNull(),
+    externalMessageId: text('external_message_id'), // OpenCode message id for agent mode sync
 
     // store pre-processed text from docs/images, or metadata about the generation
     attachments: json('attachments').default('[]'),
@@ -430,6 +478,8 @@ export type AdminSettings = InferSelectModel<typeof adminSettings>;
 export type UserProvider = InferSelectModel<typeof userProviders>;
 export type UserPreference = InferSelectModel<typeof userPreferences>;
 export type McpTool = InferSelectModel<typeof mcpTools>;
+export type UserAgentSetting = InferSelectModel<typeof userAgentSettings>;
+export type UserAgentSkill = InferSelectModel<typeof userAgentSkills>;
 export type ChatProject = InferSelectModel<typeof chatProjects>;
 export type ChatSession = InferSelectModel<typeof chatSessions>;
 export type ChatMessage = InferSelectModel<typeof chatMessages>;

@@ -54,6 +54,9 @@ type AgentSession = {
     time?: { created?: number; updated?: number }
 }
 type ProfileUpdateDetail = { name?: string | null; image?: string | null }
+type AgentSwitchIntent =
+    | { type: "existing"; href: string; sessionId: string; title: string }
+    | { type: "new" }
 
 function pickAgentSessionId(payload: any): string {
     const root = payload?.data ?? payload ?? {}
@@ -152,6 +155,7 @@ export function Sidebar({ initialSession, ...props }: React.ComponentProps<typeo
     const [agentActiveStreams, setAgentActiveStreams] = useState<Record<string, { statusText: string }>>({})
     const [creatingAgentSession, setCreatingAgentSession] = useState(false)
     const [confirmDeleteProject, setConfirmDeleteProject] = useState<{ id: string; name: string } | null>(null)
+    const [confirmAgentSwitch, setConfirmAgentSwitch] = useState<AgentSwitchIntent | null>(null)
     const [liveProfile, setLiveProfile] = useState<ProfileUpdateDetail>({})
     const [dbProfileImage, setDbProfileImage] = useState<string | null>(null)
     const [myGroupCount, setMyGroupCount] = useState(0)
@@ -220,6 +224,33 @@ export function Sidebar({ initialSession, ...props }: React.ComponentProps<typeo
         () => ({ ...chatActiveStreams, ...agentActiveStreams }),
         [chatActiveStreams, agentActiveStreams]
     )
+    const currentAgentIsBusy =
+        searchParams?.get("mode") === "agent" &&
+        !!currentAgentSessionId &&
+        !!agentActiveStreams[currentAgentSessionId]
+
+    const navigateToAgentSession = useCallback((href: string) => {
+        router.push(href)
+        if (isMobile) setOpenMobile(false)
+    }, [isMobile, router, setOpenMobile])
+
+    const requestAgentSessionSwitch = (target: AgentSwitchIntent) => {
+        if (target.type === "existing" && target.sessionId === currentAgentSessionId) {
+            navigateToAgentSession(target.href)
+            return
+        }
+
+        if (!currentAgentIsBusy) {
+            if (target.type === "existing") {
+                navigateToAgentSession(target.href)
+                return
+            }
+            void startNewChat(true)
+            return
+        }
+
+        setConfirmAgentSwitch(target)
+    }
 
     useEffect(() => { fetchAll(); fetchProfileFromDb() }, [pathname, searchParams?.toString()])
 
@@ -263,11 +294,16 @@ export function Sidebar({ initialSession, ...props }: React.ComponentProps<typeo
     }
 
     // ─── 動作處理 ────────────────────────────────────────────────────────
-    const startNewChat = async () => {
+    const startNewChat = async (skipBusyConfirm = false) => {
         const isAgentMode = searchParams?.get("mode") === "agent"
         if (!isAgentMode) {
             router.push(`${localePrefix}/chat`)
             if (isMobile) setOpenMobile(false)
+            return
+        }
+
+        if (!skipBusyConfirm && currentAgentIsBusy) {
+            setConfirmAgentSwitch({ type: "new" })
             return
         }
 
@@ -287,14 +323,12 @@ export function Sidebar({ initialSession, ...props }: React.ComponentProps<typeo
             if (!sessionId) throw new Error("missing agent session id")
 
             void fetchAgentSessions()
-            router.push(`${localePrefix}/chat?mode=agent&id=${encodeURIComponent(sessionId)}`)
+            navigateToAgentSession(`${localePrefix}/chat?mode=agent&id=${encodeURIComponent(sessionId)}`)
         } catch {
             toast.error("建立 Agent 對話失敗")
         } finally {
             setCreatingAgentSession(false)
         }
-
-        if (isMobile) setOpenMobile(false)
     }
 
     const createProject = async (e?: React.MouseEvent) => {
@@ -388,6 +422,7 @@ export function Sidebar({ initialSession, ...props }: React.ComponentProps<typeo
     // ─── 渲染對話單元 (帶 Loading 動畫) ───────────────────────────────────
     const renderSession = (s: ChatSession) => {
         const isGenerating = !!activeStreams[s.id];
+        const href = s.projectId ? `${localePrefix}/p/${s.projectId}/c/${s.id}` : `${localePrefix}/c/${s.id}`
         return (
             <div
                 key={s.id}
@@ -397,7 +432,15 @@ export function Sidebar({ initialSession, ...props }: React.ComponentProps<typeo
                         ? "bg-primary/5 text-primary font-semibold shadow-[inset_0_0_0_1px_rgba(var(--primary),0.05)]"
                         : "hover:bg-muted/60 text-muted-foreground hover:text-foreground"
                 )}
-                onClick={() => { if (renamingId !== s.id) router.push(s.projectId ? `${localePrefix}/p/${s.projectId}/c/${s.id}` : `${localePrefix}/c/${s.id}`) }}
+                onClick={() => {
+                    if (renamingId === s.id) return
+                    requestAgentSessionSwitch({
+                        type: "existing",
+                        href,
+                        sessionId: s.id,
+                        title: s.title || "新對話",
+                    })
+                }}
             >
                 {isGenerating ? (
                     <Loader2 className="h-3.5 w-3.5 shrink-0 text-primary animate-spin" />
@@ -470,6 +513,7 @@ export function Sidebar({ initialSession, ...props }: React.ComponentProps<typeo
     const renderAgentSession = (s: AgentSession) => {
         const isActive = currentAgentSessionId === s.id
         const isGenerating = !!activeStreams[s.id]
+        const href = `${localePrefix}/chat?mode=agent&id=${encodeURIComponent(s.id)}`
         return (
             <div
                 key={s.id}
@@ -479,7 +523,12 @@ export function Sidebar({ initialSession, ...props }: React.ComponentProps<typeo
                         ? "bg-primary/5 text-primary font-semibold shadow-[inset_0_0_0_1px_rgba(var(--primary),0.05)]"
                         : "hover:bg-muted/60 text-muted-foreground hover:text-foreground"
                 )}
-                onClick={() => router.push(`${localePrefix}/chat?mode=agent&id=${encodeURIComponent(s.id)}`)}
+                onClick={() => requestAgentSessionSwitch({
+                    type: "existing",
+                    href,
+                    sessionId: s.id,
+                    title: s.title || `Session ${s.id.slice(0, 8)}`,
+                })}
             >
                 {isGenerating ? (
                     <Loader2 className="h-3.5 w-3.5 shrink-0 text-primary animate-spin" />
@@ -665,7 +714,16 @@ export function Sidebar({ initialSession, ...props }: React.ComponentProps<typeo
                             {state === 'expanded' && <p className="px-4 text-[10px] font-bold text-muted-foreground/40 uppercase tracking-[0.2em] mb-2">最近對話</p>}
                             <div className="space-y-0.5">
                                 {unassigned.map(s => state === 'collapsed' ? (
-                                    <button key={s.id} onClick={() => router.push(`${localePrefix}/c/${s.id}`)} className="w-10 h-10 mx-auto flex items-center justify-center rounded-xl hover:bg-muted/50 mb-1 relative border border-transparent hover:border-border/50">
+                                    <button
+                                        key={s.id}
+                                        onClick={() => requestAgentSessionSwitch({
+                                            type: "existing",
+                                            href: `${localePrefix}/c/${s.id}`,
+                                            sessionId: s.id,
+                                            title: s.title || "新對話",
+                                        })}
+                                        className="w-10 h-10 mx-auto flex items-center justify-center rounded-xl hover:bg-muted/50 mb-1 relative border border-transparent hover:border-border/50"
+                                    >
                                         {activeStreams[s.id] ? (
                                             <Loader2 className="h-4 w-4 text-primary animate-spin" />
                                         ) : (
@@ -685,7 +743,12 @@ export function Sidebar({ initialSession, ...props }: React.ComponentProps<typeo
                                 {agentSessions.map(s => state === 'collapsed' ? (
                                     <button
                                         key={s.id}
-                                        onClick={() => router.push(`${localePrefix}/chat?mode=agent&id=${encodeURIComponent(s.id)}`)}
+                                        onClick={() => requestAgentSessionSwitch({
+                                            type: "existing",
+                                            href: `${localePrefix}/chat?mode=agent&id=${encodeURIComponent(s.id)}`,
+                                            sessionId: s.id,
+                                            title: s.title || `Session ${s.id.slice(0, 8)}`,
+                                        })}
                                         className="w-10 h-10 mx-auto flex items-center justify-center rounded-xl hover:bg-muted/50 mb-1 relative border border-transparent hover:border-border/50"
                                     >
                                         {activeStreams[s.id] ? (
@@ -782,6 +845,29 @@ export function Sidebar({ initialSession, ...props }: React.ComponentProps<typeo
                     setConfirmDeleteProject(null);
                 }}
                 onCancel={() => setConfirmDeleteProject(null)}
+            />
+        )}
+        {confirmAgentSwitch && (
+            <ConfirmDialog
+                title="目前 Session 仍在執行"
+                message={
+                    confirmAgentSwitch.type === "existing"
+                        ? `這個 Agent session 還沒跑完，現在切到「${confirmAgentSwitch.title}」會中止目前工作。確定要切換嗎？`
+                        : "這個 Agent session 還沒跑完，現在建立新 session 會中止目前工作。確定要繼續嗎？"
+                }
+                confirmLabel="仍要切換"
+                cancelLabel="留在目前 Session"
+                variant="danger"
+                onConfirm={() => {
+                    const action = confirmAgentSwitch
+                    setConfirmAgentSwitch(null)
+                    if (action.type === "existing") {
+                        navigateToAgentSession(action.href)
+                        return
+                    }
+                    void startNewChat(true)
+                }}
+                onCancel={() => setConfirmAgentSwitch(null)}
             />
         )}
     </>)

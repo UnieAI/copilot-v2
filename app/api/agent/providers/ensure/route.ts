@@ -2,6 +2,7 @@ import { auth } from "@/auth"
 import { NextResponse } from "next/server"
 import { getProvidersWithKeysForUser } from "@/lib/agent/providers"
 import { opencodeFetch, readResponsePayload } from "@/lib/agent/opencode"
+import { getUserAgentRuntime } from "@/lib/agent/runtime"
 
 export const runtime = "nodejs"
 
@@ -33,6 +34,7 @@ export async function POST(req: Request) {
   }
 
   try {
+    const runtime = await getUserAgentRuntime(session.user.id as string)
     const providers = await getProvidersWithKeysForUser(session.user.id as string)
     const provider = providers.find((p) => p.id === providerPrefix)
     if (!provider) {
@@ -56,7 +58,7 @@ export async function POST(req: Request) {
     let disabledProviders: string[] = []
 
     try {
-      const currentRes = await opencodeFetch("/global/config")
+      const currentRes = await opencodeFetch("/global/config", { runtime })
       if (currentRes.ok) {
         const currentPayload = await readResponsePayload(currentRes)
         const currentConfig = (currentPayload?.data ?? currentPayload ?? {}) as any
@@ -101,6 +103,7 @@ export async function POST(req: Request) {
     const syncRes = await opencodeFetch("/global/config", {
       method: "PATCH",
       body: patchBody,
+      runtime,
     })
 
     if (!syncRes.ok) {

@@ -4,6 +4,8 @@ import { db } from "@/lib/db"
 import { adminSettings } from "@/lib/db/schema"
 import { auth } from "@/auth"
 import { eq } from "drizzle-orm"
+import { revalidatePath } from "next/cache"
+import { normalizeAdminAgentDefaults, normalizeAgentSettingsInput, updateUserAgentSettings } from "@/lib/agent/runtime"
 
 export const adminConfigActions = async (formData: FormData) => {
     const session = await auth()
@@ -41,6 +43,35 @@ export const adminConfigActions = async (formData: FormData) => {
         payload.fileAttachmentSessionOnly = formData.get("fileAttachmentSessionOnly") === "true"
     }
 
+    const hasAgentDefaults =
+        formData.has("agentDefaultWorkspacePersistence") ||
+        formData.has("agentDefaultMemoryMb") ||
+        formData.has("agentDefaultCpuMillicores") ||
+        formData.has("agentDefaultPidLimit") ||
+        formData.has("agentDefaultIdleTimeoutMinutes") ||
+        formData.has("agentPortRangeStart") ||
+        formData.has("agentPortRangeEnd")
+
+    if (hasAgentDefaults) {
+        const normalized = normalizeAdminAgentDefaults({
+            agentDefaultWorkspacePersistence: formData.get("agentDefaultWorkspacePersistence") === "true",
+            agentDefaultMemoryMb: Number(formData.get("agentDefaultMemoryMb") || 0),
+            agentDefaultCpuMillicores: Number(formData.get("agentDefaultCpuMillicores") || 0),
+            agentDefaultPidLimit: Number(formData.get("agentDefaultPidLimit") || 0),
+            agentDefaultIdleTimeoutMinutes: Number(formData.get("agentDefaultIdleTimeoutMinutes") || 0),
+            agentPortRangeStart: Number(formData.get("agentPortRangeStart") || 0),
+            agentPortRangeEnd: Number(formData.get("agentPortRangeEnd") || 0),
+        })
+
+        payload.agentDefaultWorkspacePersistence = normalized.defaults.workspacePersistence
+        payload.agentDefaultMemoryMb = normalized.defaults.memoryMb
+        payload.agentDefaultCpuMillicores = normalized.defaults.cpuMillicores
+        payload.agentDefaultPidLimit = normalized.defaults.pidLimit
+        payload.agentDefaultIdleTimeoutMinutes = normalized.defaults.idleTimeoutMinutes
+        payload.agentPortRangeStart = normalized.portRange.start
+        payload.agentPortRangeEnd = normalized.portRange.end
+    }
+
     assignString("workModelUrl")
     assignString("workModelKey")
     assignString("workModelName")
@@ -62,5 +93,33 @@ export const adminConfigActions = async (formData: FormData) => {
         await db.insert(adminSettings).values(payload)
     }
 
+    return { success: true }
+}
+
+export const adminUpdateUserAgentSettingsAction = async (payload: {
+    userId: string
+    useCustomSettings: boolean
+    workspacePersistence: boolean
+    memoryMb: number
+    cpuMillicores: number
+    pidLimit: number
+    idleTimeoutMinutes: number
+}) => {
+    const session = await auth()
+    if (!session || !session.user || ((session.user as any).role !== 'admin' && (session.user as any).role !== 'super')) {
+        throw new Error("Unauthorized")
+    }
+
+    if (!payload.userId) {
+        throw new Error("Missing userId")
+    }
+
+    const normalized = normalizeAgentSettingsInput(payload)
+    await updateUserAgentSettings(payload.userId, {
+        useCustomSettings: Boolean(payload.useCustomSettings),
+        ...normalized,
+    })
+
+    revalidatePath("/admin/settings")
     return { success: true }
 }

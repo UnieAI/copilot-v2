@@ -5,22 +5,27 @@ import * as Tabs from "@radix-ui/react-tabs"
 import { ProfileForm } from "@/components/settings/profile-form"
 import { SettingsProvidersSection } from "@/components/settings/settings-providers-section"
 import { SettingsMcpSection } from "@/components/settings/settings-mcp-section"
+import type { AgentRemoteMcpServer } from "@/lib/agent/mcp-config"
+import type { AgentSkillDefinition } from "@/lib/agent/skill-config"
 
 interface Props {
   initialUser: {
     name: string
     email: string
     image?: string
-    // role?: string
   }
   initialProviders: any[] // 根據你的實際型別調整
   initialTools: any[]     // 根據你的實際型別調整
+  initialAgentMcpServers: AgentRemoteMcpServer[]
+  initialAgentSkills: AgentSkillDefinition[]
 }
 
 export default function SettingsClient({
   initialUser,
   initialProviders,
   initialTools,
+  initialAgentMcpServers,
+  initialAgentSkills,
 }: Props) {
   const [activeTab, setActiveTab] = useState("profile")
 
@@ -32,7 +37,7 @@ export default function SettingsClient({
           <div>
             <h1 className="text-xl md:text-2xl font-medium tracking-tight">設定</h1>
             <p className="text-sm text-muted-foreground mt-0.5 font-normal">
-              管理您的個人資料、API Provider 與 MCP 工具
+              管理您的個人資料、API Provider、MCP 工具、Agent Remote MCP 與 Agent Skills
             </p>
           </div>
         </div>
@@ -59,7 +64,7 @@ export default function SettingsClient({
                 value="mcp"
                 className="px-6 py-3 text-sm font-medium data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-foreground text-muted-foreground hover:text-foreground transition-colors"
               >
-                MCP Tools
+                MCP / Skills
               </Tabs.Trigger>
             </Tabs.List>
 
@@ -72,7 +77,6 @@ export default function SettingsClient({
                 <ProfileForm initialName={initialUser.name} initialImage={initialUser.image} />
                 <div className="text-xs text-muted-foreground space-y-0.5 pt-1 border-t border-border">
                   <p>Email：{initialUser.email}</p>
-                  {/* <p>角色：{initialUser.role || "—"}</p> */}
                 </div>
               </section>
             </Tabs.Content>
@@ -82,7 +86,11 @@ export default function SettingsClient({
             </Tabs.Content>
 
             <Tabs.Content value="mcp">
-              <SettingsMcpSection initialTools={initialTools} />
+              <SettingsMcpSection
+                initialTools={initialTools}
+                initialAgentMcpServers={initialAgentMcpServers}
+                initialAgentSkills={initialAgentSkills}
+              />
             </Tabs.Content>
           </Tabs.Root>
         </div>

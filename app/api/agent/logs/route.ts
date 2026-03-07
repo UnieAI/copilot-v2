@@ -1,17 +1,30 @@
-import { NextResponse } from "next/server"
-import { exec } from "child_process"
+import { execFile } from "child_process"
 import { promisify } from "util"
+import { NextResponse } from "next/server"
+import { getUserAgentRuntime, requireAgentUserId } from "@/lib/agent/runtime"
 
-const execAsync = promisify(exec)
-const CONTAINER_NAME = process.env.OPENCODE_CONTAINER_NAME || "opencode-agent"
+const execFileAsync = promisify(execFile)
+export const runtime = "nodejs"
 
 export async function GET() {
+    let userId: string
     try {
-        const { stdout } = await execAsync(
-            `docker logs --tail 100 ${CONTAINER_NAME} 2>&1`
-        )
-        return NextResponse.json({ logs: stdout })
+        userId = await requireAgentUserId()
     } catch {
-        return NextResponse.json({ logs: "" })
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    const agentRuntime = await getUserAgentRuntime(userId)
+    try {
+        const { stdout, stderr } = await execFileAsync("docker", [
+            "logs",
+            "--tail",
+            "100",
+            agentRuntime.containerName,
+        ])
+        return NextResponse.json({ logs: `${stdout}${stderr}` })
+    } catch (error: any) {
+        const logs = `${error?.stdout || ""}${error?.stderr || ""}`
+        return NextResponse.json({ logs })
     }
 }

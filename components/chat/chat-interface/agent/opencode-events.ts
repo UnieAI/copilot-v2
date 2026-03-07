@@ -352,6 +352,30 @@ export function subscribeOpencodeEvents(listener: (event: OpencodeEvent) => void
   }
 }
 
+export function shutdownOpencodeEventConnection() {
+  refCount = 0
+  stateListeners.clear()
+  eventListeners.clear()
+  if (eventSource) {
+    eventSource.close()
+    eventSource = null
+  }
+  if (flushTimer) {
+    clearTimeout(flushTimer)
+    flushTimer = null
+  }
+  refreshPromise = null
+  queuedEvents = []
+  bufferEvents = []
+  coalescedKeys.clear()
+  staleDeltas.clear()
+  replaceStatuses({})
+  if (snapshot.connected) {
+    snapshot.connected = false
+    emitState()
+  }
+}
+
 export async function refreshOpencodeStatusSnapshot() {
   if (refreshPromise) return refreshPromise
 

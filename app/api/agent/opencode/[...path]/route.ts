@@ -1,93 +1,105 @@
 import { NextRequest, NextResponse } from "next/server"
+import { getUserAgentRuntime, requireAgentUserId } from "@/lib/agent/runtime"
+import { createOpencodeEventStream, opencodeFetch } from "@/lib/agent/opencode"
+import {
+  resolveReadableSandboxLocation,
+  sanitizeWorkspaceBody,
+  sanitizeWorkspaceQuery,
+} from "@/lib/agent/workspace-guard"
 
 export const runtime = "nodejs"
 
-const DEFAULT_HOST = process.env.OPENCODE_HOST || "127.0.0.1"
-const DEFAULT_PORT = process.env.OPENCODE_PORT || "4096"
-const DEFAULT_WORKDIR = process.env.OPENCODE_CONTAINER_WORKDIR || "/workspace"
-const OPENCODE_BASE = (process.env.OPENCODE_BASE_URL || `http://${DEFAULT_HOST}:${DEFAULT_PORT}`).replace(/\/+$/, "")
+function traceAbortProxyEvent(input: {
+  method: string
+  targetPath: string
+  userId: string
+  body: unknown
+}) {
+  if (input.method !== "POST") return
+  if (!input.targetPath.endsWith("/abort")) return
 
-function buildAuthorizationHeader() {
-  const username = process.env.OPENCODE_SANDBOX_USERNAME
-  const password = process.env.OPENCODE_SANDBOX_PASSWORD
-  if (!username || typeof password !== "string") return null
-  return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`
+  const sessionId =
+    input.targetPath.split("/").filter(Boolean).at(-2) ?? "unknown"
+
+  console.warn("[agent-abort-trace] forwarding abort request", {
+    sessionId,
+    targetPath: input.targetPath,
+    userId: input.userId,
+    body:
+      input.body && typeof input.body === "object"
+        ? input.body
+        : undefined,
+  })
 }
 
 async function proxyRequest(
   req: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
 ) {
+  let userId: string
+  try {
+    userId = await requireAgentUserId()
+  } catch {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  let agentRuntime: Awaited<ReturnType<typeof getUserAgentRuntime>>
+  try {
+    agentRuntime = await getUserAgentRuntime(userId)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "failed to resolve agent runtime"
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
   const { path } = await params
   const targetPath = "/" + path.join("/")
-  const url = new URL(targetPath, OPENCODE_BASE)
-  url.search = req.nextUrl.search
+  let query: Record<string, string>
+  const readRoots =
+    targetPath.startsWith("/file") || targetPath.startsWith("/find/file")
+      ? [agentRuntime.workdir, agentRuntime.homeDir, "/tmp"]
+      : [agentRuntime.workdir]
+  let directoryRoot = agentRuntime.workdir
 
+  try {
+    query = sanitizeWorkspaceQuery(
+      Object.fromEntries(req.nextUrl.searchParams.entries()),
+      agentRuntime.workdir,
+      { readRoots },
+    )
+    const preferredPath =
+      req.nextUrl.searchParams.get("path") ||
+      req.nextUrl.searchParams.get("directory") ||
+      req.nextUrl.searchParams.get("cwd")
+    if (preferredPath && readRoots.length > 1) {
+      const location = resolveReadableSandboxLocation(preferredPath, readRoots, {
+        allowEmpty: true,
+      })
+      directoryRoot = location.root
+      const relativePath = location.relativePath
+      if (req.nextUrl.searchParams.has("path")) {
+        query.path = relativePath
+      } else if (req.nextUrl.searchParams.has("directory")) {
+        query.directory = relativePath
+      } else if (req.nextUrl.searchParams.has("cwd")) {
+        query.cwd = relativePath
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "invalid sandbox path"
+    return NextResponse.json({ error: message }, { status: 400 })
+  }
   const isSSE =
     req.headers.get("accept")?.includes("text/event-stream") ||
     targetPath.includes("/event")
 
-  const headers = new Headers()
-  for (const [key, value] of req.headers.entries()) {
-    if (
-      key === "host" ||
-      key === "connection" ||
-      key === "transfer-encoding"
-    )
-      continue
-    headers.set(key, value)
-  }
-
-  // Scope opencode requests to this workspace so sessions appear consistently.
-  headers.set("x-opencode-directory", process.env.OPENCODE_WORKSPACE_DIR || DEFAULT_WORKDIR)
-  if (!headers.has("authorization")) {
-    const authHeader = buildAuthorizationHeader()
-    if (authHeader) headers.set("authorization", authHeader)
-  }
-
-  let body: BodyInit | null = null
-  if (req.method !== "GET" && req.method !== "HEAD") {
-    body = await req.text()
-    if (!headers.has("content-type")) {
-      headers.set("content-type", "application/json")
-    }
-  }
-
-  let upstream: Response
-  try {
-    upstream = await fetch(url.toString(), {
-      method: req.method,
-      headers,
-      body,
-      signal: isSSE ? undefined : AbortSignal.timeout(30_000),
-    })
-  } catch {
-    return NextResponse.json(
-      { error: "opencode server unreachable" },
-      { status: 502 },
-    )
-  }
-
-  if (isSSE && upstream.body) {
-    const stream = new ReadableStream({
-      async start(controller) {
-        const reader = upstream.body!.getReader()
-        try {
-          while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
-            controller.enqueue(value)
-          }
-        } catch {
-          // connection closed
-        } finally {
-          controller.close()
-        }
-      },
-    })
+  if (isSSE) {
+    const stream = createOpencodeEventStream(targetPath, {
+      headers: req.headers,
+      query,
+      runtime: agentRuntime,
+    }, agentRuntime)
 
     return new Response(stream, {
-      status: upstream.status,
+      status: 200,
       headers: {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache, no-transform",
@@ -96,6 +108,42 @@ async function proxyRequest(
       },
     })
   }
+
+  let parsedBody: unknown = undefined
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    const rawBody = await req.text()
+    if (rawBody) {
+      try {
+        parsedBody = JSON.parse(rawBody)
+      } catch {
+        parsedBody = rawBody
+      }
+    }
+  }
+  try {
+    parsedBody = sanitizeWorkspaceBody(targetPath, parsedBody, agentRuntime.workdir)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "invalid sandbox path"
+    return NextResponse.json({ error: message }, { status: 400 })
+  }
+
+  traceAbortProxyEvent({
+    method: req.method,
+    targetPath,
+    userId,
+    body: parsedBody,
+  })
+
+  const upstream = await opencodeFetch(targetPath, {
+    method: req.method,
+    headers: req.headers,
+    body: parsedBody,
+    query,
+    runtime: {
+      ...agentRuntime,
+      workdir: directoryRoot,
+    },
+  })
 
   const responseHeaders = new Headers()
   upstream.headers.forEach((value, key) => {

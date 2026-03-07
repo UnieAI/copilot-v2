@@ -61,11 +61,11 @@ export function BasicTool({
                 </span>
                 <StatusBadge status={status} />
               </div>
-              {subtitle && (
+              {/* {subtitle && (
                 <div className="truncate text-[11px] uppercase tracking-wide text-muted-foreground">
                   {subtitle}
                 </div>
-              )}
+              )} */}
               {summary && (
                 <div className="text-xs leading-5 text-foreground/80 whitespace-pre-wrap break-words">
                   {summary}
@@ -74,9 +74,8 @@ export function BasicTool({
             </div>
             {children && !(pending && lockWhilePending) && (
               <ChevronRight
-                className={`mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/60 transition-transform duration-200 ${
-                  open ? "rotate-90" : ""
-                }`}
+                className={`mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/60 transition-transform duration-200 ${open ? "rotate-90" : ""
+                  }`}
               />
             )}
           </button>

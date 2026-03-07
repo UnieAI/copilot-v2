@@ -8,6 +8,7 @@ import { fileToBase64 } from "./utils"
 import type { Attachment } from "./types"
 import { ACCEPTED_IMAGE_TYPES, ACCEPTED_DOC_TYPES } from "./types"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { shutdownOpencodeEventConnection } from "./agent/opencode-events"
 
 type AgentStatus = "idle" | "starting" | "connected" | "error"
 type AgentHealthPayload = {
@@ -134,6 +135,7 @@ export function ChatInput({
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault()
+            if (mode === "agent" && agentBusy) return
             onSubmit()
         }
     }
@@ -224,6 +226,7 @@ export function ChatInput({
             await startAgentSandbox()
         } else {
             agentStartAttemptedRef.current = false
+            shutdownOpencodeEventConnection()
             setMode("normal")
             setAgentStatus("idle")
             setAgentVersion(null)
@@ -333,11 +336,6 @@ export function ChatInput({
                                 </TabsTrigger>
                             </TabsList>
                         </Tabs>
-                        {mode === "agent" && agentPendingCount > 0 && (
-                            <span className="rounded-full bg-amber-500/10 px-2 py-1 text-[10px] font-semibold text-amber-600">
-                                Pending {agentPendingCount}
-                            </span>
-                        )}
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -350,13 +348,13 @@ export function ChatInput({
                             </button>
                         )}
                         <button type="button" onClick={() => onSubmit()}
-                            disabled={(!input.trim() && attachments.length === 0) || isGenerating || isSetupBlocked || (mode === "agent" && agentStatus !== "connected")}
+                            disabled={(!input.trim() && attachments.length === 0) || isGenerating || isSetupBlocked || (mode === "agent" && (agentStatus !== "connected" || agentBusy))}
                             className={`flex items-center justify-center p-2.5 rounded-full transition-all duration-200
                                 ${(!input.trim() && attachments.length === 0)
                                     ? 'bg-muted/80 text-muted-foreground'
                                     : 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-md transform hover:scale-105 active:scale-95'
                                 } disabled:opacity-50 disabled:hover:scale-100 disabled:shadow-none mr-1`}
-                            title={mode === "agent" && agentBusy ? "加入 pending queue" : "送出"}
+                            title={mode === "agent" && agentBusy ? "Agent 生成中" : "送出"}
                         >
                             {isGenerating ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5 pl-0.5" />}
                         </button>
