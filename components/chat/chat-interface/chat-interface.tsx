@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, useRef, useEffect, useMemo } from "react"
+import { useState, useCallback, useRef, useEffect, useMemo, useLayoutEffect } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { Paperclip, ChevronDown, Settings2, CircleCheck, Loader2, CircleX, Server } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -119,7 +119,7 @@ export function ChatInterface({
         }
     }, [mode, pathname, router, searchParams])
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (mode !== "agent" || agentStatus !== "connected") return
 
         const freshToken =

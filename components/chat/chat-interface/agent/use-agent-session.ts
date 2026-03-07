@@ -841,6 +841,10 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
       }
       optimisticUserMessagesRef.current.clear()
       setPendingPrompts([])
+      stateRef.current = {
+        ...initialState,
+        sessionId,
+      }
       dispatch({ type: "SET_SESSION", sessionId })
     } catch (err) {
       handleApiError(err)
@@ -851,6 +855,7 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
     intentionalSwitchRef.current = true
     optimisticUserMessagesRef.current.clear()
     setPendingPrompts([])
+    stateRef.current = initialState
     dispatch({ type: "RESET" })
   }, [])
 
@@ -858,6 +863,10 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
     intentionalSwitchRef.current = true
     optimisticUserMessagesRef.current.clear()
     setPendingPrompts([])
+    stateRef.current = {
+      ...initialState,
+      sessionId,
+    }
     dispatch({ type: "SET_SESSION", sessionId })
   }, [])
 
@@ -878,6 +887,10 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
             throw new Error("Session created but no session ID was returned")
           }
           setPendingPrompts([])
+          stateRef.current = {
+            ...initialState,
+            sessionId,
+          }
           dispatch({ type: "SET_SESSION", sessionId })
         } catch (err) {
           handleApiError(err)
@@ -1068,8 +1081,17 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
       },
     })
     try {
+      const regenerateRuntimeConfig: AgentRuntimeConfig | undefined =
+        defaultRuntimeConfig || userRuntimeConfig
+          ? {
+              agent: defaultRuntimeConfig?.agent ?? userRuntimeConfig?.agent,
+              model: defaultRuntimeConfig?.model ?? userRuntimeConfig?.model,
+              variant: defaultRuntimeConfig?.variant ?? userRuntimeConfig?.variant,
+            }
+          : undefined
+
       await submitPrompt(state.sessionId, userText, {
-        runtimeConfig: userRuntimeConfig,
+        runtimeConfig: regenerateRuntimeConfig,
       })
     } catch (err) {
       if ((err as any)?.name !== "AbortError") {
@@ -1109,7 +1131,15 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
         handleApiError(err)
       }
     }
-  }, [state.sessionId, state.messageOrder, state.messages, state.parts, handleApiError, submitPrompt])
+  }, [
+    defaultRuntimeConfig,
+    state.sessionId,
+    state.messageOrder,
+    state.messages,
+    state.parts,
+    handleApiError,
+    submitPrompt,
+  ])
 
   useEffect(() => {
     if (!state.sessionId || isBusy || pendingPrompts.length === 0 || queueDrainRef.current) {
