@@ -8,11 +8,21 @@ import { requireGroupEditor, requireGroupMember } from "@/lib/group-permissions"
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
     if (!(await requireGroupMember(id))) return new Response("Forbidden", { status: 403 });
+    const canEdit = !!(await requireGroupEditor(id));
 
     const providers = await db.query.groupProviders.findMany({
         where: eq(groupProviders.groupId, id),
         orderBy: (p, { asc }) => [asc(p.updatedAt)],
     });
+
+    if (!canEdit) {
+        const sanitizedProviders = providers.map(({ apiUrl, apiKey, ...provider }) => ({
+            ...provider,
+            apiUrl: "",
+            apiKey: "",
+        }));
+        return Response.json(sanitizedProviders);
+    }
 
     return Response.json(providers);
 }

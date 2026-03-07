@@ -237,7 +237,8 @@ function ProviderCard({
             )}
           </div>
           <p className="text-xs text-muted-foreground truncate">
-            {form.apiUrl || "No API URL"} | {selectedCount}/{totalCount} selected models
+            {canEdit ? `${form.apiUrl || "No API URL"} | ` : ""}
+            {selectedCount}/{totalCount} selected models
           </p>
         </div>
 
@@ -288,51 +289,55 @@ function ProviderCard({
               />
             </div>
 
-            <div className="space-y-1">
-              <label className="text-xs font-medium">API URL</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="url"
-                  value={form.apiUrl}
-                  onChange={(e) => setForm((prev) => ({ ...prev, apiUrl: e.target.value }))}
-                  placeholder="https://api.openai.com/v1"
-                  disabled={!canEdit}
-                  className="flex-1 h-9 rounded-xl border border-input/60 bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all disabled:opacity-60"
-                />
-                <button
-                  type="button"
-                  onClick={applyUnieAIProviderDefaults}
-                  disabled={!canEdit}
-                  className="h-9 w-9 shrink-0 rounded-full border border-input/60 bg-background hover:bg-muted transition-colors inline-flex items-center justify-center disabled:opacity-60"
-                  title="Use UnieAI"
-                >
-                  <UnieAIIcon className="h-4 w-4" />
-                </button>
+            {canEdit && (
+              <div className="space-y-1">
+                <label className="text-xs font-medium">API URL</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="url"
+                    value={form.apiUrl}
+                    onChange={(e) => setForm((prev) => ({ ...prev, apiUrl: e.target.value }))}
+                    placeholder="https://api.openai.com/v1"
+                    disabled={!canEdit}
+                    className="flex-1 h-9 rounded-xl border border-input/60 bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all disabled:opacity-60"
+                  />
+                  <button
+                    type="button"
+                    onClick={applyUnieAIProviderDefaults}
+                    disabled={!canEdit}
+                    className="h-9 w-9 shrink-0 rounded-full border border-input/60 bg-background hover:bg-muted transition-colors inline-flex items-center justify-center disabled:opacity-60"
+                    title="Use UnieAI"
+                  >
+                    <UnieAIIcon className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
-            <div className="space-y-1">
-              <label className="text-xs font-medium">API Key</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type={showApiKey ? "text" : "password"}
-                  value={form.apiKey}
-                  onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
-                  placeholder="sk-..."
-                  disabled={!canEdit}
-                  className="flex-1 h-9 rounded-xl border border-input/60 bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all disabled:opacity-60"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowApiKey((prev) => !prev)}
-                  className="h-9 w-9 shrink-0 rounded-full border border-input/60 bg-background hover:bg-muted transition-colors inline-flex items-center justify-center"
-                  title={showApiKey ? "Hide API Key" : "Show API Key"}
-                  aria-label={showApiKey ? "Hide API Key" : "Show API Key"}
-                >
-                  {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
+            {canEdit && (
+              <div className="space-y-1">
+                <label className="text-xs font-medium">API Key</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type={showApiKey ? "text" : "password"}
+                    value={form.apiKey}
+                    onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
+                    placeholder="sk-..."
+                    disabled={!canEdit}
+                    className="flex-1 h-9 rounded-xl border border-input/60 bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all disabled:opacity-60"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowApiKey((prev) => !prev)}
+                    className="h-9 w-9 shrink-0 rounded-full border border-input/60 bg-background hover:bg-muted transition-colors inline-flex items-center justify-center"
+                    title={showApiKey ? "Hide API Key" : "Show API Key"}
+                    aria-label={showApiKey ? "Hide API Key" : "Show API Key"}
+                  >
+                    {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           <div className="space-y-2 pt-2 border-t border-border/40">
