@@ -534,8 +534,18 @@ export function AgentSidebar({
 
   useEffect(() => {
     if (agentStatus !== "connected") return
+    if (!open) return
     return subscribeOpencodeEvents((event) => {
-      if (!event.type.startsWith("session.") && !event.type.startsWith("message.")) {
+      const shouldRefresh =
+        event.type === "session.created" ||
+        event.type === "session.updated" ||
+        event.type === "session.deleted" ||
+        event.type === "session.idle" ||
+        event.type === "message.updated" ||
+        event.type === "message.removed" ||
+        event.type === "message.part.updated"
+
+      if (!shouldRefresh) {
         return
       }
 
@@ -547,7 +557,7 @@ export function AgentSidebar({
         void refreshWorkspace({ silent: true })
       }, 450)
     })
-  }, [agentStatus, refreshWorkspace])
+  }, [agentStatus, open, refreshWorkspace])
 
   useEffect(() => {
     return () => {

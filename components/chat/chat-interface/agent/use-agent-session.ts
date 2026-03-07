@@ -204,6 +204,60 @@ function pickVisibleUserText(parts: Part[]): string {
   return (textPart?.text || "").trim()
 }
 
+function isTerminalAssistantMessage(message: Message): boolean {
+  if (message.role !== "assistant") return false
+  if (message.error) return true
+
+  const finish = typeof message.finish === "string" ? message.finish : ""
+  const isTerminalFinish = Boolean(finish) && !["tool-calls", "unknown"].includes(finish)
+  return Boolean(message.time?.completed) && isTerminalFinish
+}
+
+function shouldPreserveLocalMessage(existing: Message, incoming: Message, isSessionBusy: boolean) {
+  if (existing.role !== incoming.role) return false
+
+  if (existing.role === "assistant" && incoming.role === "assistant") {
+    if (existing.error && !incoming.error) return true
+    if (existing.time?.completed && !incoming.time?.completed) return true
+
+    const existingFinish = existing.finish || ""
+    const incomingFinish = incoming.finish || ""
+    if (
+      existingFinish &&
+      !["tool-calls", "unknown"].includes(existingFinish) &&
+      existingFinish !== incomingFinish
+    ) {
+      return true
+    }
+  }
+
+  return false
+}
+
+function shouldPreserveLocalPart(existing: Part, incoming: Part, isSessionBusy: boolean) {
+  if (existing.type !== incoming.type) return false
+
+  if ((existing.type === "text" || existing.type === "reasoning") && "text" in incoming) {
+    const existingText = existing.text || ""
+    const incomingText = incoming.text || ""
+    if (isSessionBusy && existingText.length > incomingText.length && existingText.startsWith(incomingText)) {
+      return true
+    }
+  }
+
+  if (existing.type === "tool" && incoming.type === "tool" && existing.tool === incoming.tool) {
+    const rank = {
+      pending: 0,
+      running: 1,
+      completed: 2,
+      error: 2,
+    } as const
+    return rank[existing.state.status] > rank[incoming.state.status]
+  }
+
+  return false
+}
+
 function reducer(state: AgentState, action: Action): AgentState {
   switch (action.type) {
     case "SET_SESSION":
@@ -227,6 +281,7 @@ function reducer(state: AgentState, action: Action): AgentState {
             ...state,
             messages: { ...state.messages, [msg.id]: msg },
             messageOrder: upsertMessageOrder(state.messageOrder, msg.id),
+            status: isTerminalAssistantMessage(msg) ? { type: "idle" } : state.status,
           }
         }
         case "message.removed": {
@@ -443,6 +498,7 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
   const queueDrainRef = useRef(false)
   // When switching sessions intentionally, suppress the brief isConnected=false flicker
   const intentionalSwitchRef = useRef(false)
+  const subscribedSessionIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     stateRef.current = state
@@ -477,15 +533,13 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
       targetSessionId: string,
       status: AgentState["status"] | null | undefined,
     ) => {
-      if (!status) {
-        dispatch({
-          type: "SSE_EVENT",
-          event: {
-            type: "session.idle",
-            properties: { sessionID: targetSessionId },
-          },
-        })
-        return
+      if (!status) return
+
+      if (stateRef.current.sessionId === targetSessionId) {
+        stateRef.current = {
+          ...stateRef.current,
+          status,
+        }
       }
 
       dispatch({
@@ -509,6 +563,9 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
         const items = normalizeSessionMessages(payload)
         const current = stateRef.current
         if (current.sessionId !== targetSessionId) return
+        const isSessionBusy =
+          current.status.type === "busy" ||
+          current.status.type === "retry"
 
         const seenMessageIds = new Set<string>()
         const optimisticEntries = [...optimisticUserMessagesRef.current.entries()]
@@ -521,7 +578,10 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
           seenMessageIds.add(msgId)
 
           const existingMessage = current.messages[msgId]
-          if (!existingMessage || !isSamePayload(existingMessage, item.message)) {
+          if (
+            (!existingMessage || !isSamePayload(existingMessage, item.message)) &&
+            !(existingMessage && shouldPreserveLocalMessage(existingMessage, item.message as Message, isSessionBusy))
+          ) {
             dispatch({
               type: "SSE_EVENT",
               event: {
@@ -539,7 +599,10 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
             if (!part?.id) continue
             seenPartIds.add(part.id)
             const existingPart = existingById.get(part.id)
-            if (!existingPart || !isSamePayload(existingPart, part)) {
+            if (
+              (!existingPart || !isSamePayload(existingPart, part)) &&
+              !(existingPart && shouldPreserveLocalPart(existingPart, part, isSessionBusy))
+            ) {
               dispatch({
                 type: "SSE_EVENT",
                 event: {
@@ -551,6 +614,7 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
           }
 
           for (const existingPart of existingParts) {
+            if (isSessionBusy) continue
             if (!seenPartIds.has(existingPart.id)) {
               dispatch({
                 type: "SSE_EVENT",
@@ -593,6 +657,7 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
         }
 
         for (const messageId of current.messageOrder) {
+          if (isSessionBusy) break
           const msg = current.messages[messageId]
           if (!msg || msg.sessionID !== targetSessionId) continue
           if (optimisticUserMessagesRef.current.has(messageId)) continue
@@ -728,6 +793,12 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
         : createOptimisticUserMessage(sessionId, trimmed, runtimeConfig)
 
     abortRef.current = new AbortController()
+    if (stateRef.current.sessionId === sessionId) {
+      stateRef.current = {
+        ...stateRef.current,
+        status: { type: "busy" },
+      }
+    }
 
     dispatch({
       type: "SSE_EVENT",
@@ -774,6 +845,12 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
           properties: { sessionID: sessionId },
         },
       })
+      if (stateRef.current.sessionId === sessionId) {
+        stateRef.current = {
+          ...stateRef.current,
+          status: { type: "idle" },
+        }
+      }
       if ((err as any)?.name !== "AbortError") {
         handleApiError(err)
       }
@@ -794,10 +871,12 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
   // Workspace event stream
   useEffect(() => {
     if (!state.sessionId) {
+      subscribedSessionIdRef.current = null
       setIsConnected(getOpencodeEventSnapshot().connected)
       return
     }
     const activeSessionId = state.sessionId
+    subscribedSessionIdRef.current = activeSessionId
     intentionalSwitchRef.current = false
     setIsConnected(getOpencodeEventSnapshot().connected)
     void syncSessionMessages(activeSessionId)
@@ -821,6 +900,9 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
     })
 
     return () => {
+      if (subscribedSessionIdRef.current === activeSessionId) {
+        subscribedSessionIdRef.current = null
+      }
       unsubscribeEvents()
       unsubscribeSnapshot()
       if (!intentionalSwitchRef.current) setIsConnected(false)
@@ -868,9 +950,17 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
     dispatch({ type: "SET_SESSION", sessionId })
   }, [])
 
+  const waitForSessionSubscription = useCallback(async (sessionId: string) => {
+    const deadline = Date.now() + 1500
+    while (subscribedSessionIdRef.current !== sessionId && Date.now() < deadline) {
+      await new Promise((resolve) => window.setTimeout(resolve, 16))
+    }
+  }, [])
+
   const sendMessage = useCallback(
     async (text: string, runtimeConfig?: AgentRuntimeConfig) => {
       let sessionId = stateRef.current.sessionId
+      let createdSession = false
       const trimmed = text.trim()
       if (!trimmed) return
       // Lazily create a session if we don't have one yet
@@ -890,11 +980,17 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
             sessionId,
           }
           dispatch({ type: "SET_SESSION", sessionId })
+          createdSession = true
         } catch (err) {
           handleApiError(err)
           return
         }
       }
+
+      if (createdSession) {
+        await waitForSessionSubscription(sessionId)
+      }
+
       const current = stateRef.current
       const currentlyBusy =
         current.sessionId === sessionId &&
@@ -921,7 +1017,7 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
 
       await submitPrompt(sessionId, trimmed, { runtimeConfig })
     },
-    [createOptimisticUserMessage, handleApiError, submitPrompt],
+    [createOptimisticUserMessage, handleApiError, submitPrompt, waitForSessionSubscription],
   )
 
   const abort = useCallback(async () => {

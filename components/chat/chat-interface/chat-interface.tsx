@@ -50,7 +50,14 @@ export function ChatInterface({
     const router = useRouter()
     const pathname = usePathname()
     const searchParams = useSearchParams()
-    const currentAgentSessionId = searchParams?.get("id") || initialAgentSessionId || undefined
+    const freshAgentToken =
+        searchParams?.get("fresh") ||
+        searchParams?.get("new") ||
+        ""
+    const requestedAgentSessionId = searchParams?.get("id") || undefined
+    const currentAgentSessionId = freshAgentToken
+        ? undefined
+        : requestedAgentSessionId || initialAgentSessionId || undefined
     const userRole = (session.user as any).role as string ?? "user"
     const t = useTranslations('Home')
 
@@ -126,15 +133,13 @@ export function ChatInterface({
         if (mode !== "agent" || agentStatus !== "connected") return
 
         const freshToken =
-            searchParams?.get("fresh") ||
-            searchParams?.get("new") ||
-            ""
+            freshAgentToken
         if (!freshToken || handledAgentFreshRef.current === freshToken) return
 
         handledAgentFreshRef.current = freshToken
         // Reset to homepage (empty welcome screen) — session is created lazily on first sendMessage
         agentRef.current?.resetSession()
-    }, [mode, agentStatus, searchParams])
+    }, [mode, agentStatus, freshAgentToken])
 
     const handleAgentSessionChange = useCallback((sessionId: string) => {
         const params = new URLSearchParams(searchParams?.toString() || "")

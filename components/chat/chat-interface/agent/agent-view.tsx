@@ -174,10 +174,17 @@ export function AgentView({
   // it would change the component key and cause a full remount.
   const onSessionChangeRef = useRef(onSessionChange)
   onSessionChangeRef.current = onSessionChange
+  const hasAssistantMessage = useMemo(
+    () => Object.values(agent.state.messages).some((message) => message.role === "assistant"),
+    [agent.state.messages],
+  )
   useEffect(() => {
     if (!agent.state.sessionId) return
+    if (initialSessionId === agent.state.sessionId) return
+    if (!hasAssistantMessage) return
+    if (agent.isBusy) return
     onSessionChangeRef.current?.(agent.state.sessionId)
-  }, [agent.state.sessionId])
+  }, [agent.isBusy, agent.state.sessionId, hasAssistantMessage, initialSessionId])
 
   // If URL id changes (sidebar navigation), switch session without requiring remount.
   useEffect(() => {
