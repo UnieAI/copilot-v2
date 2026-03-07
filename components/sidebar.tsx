@@ -55,6 +55,23 @@ type AgentSession = {
 }
 type ProfileUpdateDetail = { name?: string | null; image?: string | null }
 
+function pickAgentSessionId(payload: any): string {
+    const root = payload?.data ?? payload ?? {}
+    const candidates = [
+        root?.id,
+        root?.sessionID,
+        root?.sessionId,
+        root?.info?.id,
+        root?.data?.id,
+    ]
+
+    for (const candidate of candidates) {
+        if (typeof candidate === "string" && candidate) return candidate
+    }
+
+    return ""
+}
+
 function extractAgentParentSessionId(payload: any): string {
     const root = payload?.data ?? payload ?? {}
     const candidates = [
@@ -133,6 +150,7 @@ export function Sidebar({ initialSession, ...props }: React.ComponentProps<typeo
     const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
     const [chatActiveStreams, setChatActiveStreams] = useState<Record<string, { statusText: string }>>({})
     const [agentActiveStreams, setAgentActiveStreams] = useState<Record<string, { statusText: string }>>({})
+    const [creatingAgentSession, setCreatingAgentSession] = useState(false)
     const [confirmDeleteProject, setConfirmDeleteProject] = useState<{ id: string; name: string } | null>(null)
     const [liveProfile, setLiveProfile] = useState<ProfileUpdateDetail>({})
     const [dbProfileImage, setDbProfileImage] = useState<string | null>(null)
@@ -245,13 +263,37 @@ export function Sidebar({ initialSession, ...props }: React.ComponentProps<typeo
     }
 
     // ─── 動作處理 ────────────────────────────────────────────────────────
-    const startNewChat = () => {
-        const query = new URLSearchParams()
-        query.set("fresh", String(Date.now()))
-        if (searchParams?.get("mode") === "agent") {
-            query.set("mode", "agent")
+    const startNewChat = async () => {
+        const isAgentMode = searchParams?.get("mode") === "agent"
+        if (!isAgentMode) {
+            router.push(`${localePrefix}/chat`)
+            if (isMobile) setOpenMobile(false)
+            return
         }
-        router.push(`${localePrefix}/chat?${query.toString()}`)
+
+        if (creatingAgentSession) return
+
+        try {
+            setCreatingAgentSession(true)
+            const res = await fetch('/api/agent/opencode/session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}),
+            })
+            if (!res.ok) throw new Error("create agent session failed")
+
+            const payload = await res.json()
+            const sessionId = pickAgentSessionId(payload)
+            if (!sessionId) throw new Error("missing agent session id")
+
+            void fetchAgentSessions()
+            router.push(`${localePrefix}/chat?mode=agent&id=${encodeURIComponent(sessionId)}`)
+        } catch {
+            toast.error("建立 Agent 對話失敗")
+        } finally {
+            setCreatingAgentSession(false)
+        }
+
         if (isMobile) setOpenMobile(false)
     }
 
@@ -503,13 +545,18 @@ export function Sidebar({ initialSession, ...props }: React.ComponentProps<typeo
                     )}>
                         <button
                             onClick={startNewChat}
+                            disabled={creatingAgentSession}
                             className={cn(
-                                "flex items-center gap-2 font-bold transition-colors hover:text-primary",
+                                "flex items-center gap-2 font-bold transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-60",
                                 state === 'expanded' ? "flex-1 h-full text-left" : "justify-center shrink-0"
                             )}
                         >
-                            <Plus className="size-4 shrink-0" />
-                            {state === 'expanded' && "新對話"}
+                            {creatingAgentSession ? (
+                                <Loader2 className="size-4 shrink-0 animate-spin" />
+                            ) : (
+                                <Plus className="size-4 shrink-0" />
+                            )}
+                            {state === 'expanded' && (creatingAgentSession ? "建立中..." : "新對話")}
                         </button>
 
                         {state === 'expanded' && (

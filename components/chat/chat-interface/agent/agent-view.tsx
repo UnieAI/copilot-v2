@@ -169,6 +169,10 @@ export function AgentView({
     }
   }, [agentStatus])
 
+  useEffect(() => {
+    bootstrapAttemptedRef.current = false
+  }, [initialSessionId])
+
   // Notify parent when session ID changes to a real value (not null).
   // When session resets to null (new conversation), don't update the URL —
   // it would change the component key and cause a full remount.
@@ -180,7 +184,7 @@ export function AgentView({
   )
   useEffect(() => {
     if (!agent.state.sessionId) return
-    if (initialSessionId === agent.state.sessionId) return
+    if (initialSessionId) return
     if (!hasAssistantMessage) return
     if (agent.isBusy) return
     onSessionChangeRef.current?.(agent.state.sessionId)

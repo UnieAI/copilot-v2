@@ -494,11 +494,16 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
   const [pendingPrompts, setPendingPrompts] = useState<PendingPrompt[]>([])
   const abortRef = useRef<AbortController | null>(null)
   const stateRef = useRef<AgentState>(initialState)
+  const previousStatusRef = useRef<AgentState["status"]>(initialState.status)
+  const pendingPartDeltasRef = useRef<Map<string, Record<string, string>>>(new Map())
+  const knownPartIdsRef = useRef<Set<string>>(new Set())
+  const messageSyncEpochRef = useRef(0)
   const optimisticUserMessagesRef = useRef<Map<string, OptimisticUserMessage>>(new Map())
   const queueDrainRef = useRef(false)
   // When switching sessions intentionally, suppress the brief isConnected=false flicker
   const intentionalSwitchRef = useRef(false)
   const subscribedSessionIdRef = useRef<string | null>(null)
+  const sessionListenerReadyRef = useRef<string | null>(null)
 
   useEffect(() => {
     stateRef.current = state
@@ -556,10 +561,43 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
     [],
   )
 
+  const mergeBufferedPartFields = useCallback((part: Part): Part => {
+    const key = `${part.messageID}:${part.id}`
+    const buffered = pendingPartDeltasRef.current.get(key)
+    knownPartIdsRef.current.add(key)
+    if (!buffered) return part
+
+    const next = { ...part } as Part & Record<string, unknown>
+    for (const [field, delta] of Object.entries(buffered)) {
+      const existing = typeof next[field] === "string" ? String(next[field]) : ""
+      if (!existing) {
+        next[field] = delta
+        continue
+      }
+      if (
+        existing.startsWith(delta) ||
+        existing.endsWith(delta) ||
+        existing.includes(delta)
+      ) {
+        next[field] = existing
+        continue
+      }
+      if (delta.endsWith(existing)) {
+        next[field] = delta
+        continue
+      }
+      next[field] = `${delta}${existing}`
+    }
+    pendingPartDeltasRef.current.delete(key)
+    return next as Part
+  }, [])
+
   const syncSessionMessages = useCallback(
     async (targetSessionId: string) => {
+      const syncEpoch = messageSyncEpochRef.current
       try {
         const payload = await api<any>(`/session/${targetSessionId}/message`)
+        if (messageSyncEpochRef.current !== syncEpoch) return
         const items = normalizeSessionMessages(payload)
         const current = stateRef.current
         if (current.sessionId !== targetSessionId) return
@@ -598,6 +636,7 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
           for (const part of item.parts) {
             if (!part?.id) continue
             seenPartIds.add(part.id)
+            knownPartIdsRef.current.add(`${part.messageID}:${part.id}`)
             const existingPart = existingById.get(part.id)
             if (
               (!existingPart || !isSamePayload(existingPart, part)) &&
@@ -607,10 +646,10 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
                 type: "SSE_EVENT",
                 event: {
                   type: "message.part.updated",
-                  properties: { part },
-                },
-              })
-            }
+                properties: { part: mergeBufferedPartFields(part) },
+              },
+            })
+          }
           }
 
           for (const existingPart of existingParts) {
@@ -682,7 +721,7 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
         }
       }
     },
-    [],
+    [mergeBufferedPartFields],
   )
 
   const refreshSessionStatus = useCallback(
@@ -768,11 +807,32 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
     const delays = [1200, 3500]
     for (const delay of delays) {
       window.setTimeout(() => {
-        void syncSessionMessages(sessionId)
         void refreshSessionStatus(sessionId, { force: true })
       }, delay)
     }
-  }, [refreshSessionStatus, syncSessionMessages])
+  }, [refreshSessionStatus])
+
+  const bootstrapAssistantStream = useCallback((sessionId: string) => {
+    const delays = [120, 280]
+    for (const delay of delays) {
+      window.setTimeout(() => {
+        const current = stateRef.current
+        if (current.sessionId !== sessionId) return
+        const busy =
+          current.status.type === "busy" ||
+          current.status.type === "retry"
+        if (!busy) return
+
+        const hasAssistant = current.messageOrder.some((messageId) => {
+          const message = current.messages[messageId]
+          return message?.sessionID === sessionId && message.role === "assistant"
+        })
+        if (hasAssistant) return
+
+        void syncSessionMessages(sessionId)
+      }, delay)
+    }
+  }, [syncSessionMessages])
 
   const submitPrompt = useCallback(async (
     sessionId: string,
@@ -792,6 +852,7 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
         ? { messageId: options.existingMessageId }
         : createOptimisticUserMessage(sessionId, trimmed, runtimeConfig)
 
+    messageSyncEpochRef.current += 1
     abortRef.current = new AbortController()
     if (stateRef.current.sessionId === sessionId) {
       stateRef.current = {
@@ -823,6 +884,7 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
         }),
         signal: abortRef.current.signal,
       })
+      bootstrapAssistantStream(sessionId)
       scheduleSessionResync(sessionId)
       void refreshSessionStatus(sessionId, { force: true })
       return true
@@ -859,6 +921,7 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
   }, [
     createOptimisticUserMessage,
     defaultRuntimeConfig,
+    bootstrapAssistantStream,
     handleApiError,
     refreshSessionStatus,
     scheduleSessionResync,
@@ -868,10 +931,26 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
     state.status.type === "busy" ||
     state.status.type === "retry"
 
+  useEffect(() => {
+    const previous = previousStatusRef.current
+    previousStatusRef.current = state.status
+
+    if (!state.sessionId) return
+
+    const wasBusy = previous.type === "busy" || previous.type === "retry"
+    const nowBusy = state.status.type === "busy" || state.status.type === "retry"
+    if (!wasBusy || nowBusy) return
+
+    void syncSessionMessages(state.sessionId)
+  }, [state.sessionId, state.status, syncSessionMessages])
+
   // Workspace event stream
   useEffect(() => {
     if (!state.sessionId) {
+      pendingPartDeltasRef.current.clear()
+      knownPartIdsRef.current.clear()
       subscribedSessionIdRef.current = null
+      sessionListenerReadyRef.current = null
       setIsConnected(getOpencodeEventSnapshot().connected)
       return
     }
@@ -891,17 +970,84 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
     const unsubscribeEvents = subscribeOpencodeEvents((event) => {
       if (event.type === "server.connected") {
         dispatch({ type: "CLEAR_ERROR" })
-        void syncSessionMessages(activeSessionId)
+        const current = stateRef.current
+        const currentlyBusy =
+          current.sessionId === activeSessionId &&
+          (current.status.type === "busy" || current.status.type === "retry")
+        if (!currentlyBusy) {
+          void syncSessionMessages(activeSessionId)
+        }
         void refreshSessionStatus(activeSessionId, { force: true })
         return
+      }
+
+      if (event.type === "message.part.delta") {
+        const props = event.properties as {
+          messageID: string
+          partID: string
+          field: string
+          delta: string
+        }
+        const partKey = `${props.messageID}:${props.partID}`
+        const hasPart = knownPartIdsRef.current.has(partKey)
+        if (!hasPart) {
+          const existing = pendingPartDeltasRef.current.get(partKey) || {}
+          pendingPartDeltasRef.current.set(partKey, {
+            ...existing,
+            [props.field]: `${existing[props.field] || ""}${props.delta}`,
+          })
+          return
+        }
+      }
+
+      if (event.type === "message.part.updated") {
+        const props = event.properties as { part: Part }
+        knownPartIdsRef.current.add(`${props.part.messageID}:${props.part.id}`)
+        dispatch({
+          type: "SSE_EVENT",
+          event: {
+            ...event,
+            properties: {
+              ...event.properties,
+              part: mergeBufferedPartFields(props.part),
+            },
+          } as SSEEvent,
+        })
+        return
+      }
+
+      if (event.type === "message.part.removed") {
+        const props = event.properties as { messageID: string; partID: string }
+        const key = `${props.messageID}:${props.partID}`
+        pendingPartDeltasRef.current.delete(key)
+        knownPartIdsRef.current.delete(key)
+      }
+
+      if (event.type === "message.removed") {
+        const props = event.properties as { messageID: string }
+        for (const key of pendingPartDeltasRef.current.keys()) {
+          if (key.startsWith(`${props.messageID}:`)) {
+            pendingPartDeltasRef.current.delete(key)
+          }
+        }
+        for (const key of knownPartIdsRef.current) {
+          if (key.startsWith(`${props.messageID}:`)) {
+            knownPartIdsRef.current.delete(key)
+          }
+        }
       }
 
       dispatch({ type: "SSE_EVENT", event: event as SSEEvent })
     })
 
+    sessionListenerReadyRef.current = activeSessionId
+
     return () => {
       if (subscribedSessionIdRef.current === activeSessionId) {
         subscribedSessionIdRef.current = null
+      }
+      if (sessionListenerReadyRef.current === activeSessionId) {
+        sessionListenerReadyRef.current = null
       }
       unsubscribeEvents()
       unsubscribeSnapshot()
@@ -919,6 +1065,9 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
       if (!sessionId) {
         throw new Error("Session created but no session ID was returned")
       }
+      messageSyncEpochRef.current += 1
+      pendingPartDeltasRef.current.clear()
+      knownPartIdsRef.current.clear()
       optimisticUserMessagesRef.current.clear()
       setPendingPrompts([])
       stateRef.current = {
@@ -933,6 +1082,9 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
 
   const resetSession = useCallback(() => {
     intentionalSwitchRef.current = true
+    messageSyncEpochRef.current += 1
+    pendingPartDeltasRef.current.clear()
+    knownPartIdsRef.current.clear()
     optimisticUserMessagesRef.current.clear()
     setPendingPrompts([])
     stateRef.current = initialState
@@ -941,6 +1093,9 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
 
   const loadSession = useCallback(async (sessionId: string) => {
     intentionalSwitchRef.current = true
+    messageSyncEpochRef.current += 1
+    pendingPartDeltasRef.current.clear()
+    knownPartIdsRef.current.clear()
     optimisticUserMessagesRef.current.clear()
     setPendingPrompts([])
     stateRef.current = {
@@ -952,7 +1107,11 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
 
   const waitForSessionSubscription = useCallback(async (sessionId: string) => {
     const deadline = Date.now() + 1500
-    while (subscribedSessionIdRef.current !== sessionId && Date.now() < deadline) {
+    while (
+      (subscribedSessionIdRef.current !== sessionId ||
+        sessionListenerReadyRef.current !== sessionId) &&
+      Date.now() < deadline
+    ) {
       await new Promise((resolve) => window.setTimeout(resolve, 16))
     }
   }, [])
@@ -974,6 +1133,9 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
           if (!sessionId) {
             throw new Error("Session created but no session ID was returned")
           }
+          messageSyncEpochRef.current += 1
+          pendingPartDeltasRef.current.clear()
+          knownPartIdsRef.current.clear()
           setPendingPrompts([])
           stateRef.current = {
             ...initialState,
@@ -987,7 +1149,7 @@ export function useAgentSession(defaultRuntimeConfig?: AgentRuntimeConfig) {
         }
       }
 
-      if (createdSession) {
+      if (createdSession || subscribedSessionIdRef.current !== sessionId) {
         await waitForSessionSubscription(sessionId)
       }
 

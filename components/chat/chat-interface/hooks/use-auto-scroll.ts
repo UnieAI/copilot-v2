@@ -10,12 +10,15 @@ export function useAutoScroll(isGenerating: boolean) {
     const isAutoScrollingRef = useRef(isAutoScrolling)
     useEffect(() => { isAutoScrollingRef.current = isAutoScrolling }, [isAutoScrolling])
     const [showScrollButton, setShowScrollButton] = useState(false)
+    const observerBoundRef = useRef(false)
 
     // IntersectionObserver: show/hide the scroll button based on messagesEndRef visibility
     useEffect(() => {
+        if (observerBoundRef.current) return
         const chatContainer = scrollContainerRef.current
         const messagesEnd = messagesEndRef.current
         if (!chatContainer || !messagesEnd) return
+        observerBoundRef.current = true
         let lastScrollTop = chatContainer.scrollTop
 
         const checkScrollPosition = (isEndVisible?: boolean) => {
@@ -60,14 +63,28 @@ export function useAutoScroll(isGenerating: boolean) {
         const resizeObserver = new ResizeObserver(() => checkScrollPosition())
         resizeObserver.observe(chatContainer)
 
+        const mutationObserver = new MutationObserver(() => {
+            if (isAutoScrollingRef.current) {
+                chatContainer.scrollTop = chatContainer.scrollHeight
+            }
+            checkScrollPosition()
+        })
+        mutationObserver.observe(chatContainer, {
+            childList: true,
+            subtree: true,
+            characterData: true,
+        })
+
         checkScrollPosition()
 
         return () => {
+            observerBoundRef.current = false
             chatContainer.removeEventListener("scroll", handleScroll)
             resizeObserver.disconnect()
+            mutationObserver.disconnect()
             observer.disconnect()
         }
-    }, [])
+    })
 
     // rAF loop + wheel listener: the core auto-scroll engine
     useEffect(() => {

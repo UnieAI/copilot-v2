@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, useRef, useEffect, useMemo, useLayoutEffect } from "react"
+import { useState, useCallback, useRef, useEffect, useMemo } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { Paperclip, ChevronDown, Settings2, CircleCheck, Loader2, CircleX, Server } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -54,8 +54,11 @@ export function ChatInterface({
         searchParams?.get("fresh") ||
         searchParams?.get("new") ||
         ""
+    const agentWantsBlankSession =
+        searchParams?.get("mode") === "agent" &&
+        !searchParams?.get("id")
     const requestedAgentSessionId = searchParams?.get("id") || undefined
-    const currentAgentSessionId = freshAgentToken
+    const currentAgentSessionId = freshAgentToken || agentWantsBlankSession
         ? undefined
         : requestedAgentSessionId || initialAgentSessionId || undefined
     const userRole = (session.user as any).role as string ?? "user"
@@ -97,7 +100,6 @@ export function ChatInterface({
     const [agentBusy, setAgentBusy] = useState(false)
     const [agentPendingCount, setAgentPendingCount] = useState(0)
     const agentRef = useRef<ReturnType<typeof useAgentSession> | null>(null)
-    const handledAgentFreshRef = useRef("")
 
     useEffect(() => {
         if (mode !== "agent") {
@@ -128,18 +130,6 @@ export function ChatInterface({
             router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname)
         }
     }, [mode, pathname, router, searchParams])
-
-    useLayoutEffect(() => {
-        if (mode !== "agent" || agentStatus !== "connected") return
-
-        const freshToken =
-            freshAgentToken
-        if (!freshToken || handledAgentFreshRef.current === freshToken) return
-
-        handledAgentFreshRef.current = freshToken
-        // Reset to homepage (empty welcome screen) — session is created lazily on first sendMessage
-        agentRef.current?.resetSession()
-    }, [mode, agentStatus, freshAgentToken])
 
     const handleAgentSessionChange = useCallback((sessionId: string) => {
         const params = new URLSearchParams(searchParams?.toString() || "")
@@ -238,7 +228,17 @@ export function ChatInterface({
             )
             if (!synced) return
 
-            await agentRef.current?.sendMessage(input.trim(), runtimeConfig)
+            const liveAgent = agentRef.current
+            if (!liveAgent) {
+                toast.warning("Agent 對話初始化中，請稍候再試")
+                return
+            }
+
+            if (currentAgentSessionId && liveAgent.state.sessionId !== currentAgentSessionId) {
+                await liveAgent.loadSession(currentAgentSessionId)
+            }
+
+            await liveAgent.sendMessage(input.trim(), runtimeConfig)
             setInput("")
             setAttachments([])
             return

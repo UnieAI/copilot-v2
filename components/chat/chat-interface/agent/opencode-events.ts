@@ -25,9 +25,45 @@ const eventListeners = new Set<(event: OpencodeEvent) => void>()
 let refCount = 0
 let eventSource: EventSource | null = null
 let refreshPromise: Promise<void> | null = null
+let flushTimer: ReturnType<typeof setTimeout> | null = null
+let lastFlushAt = 0
+let queuedEvents: OpencodeEvent[] = []
+let bufferEvents: OpencodeEvent[] = []
+const coalescedKeys = new Map<string, number>()
+const staleDeltas = new Set<string>()
+
+const FLUSH_FRAME_MS = 16
 
 function emitState() {
   stateListeners.forEach((listener) => listener())
+}
+
+function deltaKey(sessionId: string, messageId: string, partId: string) {
+  return `${sessionId}:${messageId}:${partId}`
+}
+
+function eventKey(event: OpencodeEvent): string | null {
+  if (event.type === "session.status") {
+    const props = event.properties as Record<string, unknown> | undefined
+    const sessionId = String(props?.sessionID ?? props?.sessionId ?? "")
+    return sessionId ? `session.status:${sessionId}` : null
+  }
+
+  if (event.type === "message.part.updated") {
+    const part = (event.properties as {
+      part?: {
+        sessionID?: string
+        messageID?: string
+        id?: string
+        type?: string
+      }
+    } | undefined)?.part
+    if (!part?.sessionID || !part?.messageID || !part?.id) return null
+    if (part.type === "text" || part.type === "reasoning") return null
+    return `message.part.updated:${part.sessionID}:${part.messageID}:${part.id}`
+  }
+
+  return null
 }
 
 function normalizeIncomingEvent(input: unknown): OpencodeEvent | null {
@@ -172,6 +208,72 @@ function applyEvent(event: OpencodeEvent) {
   }
 }
 
+function flushQueuedEvents() {
+  if (flushTimer) {
+    clearTimeout(flushTimer)
+    flushTimer = null
+  }
+  if (queuedEvents.length === 0) return
+
+  const events = queuedEvents
+  const skip = staleDeltas.size > 0 ? new Set(staleDeltas) : undefined
+  queuedEvents = bufferEvents
+  bufferEvents = events
+  queuedEvents.length = 0
+  coalescedKeys.clear()
+  staleDeltas.clear()
+  lastFlushAt = Date.now()
+
+  for (const event of events) {
+    if (skip && event.type === "message.part.delta") {
+      const props = event.properties as
+        | { sessionID?: string; messageID?: string; partID?: string }
+        | undefined
+      const sessionId = String(props?.sessionID ?? "")
+      if (
+        sessionId &&
+        props?.messageID &&
+        props?.partID &&
+        skip.has(deltaKey(sessionId, props.messageID, props.partID))
+      ) {
+        continue
+      }
+    }
+
+    applyEvent(event)
+    eventListeners.forEach((listener) => listener(event))
+  }
+
+  bufferEvents.length = 0
+}
+
+function scheduleFlush() {
+  if (flushTimer) return
+  const elapsed = Date.now() - lastFlushAt
+  flushTimer = setTimeout(flushQueuedEvents, Math.max(0, FLUSH_FRAME_MS - elapsed))
+}
+
+function enqueueEvent(event: OpencodeEvent) {
+  const key = eventKey(event)
+  if (key) {
+    const index = coalescedKeys.get(key)
+    if (typeof index === "number") {
+      queuedEvents[index] = event
+      if (event.type === "message.part.updated") {
+        const part = (event.properties as { part: { sessionID: string; messageID: string; id: string } }).part
+        staleDeltas.add(deltaKey(part.sessionID, part.messageID, part.id))
+      }
+      scheduleFlush()
+      return
+    }
+
+    coalescedKeys.set(key, queuedEvents.length)
+  }
+
+  queuedEvents.push(event)
+  scheduleFlush()
+}
+
 function retainConnection() {
   refCount += 1
   ensureConnection()
@@ -184,6 +286,7 @@ function releaseConnection() {
     eventSource.close()
     eventSource = null
   }
+  flushQueuedEvents()
   if (snapshot.connected) {
     snapshot.connected = false
     emitState()
@@ -211,8 +314,7 @@ function ensureConnection() {
       const parsed = JSON.parse(message.data)
       const event = normalizeIncomingEvent(parsed)
       if (!event) return
-      applyEvent(event)
-      eventListeners.forEach((listener) => listener(event))
+      enqueueEvent(event)
     } catch {
       // Ignore malformed events.
     }

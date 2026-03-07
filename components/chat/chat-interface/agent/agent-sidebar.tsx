@@ -540,10 +540,7 @@ export function AgentSidebar({
         event.type === "session.created" ||
         event.type === "session.updated" ||
         event.type === "session.deleted" ||
-        event.type === "session.idle" ||
-        event.type === "message.updated" ||
-        event.type === "message.removed" ||
-        event.type === "message.part.updated"
+        event.type === "session.idle"
 
       if (!shouldRefresh) {
         return
