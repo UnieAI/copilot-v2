@@ -13,7 +13,13 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
 
     const userId = session.user.id as string
     const params = await searchParams
-    const sessionId = params.id as string | undefined
+    const modeRaw = params.mode
+    const mode = Array.isArray(modeRaw) ? modeRaw[0] : modeRaw
+    const initialMode: "normal" | "agent" = mode === "agent" ? "agent" : "normal"
+    const idRaw = params.id
+    const requestedId = Array.isArray(idRaw) ? idRaw[0] : idRaw
+    const sessionId = initialMode === "normal" ? requestedId : undefined
+    const initialAgentSessionId = initialMode === "agent" ? requestedId : undefined
     const initialQuery = params.q as string | undefined
     const freshKey = (params.fresh as string | undefined) || (params.new as string | undefined) || ''
 
@@ -77,13 +83,15 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
     return (
         <ChatInterface
             session={session}
-            key={sessionId || freshKey || 'new'}
+            key={initialMode === "agent" ? "agent-mode" : (sessionId || freshKey || 'new')}
             sessionId={sessionId}
             availableModels={availableModels}
             initialSelectedModel={initialSelectedModel}
             initialSystemPrompt={initialSystemPrompt}
             initialMessages={initialMessages}
             initialQuery={initialQuery as string | undefined}
+            initialMode={initialMode}
+            initialAgentSessionId={initialAgentSessionId}
         />
     )
 }

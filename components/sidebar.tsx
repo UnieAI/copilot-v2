@@ -1,15 +1,15 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
-import { signOut, useSession } from "next-auth/react"
-import { useState, useEffect, useRef, useMemo } from "react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { signOut } from "next-auth/react"
+import { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import {
-    MessageSquare, Settings, Users, SlidersHorizontal, BarChart2, Shield, Layers3, Gauge,
+    MessageSquare, Settings, Shield,
     Plus, Trash2, LogOut, Sun, Moon, Monitor,
-    PanelLeftClose, Pencil, ChevronRight, ChevronDown,
+    PanelLeftClose, Pencil, ChevronRight,
     MoreHorizontal, FolderInput, FolderOutput, Folder, FolderPlus,
-    Users2, Loader2, Check, ChevronUp
+    Users2, Loader2, ChevronUp, Bot
 } from "lucide-react"
 import { useTheme } from "next-themes"
 import { toast } from "sonner"
@@ -18,6 +18,11 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { streamStore } from "@/lib/stream-store"
 import { UnieAIIcon } from "@/components/sidebar/unieai-logo"
 import { motion, AnimatePresence } from "framer-motion"
+import {
+    getOpencodeEventSnapshot,
+    subscribeOpencodeEvents,
+    subscribeOpencodeSnapshot,
+} from "@/components/chat/chat-interface/agent/opencode-events"
 
 import {
     Sidebar as ShadcnSidebar,
@@ -37,27 +42,97 @@ import {
     DropdownMenuSubTrigger,
     DropdownMenuPortal,
 } from "@/components/ui/dropdown-menu"
+import type { Session } from "next-auth"
 
 type ChatSession = { id: string; title: string; updatedAt: string; projectId: string | null }
 type ChatProject = { id: string; name: string; updatedAt: string }
+type AgentSession = {
+    id: string
+    title?: string
+    parentID?: string
+    parentId?: string
+    time?: { created?: number; updated?: number }
+}
 type ProfileUpdateDetail = { name?: string | null; image?: string | null }
 
-export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>) {
+function extractAgentParentSessionId(payload: any): string {
+    const root = payload?.data ?? payload ?? {}
+    const candidates = [
+        root?.parentID,
+        root?.parentId,
+        root?.info?.parentID,
+        root?.info?.parentId,
+        root?.session?.parentID,
+        root?.session?.parentId,
+        root?.data?.parentID,
+        root?.data?.parentId,
+    ]
+
+    for (const candidate of candidates) {
+        if (typeof candidate === "string" && candidate) return candidate
+    }
+    return ""
+}
+
+function normalizeAgentSessions(payload: any): AgentSession[] {
+    const list = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.data)
+            ? payload.data
+            : Array.isArray(payload?.sessions)
+                ? payload.sessions
+                : []
+
+    return list
+        .map((item: any) => {
+            const root = item?.data ?? item ?? {}
+            const id = String(root?.id || "")
+            if (!id) return null
+            return {
+                id,
+                title: typeof root?.title === "string" ? root.title : undefined,
+                parentID: typeof root?.parentID === "string" ? root.parentID : undefined,
+                parentId: typeof root?.parentId === "string" ? root.parentId : undefined,
+                time: root?.time && typeof root.time === "object"
+                    ? {
+                        created: typeof root.time.created === "number" ? root.time.created : undefined,
+                        updated: typeof root.time.updated === "number" ? root.time.updated : undefined,
+                    }
+                    : undefined,
+            } as AgentSession
+        })
+        .filter((item: AgentSession | null): item is AgentSession => !!item)
+}
+
+function isAgentBusyStatus(input: unknown): boolean {
+    const obj = (input && typeof input === "object") ? (input as Record<string, unknown>) : null
+    const raw =
+        (typeof input === "string" && input) ||
+        (typeof obj?.type === "string" && obj.type) ||
+        (typeof obj?.status === "string" && obj.status) ||
+        ""
+    const value = raw.trim().toLowerCase()
+    return value === "busy" || value === "retry" || value === "running" || value === "processing" || value === "pending"
+}
+
+export function Sidebar({ initialSession, ...props }: React.ComponentProps<typeof ShadcnSidebar> & { initialSession?: Session | null }) {
     const pathname = usePathname()
+    const searchParams = useSearchParams()
     const router = useRouter()
-    const { data: session } = useSession()
+    const session = initialSession
     const { theme, setTheme } = useTheme()
     const { state, setOpen, isMobile, setOpenMobile } = useSidebar()
 
     const [sessions, setSessions] = useState<ChatSession[]>([])
+    const [agentSessions, setAgentSessions] = useState<AgentSession[]>([])
     const [projects, setProjects] = useState<ChatProject[]>([])
-    const [mounted, setMounted] = useState(false)
     const [renamingId, setRenamingId] = useState<string | null>(null)
     const [renameValue, setRenameValue] = useState('')
     const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null)
     const [renameProjectValue, setRenameProjectValue] = useState('')
     const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
-    const [activeStreams, setActiveStreams] = useState<Record<string, { statusText: string }>>({})
+    const [chatActiveStreams, setChatActiveStreams] = useState<Record<string, { statusText: string }>>({})
+    const [agentActiveStreams, setAgentActiveStreams] = useState<Record<string, { statusText: string }>>({})
     const [confirmDeleteProject, setConfirmDeleteProject] = useState<{ id: string; name: string } | null>(null)
     const [liveProfile, setLiveProfile] = useState<ProfileUpdateDetail>({})
     const [dbProfileImage, setDbProfileImage] = useState<string | null>(null)
@@ -66,6 +141,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
     const renameInputRef = useRef<HTMLInputElement>(null)
     const renameFolderInputRef = useRef<HTMLInputElement>(null)
     const currentSessionId = pathname?.split('/c/')?.[1]?.split('/')?.[0] || ''
+    const currentAgentSessionId = searchParams?.get("mode") === "agent" ? (searchParams?.get("id") || "") : ""
     const localePrefix = pathname?.split('/')[1]?.length <= 5 ? `/${pathname?.split('/')[1]}` : ''
 
     // ─── 串流監聽 ────────────────────────────────────────────────────────
@@ -73,12 +149,61 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
         const unsubscribe = streamStore.subscribeGenerating((entries) => {
             const next: Record<string, { statusText: string }> = {}
             entries.forEach(e => { next[e.sessionId] = { statusText: e.statusText } })
-            setActiveStreams(next)
+            setChatActiveStreams(next)
         })
         return () => unsubscribe()
     }, [])
 
-    useEffect(() => { setMounted(true); fetchAll(); fetchProfileFromDb() }, [pathname])
+    const fetchAgentSessions = useCallback(async () => {
+        try {
+            const agentRes = await fetch('/api/agent/opencode/session?roots=true', { cache: "no-store" })
+            if (!agentRes.ok) {
+                setAgentSessions([])
+                return
+            }
+
+            const payload = await agentRes.json()
+            const list = normalizeAgentSessions(payload)
+                .filter((item) => !extractAgentParentSessionId(item))
+                .sort((a, b) => (b.time?.updated ?? b.time?.created ?? 0) - (a.time?.updated ?? a.time?.created ?? 0))
+
+            setAgentSessions(list)
+        } catch {
+            setAgentSessions([])
+        }
+    }, [])
+
+    useEffect(() => {
+        const syncActiveStreams = () => {
+            const next: Record<string, { statusText: string }> = {}
+            const { statuses } = getOpencodeEventSnapshot()
+            for (const [sessionId, status] of Object.entries(statuses)) {
+                if (!isAgentBusyStatus(status)) continue
+                next[sessionId] = { statusText: "Agent 執行中" }
+            }
+            setAgentActiveStreams(next)
+        }
+
+        syncActiveStreams()
+        const unsubscribeSnapshot = subscribeOpencodeSnapshot(syncActiveStreams)
+        const unsubscribeEvents = subscribeOpencodeEvents((event) => {
+            if (event.type === "session.created" || event.type === "session.updated" || event.type === "session.deleted") {
+                void fetchAgentSessions()
+            }
+        })
+
+        return () => {
+            unsubscribeEvents()
+            unsubscribeSnapshot()
+        }
+    }, [fetchAgentSessions])
+
+    const activeStreams = useMemo(
+        () => ({ ...chatActiveStreams, ...agentActiveStreams }),
+        [chatActiveStreams, agentActiveStreams]
+    )
+
+    useEffect(() => { fetchAll(); fetchProfileFromDb() }, [pathname, searchParams?.toString()])
 
     useEffect(() => {
         const onProfileUpdated = (event: Event) => {
@@ -105,7 +230,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
     const fetchAll = async () => {
         try {
             const [sessRes, projRes, groupRes] = await Promise.all([
-                fetch('/api/chat/sessions'),
+                fetch('/api/chat/sessions?mode=normal'),
                 fetch('/api/chat/projects'),
                 fetch('/api/groups/my'),
             ])
@@ -115,12 +240,18 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                 const g = await groupRes.json()
                 setMyGroupCount(Array.isArray(g) ? g.length : 0)
             }
+            await fetchAgentSessions()
         } catch { }
     }
 
     // ─── 動作處理 ────────────────────────────────────────────────────────
     const startNewChat = () => {
-        router.push(`${localePrefix}/chat?fresh=${Date.now()}`)
+        const query = new URLSearchParams()
+        query.set("fresh", String(Date.now()))
+        if (searchParams?.get("mode") === "agent") {
+            query.set("mode", "agent")
+        }
+        router.push(`${localePrefix}/chat?${query.toString()}`)
         if (isMobile) setOpenMobile(false)
     }
 
@@ -147,6 +278,21 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
             if (pathname?.includes(id)) router.push(`${localePrefix}/chat`)
             toast.success("對話已刪除")
         } catch { toast.error("刪除失敗") }
+    }
+
+    const deleteAgentSession = async (sessionId: string, e: React.MouseEvent) => {
+        e.preventDefault(); e.stopPropagation()
+        try {
+            const res = await fetch(`/api/agent/opencode/session/${encodeURIComponent(sessionId)}`, { method: "DELETE" })
+            if (!res.ok) throw new Error("delete failed")
+            setAgentSessions(prev => prev.filter(s => s.id !== sessionId))
+            if (currentAgentSessionId === sessionId) {
+                router.push(`${localePrefix}/chat?mode=agent`)
+            }
+            toast.success("Agent 對話已刪除")
+        } catch {
+            toast.error("刪除失敗")
+        }
     }
 
     const commitRename = async (id: string) => {
@@ -209,7 +355,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                         ? "bg-primary/5 text-primary font-semibold shadow-[inset_0_0_0_1px_rgba(var(--primary),0.05)]"
                         : "hover:bg-muted/60 text-muted-foreground hover:text-foreground"
                 )}
-                onClick={() => { if (renamingId !== s.id) router.push(s.projectId ? `/p/${s.projectId}/c/${s.id}` : `/c/${s.id}`) }}
+                onClick={() => { if (renamingId !== s.id) router.push(s.projectId ? `${localePrefix}/p/${s.projectId}/c/${s.id}` : `${localePrefix}/c/${s.id}`) }}
             >
                 {isGenerating ? (
                     <Loader2 className="h-3.5 w-3.5 shrink-0 text-primary animate-spin" />
@@ -277,6 +423,45 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                 )}
             </div>
         );
+    }
+
+    const renderAgentSession = (s: AgentSession) => {
+        const isActive = currentAgentSessionId === s.id
+        const isGenerating = !!activeStreams[s.id]
+        return (
+            <div
+                key={s.id}
+                className={cn(
+                    "group relative flex items-center gap-2.5 rounded-xl px-3 py-2 cursor-pointer transition-all duration-200 text-[13px]",
+                    isActive
+                        ? "bg-primary/5 text-primary font-semibold shadow-[inset_0_0_0_1px_rgba(var(--primary),0.05)]"
+                        : "hover:bg-muted/60 text-muted-foreground hover:text-foreground"
+                )}
+                onClick={() => router.push(`${localePrefix}/chat?mode=agent&id=${encodeURIComponent(s.id)}`)}
+            >
+                {isGenerating ? (
+                    <Loader2 className="h-3.5 w-3.5 shrink-0 text-primary animate-spin" />
+                ) : (
+                    <Bot className={cn("h-3.5 w-3.5 shrink-0 opacity-40", isActive && "opacity-100")} />
+                )}
+                <span className="flex-1 truncate tracking-tight">{s.title || `Session ${s.id.slice(0, 8)}`}</span>
+
+                <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <button className="p-1 rounded-md hover:bg-background/80" onClick={e => e.stopPropagation()}>
+                                <MoreHorizontal className="h-3.5 w-3.5 opacity-60" />
+                            </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-40 rounded-2xl shadow-xl border-border/40 backdrop-blur-xl">
+                            <DropdownMenuItem onClick={(e) => deleteAgentSession(s.id, e)} className="gap-2 rounded-lg py-2 text-destructive focus:bg-destructive/5">
+                                <Trash2 className="h-3.5 w-3.5" /> 刪除
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                </div>
+            </div>
+        )
     }
 
     return (<>
@@ -433,7 +618,7 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                             {state === 'expanded' && <p className="px-4 text-[10px] font-bold text-muted-foreground/40 uppercase tracking-[0.2em] mb-2">最近對話</p>}
                             <div className="space-y-0.5">
                                 {unassigned.map(s => state === 'collapsed' ? (
-                                    <button key={s.id} onClick={() => router.push(`/c/${s.id}`)} className="w-10 h-10 mx-auto flex items-center justify-center rounded-xl hover:bg-muted/50 mb-1 relative border border-transparent hover:border-border/50">
+                                    <button key={s.id} onClick={() => router.push(`${localePrefix}/c/${s.id}`)} className="w-10 h-10 mx-auto flex items-center justify-center rounded-xl hover:bg-muted/50 mb-1 relative border border-transparent hover:border-border/50">
                                         {activeStreams[s.id] ? (
                                             <Loader2 className="h-4 w-4 text-primary animate-spin" />
                                         ) : (
@@ -442,6 +627,28 @@ export function Sidebar({ ...props }: React.ComponentProps<typeof ShadcnSidebar>
                                         {activeStreams[s.id] && <div className="absolute top-1 right-1 w-2 h-2 bg-primary rounded-full animate-pulse shadow-[0_0_8px_rgba(var(--primary),0.5)]" />}
                                     </button>
                                 ) : renderSession(s))}
+                            </div>
+                        </div>
+                    )}
+
+                    {agentSessions.length > 0 && (
+                        <div className="pt-2">
+                            {state === 'expanded' && <p className="px-4 text-[10px] font-bold text-muted-foreground/40 uppercase tracking-[0.2em] mb-2">Agent 對話</p>}
+                            <div className="space-y-0.5">
+                                {agentSessions.map(s => state === 'collapsed' ? (
+                                    <button
+                                        key={s.id}
+                                        onClick={() => router.push(`${localePrefix}/chat?mode=agent&id=${encodeURIComponent(s.id)}`)}
+                                        className="w-10 h-10 mx-auto flex items-center justify-center rounded-xl hover:bg-muted/50 mb-1 relative border border-transparent hover:border-border/50"
+                                    >
+                                        {activeStreams[s.id] ? (
+                                            <Loader2 className="h-4 w-4 text-primary animate-spin" />
+                                        ) : (
+                                            <Bot className={cn("h-4 w-4 text-muted-foreground/50", currentAgentSessionId === s.id && "text-primary")} />
+                                        )}
+                                        {activeStreams[s.id] && <div className="absolute top-1 right-1 w-2 h-2 bg-primary rounded-full animate-pulse shadow-[0_0_8px_rgba(var(--primary),0.5)]" />}
+                                    </button>
+                                ) : renderAgentSession(s))}
                             </div>
                         </div>
                     )}
